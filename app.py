@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 import time
 from config import Config
+from config import DEVICES
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -55,7 +56,6 @@ def index():
 def get_status():
     # 动态获取所有设备的端口状态
     processed_data = {}
-    from config import DEVICES
     for device in DEVICES:
         device_code = device['logicalCode']
         device_status = get_device_status(device_code) or {}

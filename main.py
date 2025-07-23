@@ -1,5 +1,5 @@
 from base_request import get_ports_status
-from config import BASE_URL, COMMON_HEADERS, DEVICES
+from config import BASE_URL, COMMON_HEADERS, DEVICES, ACCOUNTS
 import time
 
 def try_accounts_for_device(device):
@@ -43,7 +43,6 @@ def get_device_status(device_logical_code):
         return None
     
     # 尝试所有账户查询该设备
-    from config import ACCOUNTS
     for account in ACCOUNTS:
         # 准备请求参数
         params = {
