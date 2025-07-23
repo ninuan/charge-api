@@ -1,10 +1,9 @@
 from flask import Flask, render_template, jsonify
-import request2
-import request
+from main import get_device_status
+from config import Config, DEVICES
 import sqlite3
 from datetime import datetime
 import os
-from config import Config
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -53,27 +52,38 @@ def index():
 
 @app.route('/api/status')
 def get_status():
-    # 获取两个设备的端口状态
-    status1 = request2.get_ports_status() or {}
-    status2 = request.get_ports_status() or {}
-    
-    # 处理并存储状态数据
+    # 动态获取所有设备的端口状态
     processed_data = {}
-    for port, info in status1.items():
-        status = 'busy' if info.get('status') == 'busy' else 'free'
-        processed_data[f'G631085_{port}'] = status
-        save_status('G631085', port, status)
     
-    for port, info in status2.items():
-        status = 'busy' if info.get('status') == 'busy' else 'free'
-        processed_data[f'G641035_{port}'] = status
-        save_status('G641035', port, status)
+    for device in DEVICES:
+        device_code = device['logicalCode']
+        device_status = get_device_status(device_code) or {}
+        
+        # 处理并存储该设备的状态数据
+        for port, info in device_status.items():
+            status = 'busy' if info.get('status') == 'busy' else 'free'
+            processed_data[f'{device_code}_{port}'] = status
+            save_status(device_code, port, status)
     
     return jsonify(processed_data)
 
 @app.route('/api/last_status')
 def get_last_status_api():
     return jsonify(get_last_status())
+
+@app.route('/api/devices')
+def get_devices():
+    """返回当前配置的设备列表"""
+    devices_info = []
+    for device in DEVICES:
+        devices_info.append({
+            'logicalCode': device['logicalCode'],
+            'returnUrl': device['returnUrl']
+        })
+    return jsonify({
+        'devices': devices_info,
+        'count': len(devices_info)
+    })
 
 
 if __name__ == '__main__':
