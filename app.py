@@ -4,8 +4,10 @@ import request
 import sqlite3
 from datetime import datetime
 import os
+from config import Config
 
 app = Flask(__name__)
+app.config.from_object(Config)
 
 # 数据库配置
 DATABASE = 'charge_status.db'
@@ -75,4 +77,4 @@ def get_last_status_api():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
