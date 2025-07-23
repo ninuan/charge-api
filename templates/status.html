@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>充电桩端口状态监控</title>
+    <!-- 引入Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- 引入Font Awesome图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 2rem;
+        }
+        .header {
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+        }
+        .refresh-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 2rem;
+        }
+        .refresh-btn {
+            padding: 0.75rem 1.5rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: 0.05rem;
+            box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        }
+        .devices-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+        .device-card {
+            margin-bottom: 2rem;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+        }
+        .device-card:hover {
+            transform: translateY(-5px);
+        }
+        .device-header {
+            background-color: #343a40;
+            color: white;
+            padding: 1rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        .ports-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 1rem;
+            gap: 1rem;
+        }
+        .port-card {
+            width: 8rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .port-card.free {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+        .port-card.busy {
+            background-color: #f8d7da;
+            color: #842029;
+        }
+        .status-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .last-update {
+            text-align: center;
+            margin-top: 2rem;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header text-center">
+            <h1 class="mb-0"><i class="fas fa-charging-station me-2"></i>充电桩端口状态监控</h1>
+        </div>
+
+        <div class="refresh-container">
+            <button id="refreshBtn" class="btn btn-primary refresh-btn">
+                <i class="fas fa-sync-alt me-2"></i>刷新状态
+            </button>
+        </div>
+
+        <div class="devices-container">
+            <div id="deviceContainer" class="row justify-content-center g-4">
+                <!-- 设备状态将通过JS动态填充 -->
+            </div>
+        </div>
+
+        <div class="last-update">
+            最后更新时间: <span id="updateTime">正在加载数据...</span>
+        </div>
+    </div>
+
+    <!-- 引入Bootstrap JS和依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        const deviceContainer = document.getElementById('deviceContainer');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const updateTimeEl = document.getElementById('updateTime');
+
+        // 页面加载时获取上次状态
+        fetch('/api/last_status')
+            .then(res => res.json())
+            .then(data => {
+                renderStatus(data);
+                updateTimeEl.textContent = '已加载上次保存的数据';
+            })
+            .catch(() => {
+                updateTimeEl.textContent = '无法加载上次数据';
+            });
+
+        function formatTime(date) {
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        }
+
+        function renderStatus(data) {
+            if (!data) return;
+            
+            deviceContainer.innerHTML = '';
+            
+            // 渲染设备1状态
+            const device1Card = document.createElement('div');
+            device1Card.className = 'col-md-6';
+            device1Card.innerHTML = `
+                <div class="device-card">
+                    <div class="device-header">
+                        <i class="fas fa-bolt me-2"></i>设备 G631085
+                    </div>
+                    <div class="card-body">
+                        <div class="ports-container" id="device1Ports"></div>
+                    </div>
+                </div>
+            `;
+            deviceContainer.appendChild(device1Card);
+            
+            // 渲染设备2状态
+            const device2Card = document.createElement('div');
+            device2Card.className = 'col-md-6';
+            device2Card.innerHTML = `
+                <div class="device-card">
+                    <div class="device-header">
+                        <i class="fas fa-bolt me-2"></i>设备 G641035
+                    </div>
+                    <div class="card-body">
+                        <div class="ports-container" id="device2Ports"></div>
+                    </div>
+                </div>
+            `;
+            deviceContainer.appendChild(device2Card);
+
+            // 填充端口状态
+            for (let i = 1; i <= 10; i++) {
+                const port = i.toString();
+                const status1 = data[`G631085_${port}`] || 'free';
+                const status2 = data[`G641035_${port}`] || 'free';
+                
+                const portCard1 = document.createElement('div');
+                portCard1.className = `port-card ${status1}`;
+                portCard1.innerHTML = `
+                    <div class="status-icon">
+                        ${status1 === 'free' ? '<i class="far fa-check-circle"></i>' : '<i class="fas fa-bolt"></i>'}
+                    </div>
+                    <strong>端口 ${port}</strong><br/>
+                    ${status1 === 'free' ? '空闲' : '充电中'}
+                `;
+                document.getElementById('device1Ports').appendChild(portCard1);
+                
+                const portCard2 = document.createElement('div');
+                portCard2.className = `port-card ${status2}`;
+                portCard2.innerHTML = `
+                    <div class="status-icon">
+                        ${status2 === 'free' ? '<i class="far fa-check-circle"></i>' : '<i class="fas fa-bolt"></i>'}
+                    </div>
+                    <strong>端口 ${port}</strong><br/>
+                    ${status2 === 'free' ? '空闲' : '充电中'}
+                `;
+                document.getElementById('device2Ports').appendChild(portCard2);
+            }
+        }
+
+        function fetchStatus() {
+            // 显示加载状态
+            refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>获取中...';
+            refreshBtn.disabled = true;
+            updateTimeEl.textContent = '正在获取最新数据...';
+
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    renderStatus(data);
+                    updateTimeEl.textContent = `${formatTime(new Date())}`;
+                })
+                .catch(() => {
+                    updateTimeEl.textContent = '获取数据失败';
+                })
+                .finally(() => {
+                    refreshBtn.innerHTML = '<i class="fas fa-sync-alt me-2"></i>刷新状态';
+                    refreshBtn.disabled = false;
+                });
+        }
+
+        // 点击刷新按钮时调用API
+        refreshBtn.onclick = fetchStatus;
+    </script>
+</body>
+</html>
