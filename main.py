@@ -1,5 +1,5 @@
 from base_request import get_ports_status
-from config import BASE_URL, COMMON_HEADERS, DEVICES, ACCOUNTS
+from config import BASE_URL, COMMON_HEADERS, DEVICES
 import time
 
 def try_accounts_for_device(device):
@@ -43,6 +43,7 @@ def get_device_status(device_logical_code):
         return None
     
     # 尝试所有账户查询该设备
+    from config import ACCOUNTS
     for account in ACCOUNTS:
         # 准备请求参数
         params = {
@@ -61,7 +62,7 @@ def get_device_status(device_logical_code):
         if charge_index:
             return charge_index
         
-        time.sleep(1)  # 失败后等待1秒再尝试下一个账户
+        time.sleep(2)  # 失败后等待2秒再尝试下一个账户
     
     return None  # 所有账户都尝试失败
 

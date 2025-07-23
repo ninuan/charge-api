@@ -1,9 +1,10 @@
 from flask import Flask, render_template, jsonify
 from main import get_device_status
-from config import Config, DEVICES
 import sqlite3
 from datetime import datetime
 import os
+import time
+from config import Config
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -54,7 +55,7 @@ def index():
 def get_status():
     # 动态获取所有设备的端口状态
     processed_data = {}
-    
+    from config import DEVICES
     for device in DEVICES:
         device_code = device['logicalCode']
         device_status = get_device_status(device_code) or {}
@@ -64,6 +65,8 @@ def get_status():
             status = 'busy' if info.get('status') == 'busy' else 'free'
             processed_data[f'{device_code}_{port}'] = status
             save_status(device_code, port, status)
+
+        time.sleep(1) # 避免请求过于频繁，增加延时
     
     return jsonify(processed_data)
 
