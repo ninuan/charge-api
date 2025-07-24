@@ -1,6 +1,10 @@
 from base_request import get_ports_status
 from config import BASE_URL, COMMON_HEADERS, DEVICES, ACCOUNTS
 import time
+import logging
+
+# 配置独立的主程序日志记录器
+logger = logging.getLogger('charge_api.main')
 
 def try_accounts_for_device(device):
     """尝试所有账户查询指定设备"""
@@ -17,14 +21,14 @@ def try_accounts_for_device(device):
         headers['Cookie'] = account['cookie']
         
         # 执行请求
-        print(f"\n尝试使用 {account['name']} 查询设备 {device['logicalCode']}...")
+        logger.info(f"尝试使用 {account['name']} 查询设备 {device['logicalCode']}...")
         charge_index = get_ports_status(BASE_URL, params, headers)
         
         if charge_index:
-            print(f"设备 {device['logicalCode']} 查询成功 (使用 {account['name']})")
+            logger.info(f"设备 {device['logicalCode']} 查询成功 (使用 {account['name']})")
             return True  # 查询成功则停止尝试其他账户
         
-        print(f"设备 {device['logicalCode']} 查询失败 (使用 {account['name']})")
+        logger.warning(f"设备 {device['logicalCode']} 查询失败 (使用 {account['name']})")
         time.sleep(3)  # 失败后等待3秒再尝试下一个账户
     
     return False  # 所有账户都尝试失败
@@ -39,8 +43,10 @@ def get_device_status(device_logical_code):
             break
     
     if not target_device:
-        print(f"未找到设备 {device_logical_code} 的配置")
+        logger.error(f"未找到设备 {device_logical_code} 的配置")
         return None
+    
+    logger.info(f"开始查询设备 {device_logical_code}")
     
     # 尝试所有账户查询该设备
     for account in ACCOUNTS:
@@ -59,23 +65,34 @@ def get_device_status(device_logical_code):
         charge_index = get_ports_status(BASE_URL, params, headers)
         
         if charge_index:
+            logger.info(f"设备 {device_logical_code} 查询成功 (账户: {account['name']})")
             return charge_index
         
+        logger.warning(f"账户 {account['name']} 查询失败，切换到下一个账户")
         time.sleep(2)  # 失败后等待2秒再尝试下一个账户
     
+    logger.error(f"设备 {device_logical_code} 所有账户都失败")
     return None  # 所有账户都尝试失败
 
 def poll_devices():
     """轮询所有设备"""
+    logger.info("开始轮询所有设备")
     for device in DEVICES:
         success = try_accounts_for_device(device)
         if not success:
-            print(f"警告: 设备 {device['logicalCode']} 所有账户尝试失败")
+            logger.warning(f"警告: 设备 {device['logicalCode']} 所有账户尝试失败")
         time.sleep(5)  # 设备间查询间隔
+    logger.info("设备轮询完成")
 
 if __name__ == "__main__":
+    # 导入并配置日志
+    from logging_config import setup_logging
+    
+    # 设置命令行模式的日志
+    setup_logging('charge_polling', debug=True)
+    
     while True:
-        print("\n=== 开始新一轮设备查询 ===")
+        logger.info("=== 开始新一轮设备查询 ===")
         poll_devices()
-        print("\n=== 本轮查询完成 ===")
+        logger.info("=== 本轮查询完成 ===")
         time.sleep(30)  # 每轮查询间隔30秒
