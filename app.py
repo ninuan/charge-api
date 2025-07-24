@@ -41,25 +41,39 @@ def save_status(device_id, port, status):
         c.execute("INSERT INTO status (device_id, port, status) VALUES (?, ?, ?)",
                   (device_id, port, status))
         conn.commit()
+        affected_rows = c.rowcount
         conn.close()
-        logger.debug(f"保存状态: {device_id}_{port} = {status}")
+        logger.debug(f"保存状态成功: {device_id}_{port} = {status} (影响行数: {affected_rows})")
+        return True
     except Exception as e:
-        logger.error(f"保存状态失败: {e}")
+        logger.error(f"保存状态失败: {device_id}_{port} = {status}, 错误: {e}")
+        return False
 
 def get_last_status():
     try:
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
-        c.execute("SELECT device_id, port, status FROM status WHERE update_time = (SELECT MAX(update_time) FROM status)")
+        # 修改SQL查询，获取每个设备+端口组合的最新记录
+        c.execute("""
+            SELECT device_id, port, status, update_time 
+            FROM status s1
+            WHERE update_time = (
+                SELECT MAX(update_time) 
+                FROM status s2 
+                WHERE s2.device_id = s1.device_id AND s2.port = s1.port
+            )
+            ORDER BY device_id, port
+        """)
         rows = c.fetchall()
         conn.close()
         
         result = {}
         for row in rows:
-            device_id, port, status = row
+            device_id, port, status, update_time = row
             result[f"{device_id}_{port}"] = status
         
         logger.debug(f"获取最新状态: {len(result)} 条记录")
+        logger.debug(f"状态详情: {result}")
         return result
     except Exception as e:
         logger.error(f"获取最新状态失败: {e}")
@@ -74,6 +88,7 @@ def index():
 def get_status():
     logger.info("开始获取设备状态")
     processed_data = {}
+    save_count = 0
     
     for device in DEVICES:
         device_code = device['logicalCode']
@@ -89,7 +104,12 @@ def get_status():
                 for port, info in device_status.items():
                     status = 'busy' if info.get('status') == 'busy' else 'free'
                     processed_data[f'{device_code}_{port}'] = status
-                    save_status(device_code, port, status)
+                    
+                    # 保存到数据库并记录结果
+                    if save_status(device_code, port, status):
+                        save_count += 1
+                    
+                logger.info(f"设备 {device_code} 已保存 {len(device_status)} 条端口数据")
             else:
                 logger.warning(f"设备 {device_code} 查询失败或返回空数据")
                 
@@ -98,7 +118,7 @@ def get_status():
         
         time.sleep(1)  # 避免请求过于频繁，增加延时
     
-    logger.info(f"状态查询完成，共获得 {len(processed_data)} 条数据")
+    logger.info(f"状态查询完成，共获得 {len(processed_data)} 条数据，成功保存 {save_count} 条")
     return jsonify(processed_data)
 
 @app.route('/api/last_status')
@@ -123,6 +143,68 @@ def get_devices():
     }
     logger.info(f"返回设备列表: {len(devices_info)} 个设备")
     return jsonify(result)
+
+@app.route('/api/debug/all_status')
+def get_all_status_debug():
+    """调试用：获取所有状态记录"""
+    try:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("SELECT device_id, port, status, update_time FROM status ORDER BY update_time DESC LIMIT 50")
+        rows = c.fetchall()
+        conn.close()
+        
+        result = []
+        for row in rows:
+            device_id, port, status, update_time = row
+            result.append({
+                'device_id': device_id,
+                'port': port,
+                'status': status,
+                'update_time': update_time
+            })
+        
+        logger.info(f"调试：返回 {len(result)} 条状态记录")
+        return jsonify({
+            'total_records': len(result),
+            'records': result
+        })
+    except Exception as e:
+        logger.error(f"调试API失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/latest_by_device')
+def get_latest_by_device_debug():
+    """调试用：按设备获取最新状态"""
+    try:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("""
+            SELECT device_id, COUNT(*) as port_count, MAX(update_time) as latest_time
+            FROM status 
+            GROUP BY device_id 
+            ORDER BY latest_time DESC
+        """)
+        rows = c.fetchall()
+        conn.close()
+        
+        result = []
+        for row in rows:
+            device_id, port_count, latest_time = row
+            result.append({
+                'device_id': device_id,
+                'port_count': port_count,
+                'latest_time': latest_time
+            })
+        
+        logger.info(f"调试：返回 {len(result)} 个设备的统计信息")
+        return jsonify({
+            'devices': result,
+            'total_devices': len(result)
+        })
+    except Exception as e:
+        logger.error(f"调试API失败: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
