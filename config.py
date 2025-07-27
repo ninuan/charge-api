@@ -36,11 +36,11 @@ DEVICES = [
 ACCOUNTS = [
     {
         'name': '账户1',
-        'cookie': 'gdt_fp=85291b4d95f97716d32df25995e93e41; jwt_auth_domain=MyUser; user_dev_no=868327078809959; MyUser_session_id=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NTMyNTY3NzAsInVzZXJfaWQiOiI2ODZjOGEzNzZmMjkyNTQzOTk0OGQ4YzgiLCJleHAiOjE3NTU4Nzc1NzB9.jJTNkHfzNkUOHHHpw0ZsOZBfc67vf2Ap476IaYZlMso'
+        'cookie': ''
     },
     {
         'name': '账户2',
-        'cookie': 'gdt_fp=5b92923ebf01402e737dc4907d625def; jwt_auth_domain=MyUser; user_dev_no=868327078809959; agentLogoUrl="aHR0cHM6Ly9yZXNvdXJjZS53YXNocGF5ZXIuY29tL3VwbG9hZGVkL2xvZ28vOTY1YjkzYjJmNDRiMjZkMzk2ZjFmNzJiZDE5MWUxMjEuanBlZw=="; agentId=5d857a130030483f797808b5; agentBrandName=%E6%98%8C%E5%8E%9F%E4%BA%91%E5%85%85; gdt_fp=5b92923ebf01402e737dc4907d625def; MyUser_session_id=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NTMyNzk2NzgsInVzZXJfaWQiOiI2ODgwZWIyNDZmMjkyNTU1NjE3NTE2YmMiLCJleHAiOjE3NTU5MDA0Nzh9.M324JlPUG7PwdqIN0uK_IEiLiAcng615EyK1xjKlQ0Q'
+        'cookie': ''
     }
 ]
 
