@@ -25,6 +25,10 @@ DEVICES = [
     {
         'logicalCode': 'G641035',
         'returnUrl': 'https://www.washpayer.com/user/index.html#/pages/device/selectPort?chargeIndex=&logicalCode=G641035'
+    },
+    {
+        'logicalCode': 'G641014',
+        'returnUrl': 'https://www.washpayer.com/user/index.html#/pages/device/selectPort?chargeIndex=&logicalCode=G641014'
     }
 ]
 
