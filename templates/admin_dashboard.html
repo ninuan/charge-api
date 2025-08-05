@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .container {
+            margin-top: 50px;
+        }
+        .card {
+            margin-bottom: 30px;
+        }
+        .card-header {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-edit {
+            margin-right: 5px;
+        }
+        td {
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+<body>
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Admin Dashboard</h1>
+            <span>Welcome, {{ session.username }}! <a href="{{ url_for('admin_logout') }}">Logout</a></span>
+        </div>
+
+        <!-- Device Management -->
+        <div class="card">
+            <h5 class="card-header">Device Management</h5>
+            <div class="card-body">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Logical Code</th>
+                            <th>Return URL</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in devices %}
+                        <tr>
+                            <td>{{ device.logicalCode }}</td>
+                            <td>{{ device.returnUrl }}</td>
+                            <td>
+                                <a href="{{ url_for('edit_device', device_id=device.id) }}" class="btn btn-sm btn-primary btn-edit">Edit</a>
+                                <form method="post" action="{{ url_for('delete_device', device_id=device.id) }}" style="display:inline;">
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <h5>Add New Device</h5>
+                <form method="post" action="{{ url_for('add_device') }}">
+                    <div class="form-row">
+                        <div class="col">
+                            <input type="text" name="logicalCode" class="form-control" placeholder="Logical Code" required>
+                        </div>
+                        <div class="col">
+                            <input type="text" name="returnUrl" class="form-control" placeholder="Return URL">
+                        </div>
+                        <div class="col">
+                            <button type="submit" class="btn btn-success">Add Device</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Account Management -->
+        <div class="card">
+            <h5 class="card-header">Account Management</h5>
+            <div class="card-body">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Cookie</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for account in accounts %}
+                        <tr>
+                            <td>{{ account.name }}</td>
+                            <td>{{ account.cookie }}</td>
+                            <td>
+                                <a href="{{ url_for('edit_account', account_id=account.id) }}" class="btn btn-sm btn-primary btn-edit">Edit</a>
+                                <form method="post" action="{{ url_for('delete_account', account_id=account.id) }}" style="display:inline;">
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <h5>Add New Account</h5>
+                <form method="post" action="{{ url_for('add_account') }}">
+                    <div class="form-row">
+                        <div class="col">
+                            <input type="text" name="name" class="form-control" placeholder="Account Name" required>
+                        </div>
+                        <div class="col">
+                            <input type="text" name="cookie" class="form-control" placeholder="Cookie">
+                        </div>
+                        <div class="col">
+                            <button type="submit" class="btn btn-success">Add Account</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

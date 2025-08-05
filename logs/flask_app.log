@@ -184,3 +184,232 @@
 2025-07-27 09:24:24,389 charge_api.flask INFO: 设备 G641014 查询成功，获得 10 个端口数据 [app.py:101]
 2025-07-27 09:24:24,471 charge_api.flask INFO: 设备 G641014 已保存 10 条端口数据 [app.py:112]
 2025-07-27 09:24:25,472 charge_api.flask INFO: 状态查询完成，共获得 30 条数据，成功保存 30 条 [app.py:121]
+2025-08-05 16:14:54,021 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:144]
+2025-08-05 16:14:56,597 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:144]
+2025-08-05 16:14:57,462 charge_api.flask INFO: 开始获取设备状态 [app.py:89]
+2025-08-05 16:14:57,462 charge_api.flask INFO: 正在查询设备: G631085 [app.py:95]
+2025-08-05 16:14:57,462 charge_api.main INFO: 开始查询设备 G631085 [main.py:49]
+2025-08-05 16:14:57,462 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G631085... [base_request.py:13]
+2025-08-05 16:14:57,615 charge_api.requests ERROR: 请求失败，HTTP错误: 401 Client Error: UNAUTHORIZED for url: https://www.washpayer.com/user/message/equipmentPara?logicalCode=G631085&returnUrl=https%3A%2F%2Fwww.washpayer.com%2Fuser%2Findex.html%23%2Fpages%2Fdevice%2FselectPort%3FchargeIndex%3D%26logicalCode%3DG631085&refresh=false [base_request.py:68]
+2025-08-05 16:14:57,615 charge_api.requests ERROR: 认证失败！请检查你的 Cookie 是否正确或已过期。 [base_request.py:70]
+2025-08-05 16:14:57,615 charge_api.main WARNING: 账户 账户1 查询失败，切换到下一个账户 [main.py:71]
+2025-08-05 16:14:59,616 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G631085... [base_request.py:13]
+2025-08-05 16:14:59,789 charge_api.requests ERROR: 请求失败，HTTP错误: 401 Client Error: UNAUTHORIZED for url: https://www.washpayer.com/user/message/equipmentPara?logicalCode=G631085&returnUrl=https%3A%2F%2Fwww.washpayer.com%2Fuser%2Findex.html%23%2Fpages%2Fdevice%2FselectPort%3FchargeIndex%3D%26logicalCode%3DG631085&refresh=false [base_request.py:68]
+2025-08-05 16:14:59,789 charge_api.requests ERROR: 认证失败！请检查你的 Cookie 是否正确或已过期。 [base_request.py:70]
+2025-08-05 16:14:59,790 charge_api.main WARNING: 账户 账户2 查询失败，切换到下一个账户 [main.py:71]
+2025-08-05 16:15:01,790 charge_api.main ERROR: 设备 G631085 所有账户都失败 [main.py:74]
+2025-08-05 16:15:01,790 charge_api.flask WARNING: 设备 G631085 查询失败或返回空数据 [app.py:114]
+2025-08-05 16:15:02,790 charge_api.flask INFO: 正在查询设备: G641035 [app.py:95]
+2025-08-05 16:15:02,790 charge_api.main INFO: 开始查询设备 G641035 [main.py:49]
+2025-08-05 16:15:02,790 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G641035... [base_request.py:13]
+2025-08-05 16:15:02,939 charge_api.requests ERROR: 请求失败，HTTP错误: 401 Client Error: UNAUTHORIZED for url: https://www.washpayer.com/user/message/equipmentPara?logicalCode=G641035&returnUrl=https%3A%2F%2Fwww.washpayer.com%2Fuser%2Findex.html%23%2Fpages%2Fdevice%2FselectPort%3FchargeIndex%3D%26logicalCode%3DG641035&refresh=false [base_request.py:68]
+2025-08-05 16:15:02,939 charge_api.requests ERROR: 认证失败！请检查你的 Cookie 是否正确或已过期。 [base_request.py:70]
+2025-08-05 16:15:02,939 charge_api.main WARNING: 账户 账户1 查询失败，切换到下一个账户 [main.py:71]
+2025-08-05 16:15:04,940 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G641035... [base_request.py:13]
+2025-08-05 16:15:05,084 charge_api.requests ERROR: 请求失败，HTTP错误: 401 Client Error: UNAUTHORIZED for url: https://www.washpayer.com/user/message/equipmentPara?logicalCode=G641035&returnUrl=https%3A%2F%2Fwww.washpayer.com%2Fuser%2Findex.html%23%2Fpages%2Fdevice%2FselectPort%3FchargeIndex%3D%26logicalCode%3DG641035&refresh=false [base_request.py:68]
+2025-08-05 16:15:05,084 charge_api.requests ERROR: 认证失败！请检查你的 Cookie 是否正确或已过期。 [base_request.py:70]
+2025-08-05 16:15:05,085 charge_api.main WARNING: 账户 账户2 查询失败，切换到下一个账户 [main.py:71]
+2025-08-05 16:15:07,085 charge_api.main ERROR: 设备 G641035 所有账户都失败 [main.py:74]
+2025-08-05 16:15:07,085 charge_api.flask WARNING: 设备 G641035 查询失败或返回空数据 [app.py:114]
+2025-08-05 16:15:08,086 charge_api.flask INFO: 正在查询设备: G641014 [app.py:95]
+2025-08-05 16:15:08,086 charge_api.main INFO: 开始查询设备 G641014 [main.py:49]
+2025-08-05 16:15:08,086 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G641014... [base_request.py:13]
+2025-08-05 16:15:08,234 charge_api.requests ERROR: 请求失败，HTTP错误: 401 Client Error: UNAUTHORIZED for url: https://www.washpayer.com/user/message/equipmentPara?logicalCode=G641014&returnUrl=https%3A%2F%2Fwww.washpayer.com%2Fuser%2Findex.html%23%2Fpages%2Fdevice%2FselectPort%3FchargeIndex%3D%26logicalCode%3DG641014&refresh=false [base_request.py:68]
+2025-08-05 16:15:08,234 charge_api.requests ERROR: 认证失败！请检查你的 Cookie 是否正确或已过期。 [base_request.py:70]
+2025-08-05 16:15:08,234 charge_api.main WARNING: 账户 账户1 查询失败，切换到下一个账户 [main.py:71]
+2025-08-05 16:15:10,235 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G641014... [base_request.py:13]
+2025-08-05 16:15:10,401 charge_api.requests ERROR: 请求失败，HTTP错误: 401 Client Error: UNAUTHORIZED for url: https://www.washpayer.com/user/message/equipmentPara?logicalCode=G641014&returnUrl=https%3A%2F%2Fwww.washpayer.com%2Fuser%2Findex.html%23%2Fpages%2Fdevice%2FselectPort%3FchargeIndex%3D%26logicalCode%3DG641014&refresh=false [base_request.py:68]
+2025-08-05 16:15:10,401 charge_api.requests ERROR: 认证失败！请检查你的 Cookie 是否正确或已过期。 [base_request.py:70]
+2025-08-05 16:15:10,402 charge_api.main WARNING: 账户 账户2 查询失败，切换到下一个账户 [main.py:71]
+2025-08-05 16:15:12,403 charge_api.main ERROR: 设备 G641014 所有账户都失败 [main.py:74]
+2025-08-05 16:15:12,403 charge_api.flask WARNING: 设备 G641014 查询失败或返回空数据 [app.py:114]
+2025-08-05 16:15:13,404 charge_api.flask INFO: 状态查询完成，共获得 0 条数据，成功保存 0 条 [app.py:121]
+2025-08-05 16:33:05,709 app ERROR: Exception on / [GET] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 153, in index
+    create_admin('admin', 'password')
+  File "d:\Projects\charge-api\app.py", line 85, in create_admin
+    c.execute("SELECT id FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such table: admins
+2025-08-05 16:33:08,679 app ERROR: Exception on / [GET] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 153, in index
+    create_admin('admin', 'password')
+  File "d:\Projects\charge-api\app.py", line 85, in create_admin
+    c.execute("SELECT id FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such table: admins
+2025-08-05 16:33:09,301 app ERROR: Exception on / [GET] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 153, in index
+    create_admin('admin', 'password')
+  File "d:\Projects\charge-api\app.py", line 85, in create_admin
+    c.execute("SELECT id FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such table: admins
+2025-08-05 16:33:28,218 app ERROR: Exception on /admin/login [POST] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 315, in admin_login
+    c.execute("SELECT id, password_hash FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such table: admins
+2025-08-05 16:34:01,818 app ERROR: Exception on /admin/login [POST] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 315, in admin_login
+    c.execute("SELECT id, password_hash FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such table: admins
+2025-08-05 16:34:50,900 app ERROR: Exception on /admin/login [POST] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 315, in admin_login
+    c.execute("SELECT id, password_hash FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such table: admins
+2025-08-05 16:36:56,278 charge_api.flask INFO: 正在插入初始设备数据... [app.py:57]
+2025-08-05 16:36:56,280 charge_api.flask INFO: 设备数据插入完成。 [app.py:61]
+2025-08-05 16:36:56,280 charge_api.flask INFO: 正在插入初始账户数据... [app.py:67]
+2025-08-05 16:36:56,280 charge_api.flask INFO: 账户数据插入完成。 [app.py:71]
+2025-08-05 16:36:56,286 charge_api.flask INFO: 数据库初始化完成 [app.py:75]
+2025-08-05 16:36:56,353 charge_api.flask INFO: 管理员 'admin' 创建成功。 [app.py:87]
+2025-08-05 16:36:59,532 app ERROR: Exception on /admin/login [POST] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 314, in admin_login
+    session['admin_id'] = admin[0]
+    ~~~~~~~^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\sessions.py", line 102, in _fail
+    raise RuntimeError(
+RuntimeError: The session is unavailable because no secret key was set.  Set the secret_key on the application to something unique and secret.
+2025-08-05 16:37:04,167 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
+2025-08-05 16:37:15,118 app ERROR: Exception on /admin/login [POST] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 314, in admin_login
+    session['admin_id'] = admin[0]
+    ~~~~~~~^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\sessions.py", line 102, in _fail
+    raise RuntimeError(
+RuntimeError: The session is unavailable because no secret key was set.  Set the secret_key on the application to something unique and secret.
+2025-08-05 16:39:29,350 charge_api.flask INFO: 数据库初始化完成 [app.py:75]
+2025-08-05 16:39:29,351 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:89]
+2025-08-05 16:43:45,866 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
+2025-08-05 16:43:52,839 charge_api.flask INFO: 开始获取设备状态 [app.py:152]
+2025-08-05 16:43:52,839 charge_api.flask INFO: 正在查询设备: G631085 [app.py:164]
+2025-08-05 16:43:52,840 charge_api.main INFO: 开始查询设备 G631085 [main.py:49]
+2025-08-05 16:43:52,840 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G631085... [base_request.py:13]
+2025-08-05 16:43:53,180 charge_api.requests INFO: 请求成功！状态码: 200 [base_request.py:22]
+2025-08-05 16:43:53,180 charge_api.requests INFO: 充电桩 (G631085) 端口状态查询成功 [base_request.py:54]
+2025-08-05 16:43:53,180 charge_api.main INFO: 设备 G631085 查询成功 (账户: 账户1) [main.py:68]
+2025-08-05 16:43:53,180 charge_api.flask INFO: 设备 G631085 查询成功，获得 10 个端口数据 [app.py:170]
+2025-08-05 16:43:53,259 charge_api.flask INFO: 设备 G631085 已保存 10 条端口数据 [app.py:181]
+2025-08-05 16:43:54,260 charge_api.flask INFO: 正在查询设备: G641014 [app.py:164]
+2025-08-05 16:43:54,260 charge_api.main INFO: 开始查询设备 G641014 [main.py:49]
+2025-08-05 16:43:54,260 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G641014... [base_request.py:13]
+2025-08-05 16:43:54,472 charge_api.requests INFO: 请求成功！状态码: 200 [base_request.py:22]
+2025-08-05 16:43:54,472 charge_api.requests INFO: 充电桩 (G641014) 端口状态查询成功 [base_request.py:54]
+2025-08-05 16:43:54,472 charge_api.main INFO: 设备 G641014 查询成功 (账户: 账户1) [main.py:68]
+2025-08-05 16:43:54,472 charge_api.flask INFO: 设备 G641014 查询成功，获得 10 个端口数据 [app.py:170]
+2025-08-05 16:43:54,548 charge_api.flask INFO: 设备 G641014 已保存 10 条端口数据 [app.py:181]
+2025-08-05 16:43:55,548 charge_api.flask INFO: 正在查询设备: G641035 [app.py:164]
+2025-08-05 16:43:55,548 charge_api.main INFO: 开始查询设备 G641035 [main.py:49]
+2025-08-05 16:43:55,548 charge_api.requests INFO: 正在向服务器发送请求，查询设备 G641035... [base_request.py:13]
+2025-08-05 16:43:55,739 charge_api.requests INFO: 请求成功！状态码: 200 [base_request.py:22]
+2025-08-05 16:43:55,740 charge_api.requests INFO: 充电桩 (G641035) 端口状态查询成功 [base_request.py:54]
+2025-08-05 16:43:55,740 charge_api.main INFO: 设备 G641035 查询成功 (账户: 账户1) [main.py:68]
+2025-08-05 16:43:55,740 charge_api.flask INFO: 设备 G641035 查询成功，获得 10 个端口数据 [app.py:170]
+2025-08-05 16:43:55,809 charge_api.flask INFO: 设备 G641035 已保存 10 条端口数据 [app.py:181]
+2025-08-05 16:43:56,809 charge_api.flask INFO: 状态查询完成，共获得 30 条数据，成功保存 30 条 [app.py:190]
+2025-08-05 16:52:36,707 charge_api.flask INFO: 数据库初始化完成 [app.py:75]
+2025-08-05 16:52:36,708 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:89]
+2025-08-05 16:52:38,877 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
+2025-08-05 16:55:25,627 charge_api.flask INFO: 数据库初始化完成 [app.py:75]
+2025-08-05 16:55:25,627 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:89]

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Device</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Edit Device</h1>
+        <form method="post">
+            <div class="form-group">
+                <label for="logicalCode">Logical Code:</label>
+                <input type="text" id="logicalCode" name="logicalCode" class="form-control" value="{{ device.logicalCode }}" required>
+            </div>
+            <div class="form-group">
+                <label for="returnUrl">Return URL:</label>
+                <input type="text" id="returnUrl" name="returnUrl" class="form-control" value="{{ device.returnUrl }}">
+            </div>
+            <button type="submit" class="btn btn-primary">Update Device</button>
+        </form>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary mt-3">Back to Dashboard</a>
+    </div>
+</body>
+</html>

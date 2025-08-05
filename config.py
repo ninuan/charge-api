@@ -36,19 +36,15 @@ DEVICES = [
 ACCOUNTS = [
     {
         'name': '账户1',
-        'cookie': ''
+        'cookie': 'gdt_fp=85291b4d95f97716d32df25995e93e41; jwt_auth_domain=MyUser; user_dev_no=868327078809959; MyUser_session_id=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NTMyNTY3NzAsInVzZXJfaWQiOiI2ODZjOGEzNzZmMjkyNTQzOTk0OGQ4YzgiLCJleHAiOjE3NTU4Nzc1NzB9.jJTNkHfzNkUOHHHpw0ZsOZBfc67vf2Ap476IaYZlMso'
     },
-    {
-        'name': '账户2',
-        'cookie': ''
-    }
 ]
 
 import os
 
 class Config:
     DEBUG = False
-    SECRET_KEY = os.environ.get('SECRET_KEY')
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'a-default-secret-key-for-development'
     DATABASE = 'charge_status.db'
     HOST = '0.0.0.0'
     PORT = 5000
