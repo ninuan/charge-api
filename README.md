@@ -43,14 +43,21 @@
     }
     ```
 
-2.  **创建 `.env` 文件**
+2.  **创建并配置 `.env` 文件**
 
-    在项目的根目录下，创建一个名为 `.env` 的文件。这个文件将用于存储敏感信息，如 `SECRET_KEY`。
+    项目提供了一个环境变量示例文件 `example.env`。您需要将其复制为 `.env` 文件，然后根据您的需求修改其中的值。
 
+    **第一步：复制文件**
+    ```bash
+    cp example.env .env
     ```
+
+    **第二步：修改 `.env` 文件**
+    打开新创建的 `.env` 文件，并修改 `SECRET_KEY` 的值。
+    ```
+    # .env
     SECRET_KEY=your-super-secret-and-long-key
     ```
-
     **重要提示:** 请将 `your-super-secret-and-long-key` 替换为您自己的、随机生成的、足够长的密钥。
 
 3.  **构建并启动容器**
