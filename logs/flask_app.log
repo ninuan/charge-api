@@ -413,3 +413,7 @@ RuntimeError: The session is unavailable because no secret key was set.  Set the
 2025-08-05 16:52:38,877 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
 2025-08-05 16:55:25,627 charge_api.flask INFO: 数据库初始化完成 [app.py:75]
 2025-08-05 16:55:25,627 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:89]
+2025-08-05 16:57:10,863 charge_api.flask INFO: 数据库初始化完成 [app.py:75]
+2025-08-05 16:57:10,864 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:89]
+2025-08-05 16:57:29,567 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
+2025-08-05 16:58:21,854 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]

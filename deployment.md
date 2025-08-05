@@ -1,54 +1,61 @@
-# 充电状态监控系统部署指南
+# Docker 部署指南
 
-## 服务器环境准备
-1. 安装Python 3.8+
-2. 安装Nginx
-3. 安装SQLite3
+本文档提供了在服务器上使用 Docker 和 Docker Compose 部署此 Flask 应用的详细步骤。
 
-## Nginx配置说明
-nginx.conf文件是Nginx服务器的核心配置文件，主要作用：
-- 监听80端口处理HTTP请求
-- 将请求反向代理到Gunicorn服务(127.0.0.1:8000)
-- 设置必要的请求头(X-Real-IP等)
-- 可配置静态文件服务
+## 先决条件
 
-关键配置项说明：
-- `listen 80`: 监听80端口
-- `server_name`: 替换为您的域名
-- `proxy_pass`: 指向Gunicorn服务地址
-- `location /static/`: 静态文件目录(需配置实际路径)
+*   在您的服务器上已安装 Docker 和 Docker Compose。
+*   您已将项目代码克隆或上传到服务器。
 
-## 应用部署
-1. 将项目文件上传至服务器 `/opt/charge-status` 目录
-2. 创建虚拟环境：
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+## 部署步骤
 
-3. 配置Nginx：
-   - 复制nginx.conf到 `/etc/nginx/sites-available/charge-status`
-   - 创建符号链接：
-     ```bash
-     sudo ln -s /etc/nginx/sites-available/charge-status /etc/nginx/sites-enabled
-     ```
-   - 测试并重启Nginx：
-     ```bash
-     sudo nginx -t
-     sudo systemctl restart nginx
-     ```
+1.  **创建 `.env` 文件**
 
-4. 启动应用：
-   ```bash
-   chmod +x start.sh
-   ./start.sh
-   ```
+    在项目的根目录下，创建一个名为 `.env` 的文件。这个文件将用于存储敏感信息，如 `SECRET_KEY`。
 
-5. 使用进程管理(可选)：
-   - 使用systemd或supervisor管理Gunicorn进程
+    ```
+    SECRET_KEY=your-super-secret-and-long-key
+    ```
 
-## 环境变量配置
-建议设置SECRET_KEY环境变量：
-```bash
-export SECRET_KEY='your-production-secret-key'
+    **重要提示:** 请将 `your-super-secret-and-long-key` 替换为您自己的、随机生成的、足够长的密钥。
+
+2.  **构建并启动容器**
+
+    在项目的根目录下，运行以下命令来构建 Docker 镜像并以后台模式启动容器：
+
+    ```bash
+    docker-compose up --build -d
+    ```
+
+    *   `--build` 标志会强制重新构建镜像，以确保应用了所有最新的代码更改。
+    *   `-d` 标志（detached mode）会让容器在后台运行。
+
+3.  **验证部署**
+
+    应用现在应该正在运行，并监听服务器的 5000 端口。您可以通过在浏览器中访问 `http://<your-server-ip>:5000` 来验证它是否正常工作。
+
+## 管理应用
+
+*   **查看日志:**
+    ```bash
+    docker-compose logs -f
+    ```
+
+*   **停止应用:**
+    ```bash
+    docker-compose down
+    ```
+
+*   **重启应用:**
+    ```bash
+    docker-compose restart
+    ```
+
+## 数据持久化
+
+`docker-compose.yml` 文件已配置为将以下数据持久化到主机上：
+
+*   **数据库:** `charge_status.db` 文件将映射到您主机上的 `./charge_status.db`。
+*   **日志:** `logs` 目录将映射到您主机上的 `./logs` 目录。
+
+这意味着即使您停止或移除了容器，您的数据和日志也不会丢失。

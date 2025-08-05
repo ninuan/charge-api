@@ -1,0 +1,22 @@
+# 忽略 Git 目录
+.git
+.gitignore
+
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 忽略数据库文件
+*.db
+
+# 忽略日志文件
+logs/
+
+# 忽略 Docker 相关文件
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# 忽略 VSCode 设置
+.vscode/
