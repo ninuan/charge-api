@@ -3,10 +3,19 @@ version: '3.8'
 services:
   web:
     build: .
-    ports:
-      - "5000:5000"
     volumes:
       - ./charge_status.db:/app/charge_status.db
       - ./logs:/app/logs
     environment:
       - SECRET_KEY=${SECRET_KEY} # 从 .env 文件或命令行读取
+    expose:
+      - "5000"
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - web

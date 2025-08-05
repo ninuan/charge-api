@@ -36,7 +36,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS admins (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL
+                    password_hash TEXT NOT NULL,
+                    password_changed BOOLEAN NOT NULL DEFAULT 0
                 )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS devices (
@@ -82,7 +83,7 @@ def create_admin(username, password):
     c.execute("SELECT id FROM admins WHERE username = ?", (username,))
     if c.fetchone() is None:
         password_hash = generate_password_hash(password)
-        c.execute("INSERT INTO admins (username, password_hash) VALUES (?, ?)", (username, password_hash))
+        c.execute("INSERT INTO admins (username, password_hash, password_changed) VALUES (?, ?, ?)", (username, password_hash, 0))
         conn.commit()
         logger.info(f"管理员 '{username}' 创建成功。")
     else:
@@ -95,6 +96,12 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         if 'admin_id' not in session:
             return redirect(url_for('admin_login', next=request.url))
+        
+        # 检查密码是否需要修改
+        if session.get('username') == 'admin' and not session.get('password_changed'):
+            if request.endpoint != 'change_password' and request.endpoint != 'static':
+                return redirect(url_for('change_password'))
+                
         return f(*args, **kwargs)
     return decorated_function
 
@@ -306,13 +313,18 @@ def admin_login():
         
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
-        c.execute("SELECT id, password_hash FROM admins WHERE username = ?", (username,))
+        c.execute("SELECT id, password_hash, password_changed FROM admins WHERE username = ?", (username,))
         admin = c.fetchone()
         conn.close()
         
         if admin and check_password_hash(admin[1], password):
             session['admin_id'] = admin[0]
             session['username'] = username
+            session['password_changed'] = admin[2]
+
+            if username == 'admin' and not admin[2]:
+                return redirect(url_for('change_password'))
+            
             flash('Login successful!', 'success')
             return redirect(url_for('admin_dashboard'))
         else:
@@ -428,6 +440,35 @@ def edit_account(account_id):
         account = {'id': account_id, 'name': account_data[0], 'cookie': account_data[1]}
         return render_template('edit_account.html', account=account)
     return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    if session.get('username') != 'admin' or session.get('password_changed'):
+        return redirect(url_for('admin_dashboard'))
+
+    if request.method == 'POST':
+        new_password = request.form['new_password']
+        confirm_password = request.form['confirm_password']
+
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return redirect(url_for('change_password'))
+
+        password_hash = generate_password_hash(new_password)
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("UPDATE admins SET password_hash = ?, password_changed = ? WHERE username = ?",
+                  (password_hash, 1, 'admin'))
+        conn.commit()
+        conn.close()
+
+        session['password_changed'] = True
+        flash('Password updated successfully!', 'success')
+        return redirect(url_for('admin_dashboard'))
+
+    return render_template('change_password.html')
 
 
 if __name__ == '__main__':

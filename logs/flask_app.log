@@ -417,3 +417,29 @@ RuntimeError: The session is unavailable because no secret key was set.  Set the
 2025-08-05 16:57:10,864 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:89]
 2025-08-05 16:57:29,567 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
 2025-08-05 16:58:21,854 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:220]
+2025-08-05 17:39:40,442 charge_api.flask INFO: 数据库初始化完成 [app.py:76]
+2025-08-05 17:39:40,442 charge_api.flask INFO: 管理员 'admin' 已存在。 [app.py:90]
+2025-08-05 17:39:40,940 charge_api.flask INFO: 返回设备列表: 3 个设备 [app.py:227]
+2025-08-05 17:39:49,629 app ERROR: Exception on /admin/login [POST] [app.py:838]
+Traceback (most recent call last):
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Scoop\apps\anaconda3\2024.10-1\App\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Projects\charge-api\app.py", line 316, in admin_login
+    c.execute("SELECT id, password_hash, password_changed FROM admins WHERE username = ?", (username,))
+sqlite3.OperationalError: no such column: password_changed
+2025-08-05 17:42:23,284 charge_api.flask INFO: 正在插入初始设备数据... [app.py:58]
+2025-08-05 17:42:23,285 charge_api.flask INFO: 设备数据插入完成。 [app.py:62]
+2025-08-05 17:42:23,285 charge_api.flask INFO: 正在插入初始账户数据... [app.py:68]
+2025-08-05 17:42:23,285 charge_api.flask INFO: 账户数据插入完成。 [app.py:72]
+2025-08-05 17:42:23,292 charge_api.flask INFO: 数据库初始化完成 [app.py:76]
+2025-08-05 17:42:23,360 charge_api.flask INFO: 管理员 'admin' 创建成功。 [app.py:88]
