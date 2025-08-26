@@ -19,10 +19,19 @@ setup_logging('flask_app', debug=app.config.get('DEBUG', False))
 logger = get_logger('charge_api.flask')
 
 # 数据库配置
-DATABASE = 'charge_status.db'
+DATABASE = './charge_status.db'
 
 def init_db():
-    conn = sqlite3.connect(DATABASE)
+    # 确保数据库文件路径正确，避免创建目录
+    db_path = DATABASE
+    
+    # 如果存在同名目录，删除它
+    if os.path.isdir(db_path):
+        import shutil
+        shutil.rmtree(db_path)
+        logger.warning(f"删除了错误的目录: {db_path}")
+    
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
     # 检查并创建所有表
@@ -37,7 +46,8 @@ def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
-                    password_changed BOOLEAN NOT NULL DEFAULT 0
+                    password_changed INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS devices (
@@ -71,6 +81,22 @@ def init_db():
                       (account['name'], account['cookie']))
         logger.info("账户数据插入完成。")
 
+    # 检查并修复 admins 表结构
+    try:
+        c.execute("PRAGMA table_info(admins)")
+        columns = [column[1] for column in c.fetchall()]
+        
+        if 'password_changed' not in columns:
+            logger.info("添加 password_changed 列...")
+            c.execute("ALTER TABLE admins ADD COLUMN password_changed INTEGER DEFAULT 0")
+        
+        if 'created_at' not in columns:
+            logger.info("添加 created_at 列...")
+            c.execute("ALTER TABLE admins ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            
+    except Exception as e:
+        logger.error(f"修复 admins 表结构时出错: {e}")
+
     conn.commit()
     conn.close()
     logger.info("数据库初始化完成")
@@ -79,11 +105,25 @@ def create_admin(username, password):
     """创建一个新的管理员账户"""
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
+    
     # 检查管理员是否已存在
     c.execute("SELECT id FROM admins WHERE username = ?", (username,))
     if c.fetchone() is None:
         password_hash = generate_password_hash(password)
-        c.execute("INSERT INTO admins (username, password_hash, password_changed) VALUES (?, ?, ?)", (username, password_hash, 0))
+        
+        # 尝试插入，如果失败则可能是表结构问题
+        try:
+            c.execute("INSERT INTO admins (username, password_hash, password_changed) VALUES (?, ?, ?)", 
+                     (username, password_hash, 0))
+        except sqlite3.OperationalError as e:
+            if "no such column: password_changed" in str(e):
+                # 如果没有 password_changed 列，先添加
+                c.execute("ALTER TABLE admins ADD COLUMN password_changed INTEGER DEFAULT 0")
+                c.execute("INSERT INTO admins (username, password_hash, password_changed) VALUES (?, ?, ?)", 
+                         (username, password_hash, 0))
+            else:
+                raise e
+                
         conn.commit()
         logger.info(f"管理员 '{username}' 创建成功。")
     else:
@@ -311,24 +351,42 @@ def admin_login():
         username = request.form['username']
         password = request.form['password']
         
-        conn = sqlite3.connect(DATABASE)
-        c = conn.cursor()
-        c.execute("SELECT id, password_hash, password_changed FROM admins WHERE username = ?", (username,))
-        admin = c.fetchone()
-        conn.close()
-        
-        if admin and check_password_hash(admin[1], password):
-            session['admin_id'] = admin[0]
-            session['username'] = username
-            session['password_changed'] = admin[2]
-
-            if username == 'admin' and not admin[2]:
-                return redirect(url_for('change_password'))
+        try:
+            conn = sqlite3.connect(DATABASE)
+            c = conn.cursor()
             
-            flash('Login successful!', 'success')
-            return redirect(url_for('admin_dashboard'))
-        else:
-            flash('Invalid username or password', 'danger')
+            # 尝试查询，如果出现列不存在错误则修复
+            try:
+                c.execute("SELECT id, password_hash, password_changed FROM admins WHERE username = ?", (username,))
+                admin = c.fetchone()
+            except sqlite3.OperationalError as e:
+                if "no such column: password_changed" in str(e):
+                    logger.info("检测到 password_changed 列不存在，正在修复...")
+                    c.execute("ALTER TABLE admins ADD COLUMN password_changed INTEGER DEFAULT 0")
+                    conn.commit()
+                    c.execute("SELECT id, password_hash, password_changed FROM admins WHERE username = ?", (username,))
+                    admin = c.fetchone()
+                else:
+                    raise e
+            
+            conn.close()
+            
+            if admin and check_password_hash(admin[1], password):
+                session['admin_id'] = admin[0]
+                session['username'] = username
+                session['password_changed'] = bool(admin[2])  # 确保转换为布尔值
+
+                if username == 'admin' and not admin[2]:
+                    return redirect(url_for('change_password'))
+                
+                flash('Login successful!', 'success')
+                return redirect(url_for('admin_dashboard'))
+            else:
+                flash('Invalid username or password', 'danger')
+                
+        except Exception as e:
+            logger.error(f"登录时发生错误: {e}")
+            flash('An error occurred during login', 'danger')
             
     return render_template('admin_login.html')
 
@@ -460,7 +518,7 @@ def change_password():
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
         c.execute("UPDATE admins SET password_hash = ?, password_changed = ? WHERE username = ?",
-                  (password_hash, 1, 'admin'))
+                  (password_hash, 1, 'admin'))  # 使用整数 1 而不是布尔值
         conn.commit()
         conn.close()
 
