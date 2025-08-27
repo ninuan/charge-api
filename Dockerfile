@@ -13,11 +13,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用代码
 COPY . .
 
+# 创建数据与日志目录
+RUN mkdir -p /app/data /app/logs
+
 # 暴露端口
 EXPOSE 5000
 
 # 设置环境变量
 ENV FLASK_APP=app.py
+ENV DB_PATH=/app/data/charge_status.db
 
 # 运行 Gunicorn 服务器
 CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5000", "app:app"]

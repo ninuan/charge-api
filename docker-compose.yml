@@ -2,10 +2,11 @@ services:
   web:
     build: .
     volumes:
-      - ./charge_status.db:/app/charge_status.db
+  - ./data:/app/data
       - ./logs:/app/logs
     environment:
-      - SECRET_KEY=${SECRET_KEY} # 从 .env 文件或命令行读取
+  - SECRET_KEY=${SECRET_KEY} # 从 .env 文件或命令行读取
+  - DB_PATH=/app/data/charge_status.db
     expose:
       - "5000"
 

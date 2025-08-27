@@ -18,19 +18,25 @@ app.config.from_object(Config)
 setup_logging('flask_app', debug=app.config.get('DEBUG', False))
 logger = get_logger('charge_api.flask')
 
-# 数据库配置
-DATABASE = './charge_status.db'
+# 数据库配置（优先使用环境变量 DB_PATH）
+DB_ENV_PATH = os.getenv('DB_PATH')
+DATABASE = DB_ENV_PATH if DB_ENV_PATH else './charge_status.db'
 
 def init_db():
     # 确保数据库文件路径正确，避免创建目录
     db_path = DATABASE
-    
+
+    # 确保父级目录存在（例如 /app/data）
+    parent_dir = os.path.dirname(db_path)
+    if parent_dir and not os.path.exists(parent_dir):
+        os.makedirs(parent_dir, exist_ok=True)
+
     # 如果存在同名目录，删除它
     if os.path.isdir(db_path):
         import shutil
         shutil.rmtree(db_path)
         logger.warning(f"删除了错误的目录: {db_path}")
-    
+
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
