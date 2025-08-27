@@ -109,14 +109,19 @@ def init_db():
     logger.info("数据库初始化完成")
 
 # 在 WSGI（如 Gunicorn）环境下，模块不会以 __main__ 运行，这里确保首次请求前完成初始化
-@app.before_first_request
+_db_initialized = False
+
+@app.before_request
 def ensure_db_ready():
-    try:
-        logger.info("Ensuring database and default admin before first request...")
-        init_db()
-        create_admin('admin', 'password')
-    except Exception as e:
-        logger.error(f"Error ensuring database on first request: {e}")
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            logger.info("Ensuring database and default admin before first request...")
+            init_db()
+            create_admin('admin', 'password')
+            _db_initialized = True
+        except Exception as e:
+            logger.error(f"Error ensuring database on first request: {e}")
 
 def create_admin(username, password):
     """创建一个新的管理员账户"""
