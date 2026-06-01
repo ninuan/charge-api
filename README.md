@@ -1,8 +1,8 @@
 # Charge Dashboard (Go + TypeScript)
 
-基于 `20260601_202646` 抓包里记录的接口信息构建的充电桩可视化项目。
+基于抓包里记录的接口信息构建的充电桩可视化项目。
 
-- 后端：Go（远端接口请求、内存状态、REST、SSE）
+- 后端：Go（远端接口请求、本地状态缓存、REST、SSE）
 - 前端：Vue 3 + TypeScript + Vite + Pinia + Naive UI
 - 功能：展示每桩充电口状态、动态新增/删除远端桩、按钮主动刷新口状态
 
@@ -16,6 +16,7 @@ backend/
     charger/client.go
     model/model.go
     parser/parser.go
+    persistence/state.go
     store/store.go
 frontend/
   src/
@@ -23,7 +24,7 @@ frontend/
     components/PileCard.vue
     stores/dashboard.ts
     types/dashboard.ts
-20260601_202646/
+examples/capture-template/
   0/basic
   0/request_body
   0/request_headers

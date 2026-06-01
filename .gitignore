@@ -5,6 +5,41 @@ frontend/src/**/*.js
 frontend/**/*.tsbuildinfo
 20260601_202646/
 charge_state.json
+
+# Local secrets and runtime data
 .env
 .env.*
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/*.log
+
+# Python artifacts from previous versions
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+env/
+venv/
+ENV/
+
+# Build and cache directories
+build/
+dist/
+.cache/
+.pytest_cache/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
