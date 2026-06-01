@@ -1,0 +1,9 @@
+POST /action/i/api/devicewithnumbers HTTP/1.1
+Host: ele.mocele.com
+Accept: application/json
+Content-Type: application/x-www-form-urlencoded
+Origin: https://ele.mocele.com
+User-Agent: YOUR_BROWSER_USER_AGENT
+Referer: https://ele.mocele.com/i/device/open?id=YOUR_DEVICE_LONG_ID
+X-Requested-With: XMLHttpRequest
+Cookie: deviceid=YOUR_DEVICE_LONG_ID; org=1; openindex=1; wxopenid=YOUR_WX_OPENID; info=YOUR_INFO_TOKEN; verifycode=YOUR_VERIFYCODE; sid=YOUR_SID

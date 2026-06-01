@@ -1,0 +1,68 @@
+package model
+
+import "time"
+
+type PortStatus string
+
+const (
+	PortIdle    PortStatus = "idle"
+	PortInUse   PortStatus = "in_use"
+	PortOffline PortStatus = "offline"
+)
+
+type Port struct {
+	ID         int        `json:"id"`
+	Status     PortStatus `json:"status"`
+	PowerKW    float64    `json:"powerKw"`
+	EnergyKWh  float64    `json:"energyKwh"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	SessionMin int        `json:"sessionMin"`
+}
+
+type Pile struct {
+	ID          string    `json:"id"`
+	Number      string    `json:"number"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"`
+	Address     string    `json:"address"`
+	OpenNum     int       `json:"openNum"`
+	Online      bool      `json:"online"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	Source      string    `json:"source"`
+	Ports       []Port    `json:"ports"`
+	UsedPortIDs []int     `json:"usedPortIds"`
+}
+
+type DashboardSnapshot struct {
+	Piles      []Pile            `json:"piles"`
+	UpdatedAt  time.Time         `json:"updatedAt"`
+	Statistics DashboardCounters `json:"statistics"`
+	Refresh    RefreshInfo       `json:"refresh"`
+}
+
+type DashboardCounters struct {
+	PileCount      int `json:"pileCount"`
+	PortCount      int `json:"portCount"`
+	InUsePortCount int `json:"inUsePortCount"`
+	IdlePortCount  int `json:"idlePortCount"`
+	OfflinePorts   int `json:"offlinePorts"`
+}
+
+type RefreshInfo struct {
+	LastRemoteAt       *time.Time `json:"lastRemoteAt,omitempty"`
+	NextRemoteAt       *time.Time `json:"nextRemoteAt,omitempty"`
+	MinIntervalSeconds int        `json:"minIntervalSeconds"`
+	Cached             bool       `json:"cached"`
+	Message            string     `json:"message,omitempty"`
+}
+
+type PileUpsertRequest struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Number  string `json:"number"`
+	OpenNum int    `json:"openNum"`
+	Status  string `json:"status"`
+	Address string `json:"address"`
+}
