@@ -25,20 +25,34 @@ type Client struct {
 }
 
 func NewClient(requests []parser.CaptureRequest) *Client {
+	return newClient(requests, true)
+}
+
+func NewClientTemplateOnly(requests []parser.CaptureRequest) *Client {
+	return newClient(requests, false)
+}
+
+func newClient(requests []parser.CaptureRequest, preload bool) *Client {
 	requestMap := make(map[string]parser.CaptureRequest, len(requests))
 	order := make([]string, 0, len(requests))
-	for _, request := range requests {
-		id := requestDeviceID(request)
-		if id == "" {
-			id = request.Name
+	if preload {
+		for _, request := range requests {
+			id := requestDeviceID(request)
+			if id == "" {
+				id = request.Name
+			}
+			requestMap[id] = request
+			order = append(order, id)
 		}
-		requestMap[id] = request
-		order = append(order, id)
 	}
 
 	var template parser.CaptureRequest
 	if len(requests) > 0 {
 		template = requests[0]
+		if !preload {
+			template.Headers = cloneHeaders(template.Headers)
+			template.Headers["Cookie"] = ""
+		}
 	}
 
 	return &Client{
@@ -121,9 +135,6 @@ func (c *Client) RemoveDevice(id string) {
 
 func (c *Client) UpdateCookie(cookie string) error {
 	cookie = strings.TrimSpace(cookie)
-	if cookie == "" {
-		return fmt.Errorf("cookie is required")
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

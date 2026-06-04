@@ -26,10 +26,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const stats = computed(() => snapshot.value.statistics);
   const refresh = computed(() => snapshot.value.refresh);
 
+  function reset() {
+    snapshot.value = {
+      ...emptySnapshot,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
   async function fetchSnapshot() {
     loading.value = true;
     try {
-      const res = await fetch("/api/piles");
+      const res = await fetch("/api/piles", { credentials: "include" });
       if (!res.ok) {
         throw new Error(`Load failed: ${res.status}`);
       }
@@ -42,6 +49,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   async function addPile(payload: { id: string; name: string; number: string; openNum: number; status: string; address: string }) {
     const res = await fetch("/api/piles", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
@@ -53,7 +61,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   async function deletePile(id: string) {
-    const res = await fetch(`/api/piles/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/piles/${id}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
     if (!res.ok && res.status !== 204) {
       const err = await res.json();
       throw new Error(err.error ?? "delete pile failed");
@@ -61,7 +72,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   async function refreshFromCapture() {
-    const res = await fetch("/api/refresh", { method: "POST" });
+    const res = await fetch("/api/refresh", {
+      method: "POST",
+      credentials: "include"
+    });
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.error ?? "refresh failed");
@@ -72,6 +86,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   async function updateCookie(cookie: string) {
     const res = await fetch("/api/session/cookie", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cookie })
     });
@@ -88,6 +103,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     piles,
     stats,
     refresh,
+    reset,
     fetchSnapshot,
     addPile,
     deletePile,

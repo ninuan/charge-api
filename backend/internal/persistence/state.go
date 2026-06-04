@@ -12,11 +12,23 @@ import (
 )
 
 type State struct {
-	Piles     []model.Pile      `json:"piles"`
-	Refresh   model.RefreshInfo `json:"refresh"`
-	DeviceIDs []string          `json:"deviceIds"`
+	Version    int                  `json:"version"`
+	Users      []model.User         `json:"users"`
+	UserStates map[string]UserState `json:"userStates"`
+	SavedAt    time.Time            `json:"savedAt"`
+
+	Piles     []model.Pile      `json:"piles,omitempty"`
+	Refresh   model.RefreshInfo `json:"refresh,omitempty"`
+	DeviceIDs []string          `json:"deviceIds,omitempty"`
 	Cookie    string            `json:"cookie,omitempty"`
-	SavedAt   time.Time         `json:"savedAt"`
+}
+
+type UserState struct {
+	Piles     []model.Pile       `json:"piles"`
+	Refresh   model.RefreshInfo  `json:"refresh"`
+	DeviceIDs []string           `json:"deviceIds"`
+	Cookie    string             `json:"cookie,omitempty"`
+	Stats     model.TrafficStats `json:"stats"`
 }
 
 func Load(path string) (State, bool, error) {

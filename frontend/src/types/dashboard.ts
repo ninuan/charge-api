@@ -50,3 +50,35 @@ export interface DashboardSnapshot {
   statistics: DashboardCounters;
   refresh: RefreshInfo;
 }
+
+export type UserRole = "admin" | "user";
+
+export interface CurrentUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface TrafficStats {
+  totalRequests: number;
+  refreshRequests: number;
+  remoteFetches: number;
+  cachedRefreshes: number;
+  failedRequests: number;
+  authFailures: number;
+  lastRequestAt?: string;
+  lastRemoteFetchAt?: string;
+  lastFailedAt?: string;
+  lastAuthFailureAt?: string;
+}
+
+export interface AdminUserSummary {
+  user: CurrentUser;
+  stats: TrafficStats;
+  dashboard: DashboardCounters;
+  deviceIds: string[];
+  hasCookie: boolean;
+  lastRefresh: RefreshInfo;
+}

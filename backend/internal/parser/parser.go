@@ -37,6 +37,25 @@ type CaptureRequest struct {
 	Headers map[string]string
 }
 
+func DefaultCaptureRequests() []CaptureRequest {
+	return []CaptureRequest{
+		{
+			Name:   "default",
+			URL:    "https://ele.mocele.com/action/i/api/devicewithnumbers",
+			Method: "POST",
+			Body:   "id=YOUR_DEVICE_LONG_ID",
+			Headers: map[string]string{
+				"Accept":           "application/json",
+				"Content-Type":     "application/x-www-form-urlencoded",
+				"Origin":           "https://ele.mocele.com",
+				"Referer":          "https://ele.mocele.com/i/device/open?id=YOUR_DEVICE_LONG_ID",
+				"User-Agent":       "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36",
+				"X-Requested-With": "XMLHttpRequest",
+			},
+		},
+	}
+}
+
 func ParseCaptureRequests(dir string) ([]CaptureRequest, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

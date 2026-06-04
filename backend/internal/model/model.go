@@ -69,3 +69,68 @@ type PileUpsertRequest struct {
 	Status  string `json:"status"`
 	Address string `json:"address"`
 }
+
+type UserRole string
+
+const (
+	RoleAdmin UserRole = "admin"
+	RoleUser  UserRole = "user"
+)
+
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"passwordHash,omitempty"`
+	Role         UserRole  `json:"role"`
+	Enabled      bool      `json:"enabled"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type CurrentUser struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	Role      UserRole  `json:"role"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type UserCreateRequest struct {
+	Username string   `json:"username"`
+	Password string   `json:"password"`
+	Role     UserRole `json:"role"`
+	Enabled  *bool    `json:"enabled,omitempty"`
+}
+
+type UserUpdateRequest struct {
+	Password *string   `json:"password,omitempty"`
+	Role     *UserRole `json:"role,omitempty"`
+	Enabled  *bool     `json:"enabled,omitempty"`
+}
+
+type TrafficStats struct {
+	TotalRequests     int        `json:"totalRequests"`
+	RefreshRequests   int        `json:"refreshRequests"`
+	RemoteFetches     int        `json:"remoteFetches"`
+	CachedRefreshes   int        `json:"cachedRefreshes"`
+	FailedRequests    int        `json:"failedRequests"`
+	AuthFailures      int        `json:"authFailures"`
+	LastRequestAt     *time.Time `json:"lastRequestAt,omitempty"`
+	LastRemoteFetchAt *time.Time `json:"lastRemoteFetchAt,omitempty"`
+	LastFailedAt      *time.Time `json:"lastFailedAt,omitempty"`
+	LastAuthFailureAt *time.Time `json:"lastAuthFailureAt,omitempty"`
+}
+
+type AdminUserSummary struct {
+	User        CurrentUser       `json:"user"`
+	Stats       TrafficStats      `json:"stats"`
+	Dashboard   DashboardCounters `json:"dashboard"`
+	DeviceIDs   []string          `json:"deviceIds"`
+	HasCookie   bool              `json:"hasCookie"`
+	LastRefresh RefreshInfo       `json:"lastRefresh"`
+}

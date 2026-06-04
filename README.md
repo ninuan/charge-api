@@ -6,11 +6,15 @@
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
 ![License](https://img.shields.io/badge/Usage-Personal%20Monitoring-lightgrey)
 
-一个用于查看充电桩端口占用情况的本地看板。后端使用 Go 请求充电桩接口，前端使用 Vue + TypeScript 展示多个充电桩、多个充电口的实时状态、已用时间和剩余时间。
+一个用于查看充电桩端口占用情况的多用户看板。后端使用 Go 请求充电桩接口，前端使用 Vue + TypeScript 展示多个充电桩、多个充电口的实时状态、已用时间和剩余时间。
 
 ## 功能亮点
 
 - 多桩管理：支持动态添加、删除充电桩。
+- 用户隔离：每个用户使用自己的 Cookie、设备列表和本地缓存。
+- 自助注册：普通用户可以自行注册并维护自己的充电桩。
+- 管理后台：管理员只查看流量监控大屏，并可以添加、禁用、删除用户。
+- 流量统计：按用户统计访问次数、刷新次数、远端请求次数和失败次数。
 - 端口看板：展示每个充电口的空闲、使用中、离线状态。
 - 时间信息：显示使用中端口的已用时间和剩余时间。
 - 主动刷新：由用户点击按钮后请求远端接口，不做自动高频轮询。
@@ -31,10 +35,11 @@
 
 ```mermaid
 flowchart LR
-  A["Vue Dashboard"] -->|"POST /api/refresh"| B["Go Backend"]
-  B --> C["Local Cache"]
-  B -->|"Request with template"| D["Charger API"]
+  A["User Dashboard"] -->|"Session Cookie"| B["Go Backend"]
+  B --> C["Per-user Cache"]
+  B -->|"User Cookie + Device IDs"| D["Charger API"]
   D --> B
+  E["Admin Panel"] -->|"User & Traffic Stats"| B
   B -->|"Snapshot"| A
 ```
 
@@ -62,27 +67,19 @@ examples/capture-template/ # 脱敏请求模板
 
 ### 1. 准备请求模板
 
-```bash
-cp -R examples/capture-template 20260601_202646
-```
+后端已经内置默认请求模板，普通部署不需要额外准备抓包目录。
 
-编辑模板目录里的文件，填入你自己的远端接口 URL、请求体和请求头：
-
-```text
-20260601_202646/0/basic
-20260601_202646/0/request_body
-20260601_202646/0/request_headers
-```
-
-如需预加载多个充电桩，可以继续添加 `1/`、`2/` 等同结构目录。
+如果远端接口发生变化，也可以通过 `-capture` 参数指定自定义模板目录。
 
 ### 2. 启动后端
 
 ```bash
 cd backend
 go build -o server ./cmd/server
-./server -listen :8080 -capture ../20260601_202646 -state ../charge_state.json
+CHARGE_ADMIN_PASSWORD="your-admin-password" ./server -listen :8080 -state ../charge_state.json
 ```
+
+首次启动会创建 `admin` 管理员账号。也可以用 `-admin-password` 参数指定初始密码。
 
 ### 3. 启动前端
 
@@ -103,11 +100,19 @@ http://localhost:5173
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/healthz` | 健康检查 |
+| POST | `/api/auth/login` | 登录 |
+| POST | `/api/auth/register` | 普通用户注册 |
+| POST | `/api/auth/logout` | 退出 |
+| GET | `/api/auth/me` | 当前用户 |
 | GET | `/api/piles` | 获取看板快照 |
 | POST | `/api/piles` | 添加充电桩 |
 | DELETE | `/api/piles/:id` | 删除充电桩 |
 | POST | `/api/refresh` | 主动刷新远端状态 |
 | POST | `/api/session/cookie` | 更新并验证 Cookie |
+| GET | `/api/admin/users` | 管理员用户列表和统计 |
+| POST | `/api/admin/users` | 管理员添加用户 |
+| PATCH | `/api/admin/users/:id` | 管理员更新用户 |
+| DELETE | `/api/admin/users/:id` | 管理员删除用户 |
 | GET | `/api/stream` | SSE 快照推送 |
 
 ## 本地缓存
@@ -118,7 +123,7 @@ http://localhost:5173
 charge_state.json
 ```
 
-服务启动时会先读取本地缓存，不会自动请求远端接口。这样在开发、重启和部署调试时，可以减少不必要的远端访问。
+服务启动时会先读取本地缓存，不会自动请求远端接口。用户、Cookie、设备列表、看板快照和流量统计都会按用户独立保存。
 
 ## 说明
 
