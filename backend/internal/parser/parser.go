@@ -13,13 +13,20 @@ import (
 )
 
 type rawPayload struct {
-	ID      string `json:"id"`
-	Number  string `json:"number"`
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Address string `json:"address"`
-	OpenNum int    `json:"opennum"`
-	Used    []int  `json:"used"`
+	ID      string          `json:"id"`
+	Number  string          `json:"number"`
+	Name    string          `json:"name"`
+	Status  string          `json:"status"`
+	Address string          `json:"address"`
+	OpenNum int             `json:"opennum"`
+	Used    []int           `json:"used"`
+	Useds   []rawUsedStatus `json:"useds"`
+}
+
+type rawUsedStatus struct {
+	Index         int    `json:"i"`
+	UsedSeconds   int    `json:"u"`
+	RemainingText string `json:"s"`
 }
 
 type CaptureRequest struct {
@@ -76,6 +83,14 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 	for _, u := range raw.Used {
 		usedMap[u] = true
 	}
+	usedStatusMap := make(map[int]rawUsedStatus, len(raw.Useds))
+	for _, item := range raw.Useds {
+		if item.Index <= 0 {
+			continue
+		}
+		usedMap[item.Index] = true
+		usedStatusMap[item.Index] = item
+	}
 
 	ports := make([]model.Port, 0, openNum)
 	for i := 1; i <= openNum; i++ {
@@ -84,14 +99,28 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 		energy := 0.0
 		var start *time.Time
 		minutes := 0
+		usedSeconds := 0
+		usedText := ""
+		remainingText := ""
 
 		if usedMap[i] {
 			status = model.PortInUse
 			power = 0.45
 			energy = 0.12
-			startedAt := now.Add(-15 * time.Minute)
+			if usedStatus, ok := usedStatusMap[i]; ok {
+				usedSeconds = usedStatus.UsedSeconds
+				usedText = formatDuration(usedSeconds)
+				remainingText = strings.TrimSpace(usedStatus.RemainingText)
+			}
+			if usedSeconds > 0 {
+				minutes = usedSeconds / 60
+			} else {
+				minutes = 15
+				usedSeconds = minutes * 60
+				usedText = formatDuration(usedSeconds)
+			}
+			startedAt := now.Add(-time.Duration(usedSeconds) * time.Second)
 			start = &startedAt
-			minutes = 15
 		}
 
 		if !strings.Contains(raw.Status, "在线") {
@@ -100,20 +129,33 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 			energy = 0
 			start = nil
 			minutes = 0
+			usedSeconds = 0
+			usedText = ""
+			remainingText = ""
 		}
 
 		ports = append(ports, model.Port{
-			ID:         i,
-			Status:     status,
-			PowerKW:    power,
-			EnergyKWh:  energy,
-			UpdatedAt:  now,
-			StartedAt:  start,
-			SessionMin: minutes,
+			ID:            i,
+			Status:        status,
+			PowerKW:       power,
+			EnergyKWh:     energy,
+			UpdatedAt:     now,
+			StartedAt:     start,
+			SessionMin:    minutes,
+			UsedSeconds:   usedSeconds,
+			UsedText:      usedText,
+			RemainingText: remainingText,
 		})
 	}
 
-	sort.Ints(raw.Used)
+	usedPortIDs := make([]int, 0, len(usedMap))
+	for portID, used := range usedMap {
+		if used {
+			usedPortIDs = append(usedPortIDs, portID)
+		}
+	}
+	sort.Ints(usedPortIDs)
+
 	return model.Pile{
 		ID:          raw.ID,
 		Number:      raw.Number,
@@ -126,7 +168,7 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 		UpdatedAt:   now,
 		Source:      source,
 		Ports:       ports,
-		UsedPortIDs: raw.Used,
+		UsedPortIDs: usedPortIDs,
 	}, nil
 }
 
@@ -136,6 +178,27 @@ func compactPayload(body []byte) string {
 		return text[:180] + "..."
 	}
 	return text
+}
+
+func formatDuration(seconds int) string {
+	if seconds <= 0 {
+		return ""
+	}
+
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	remainingSeconds := seconds % 60
+
+	switch {
+	case hours > 0 && minutes > 0:
+		return fmt.Sprintf("%d小时%d分钟", hours, minutes)
+	case hours > 0:
+		return fmt.Sprintf("%d小时", hours)
+	case minutes > 0:
+		return fmt.Sprintf("%d分钟", minutes)
+	default:
+		return fmt.Sprintf("%d秒", remainingSeconds)
+	}
 }
 
 func ParseCaptureDir(dir string) ([]model.Pile, error) {

@@ -53,7 +53,9 @@ function statusClass(port: Port) {
       >
         <strong>{{ port.id }}</strong>
         <span>{{ statusLabel(port) }}</span>
-        <small>{{ port.powerKw.toFixed(2) }}kW</small>
+        <small v-if="port.status === 'in_use' && port.usedText">已用 {{ port.usedText }}</small>
+        <small v-if="port.status === 'in_use' && port.remainingText">剩余 {{ port.remainingText }}</small>
+        <small v-if="port.status !== 'in_use'">--</small>
       </div>
     </div>
   </n-card>
@@ -102,6 +104,7 @@ function statusClass(port: Port) {
 }
 
 .port-cell {
+  min-height: 86px;
   border-radius: 6px;
   padding: 10px 8px;
   display: flex;
@@ -123,6 +126,8 @@ function statusClass(port: Port) {
 .port-cell small {
   font-size: 11px;
   opacity: 0.9;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .port-cell.idle {

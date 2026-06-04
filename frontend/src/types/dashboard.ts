@@ -8,6 +8,9 @@ export interface Port {
   updatedAt: string;
   startedAt?: string;
   sessionMin: number;
+  usedSeconds: number;
+  usedText?: string;
+  remainingText?: string;
 }
 
 export interface Pile {

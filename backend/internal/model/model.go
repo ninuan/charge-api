@@ -11,13 +11,16 @@ const (
 )
 
 type Port struct {
-	ID         int        `json:"id"`
-	Status     PortStatus `json:"status"`
-	PowerKW    float64    `json:"powerKw"`
-	EnergyKWh  float64    `json:"energyKwh"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-	StartedAt  *time.Time `json:"startedAt,omitempty"`
-	SessionMin int        `json:"sessionMin"`
+	ID            int        `json:"id"`
+	Status        PortStatus `json:"status"`
+	PowerKW       float64    `json:"powerKw"`
+	EnergyKWh     float64    `json:"energyKwh"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
+	SessionMin    int        `json:"sessionMin"`
+	UsedSeconds   int        `json:"usedSeconds"`
+	UsedText      string     `json:"usedText,omitempty"`
+	RemainingText string     `json:"remainingText,omitempty"`
 }
 
 type Pile struct {
