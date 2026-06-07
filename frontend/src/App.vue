@@ -1,27 +1,32 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { createDiscreteApi } from "naive-ui";
+import { Badge as UiBadge } from "@/components/ui/badge";
+import { Button as UiButton } from "@/components/ui/button";
 import {
-  NAlert,
-  NButton,
-  NCard,
-  NConfigProvider,
-  NDivider,
-  NForm,
-  NFormItem,
-  NGrid,
-  NGridItem,
-  NInput,
-  NInputNumber,
-  NLayout,
-  NLayoutContent,
-  NModal,
-  NSelect,
-  NSpace,
-  NStatistic,
-  NTag,
-  createDiscreteApi,
-  darkTheme,
-} from "naive-ui";
+  Card as UiCard,
+  CardContent as UiCardContent,
+  CardDescription as UiCardDescription,
+  CardHeader as UiCardHeader,
+  CardTitle as UiCardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input as UiInput } from "@/components/ui/input";
+import {
+  Table as UiTable,
+  TableBody as UiTableBody,
+  TableCell as UiTableCell,
+  TableHead as UiTableHead,
+  TableHeader as UiTableHeader,
+  TableRow as UiTableRow,
+} from "@/components/ui/table";
 import PileCard from "./components/PileCard.vue";
 import { useAuthStore } from "./stores/auth";
 import { useDashboardStore } from "./stores/dashboard";
@@ -341,308 +346,402 @@ onMounted(async () => {
 </script>
 
 <template>
-  <n-config-provider :theme="darkTheme">
-    <n-layout class="page-shell">
-      <n-layout-content content-style="padding: 24px">
-        <section v-if="auth.loading" class="login-shell">
-          <n-card class="login-card">正在恢复登录状态...</n-card>
-        </section>
+  <main class="app-shell dark">
+    <section v-if="auth.loading" class="auth-shell">
+      <UiCard class="auth-card">
+        <UiCardContent class="auth-loading">正在恢复登录状态...</UiCardContent>
+      </UiCard>
+    </section>
 
-        <section v-else-if="!auth.isLoggedIn" class="login-shell">
-          <n-card class="login-card" :title="authMode === 'login' ? '登录充电桩看板' : '注册普通用户'">
-            <p class="login-hint">
-              {{ authMode === 'login' ? '管理员进入流量监控，普通用户进入自己的充电桩看板。' : '注册后会自动登录，使用你自己的 Cookie 和充电桩列表。' }}
-            </p>
-            <n-form>
-              <n-form-item label="用户名">
-                <n-input
-                  v-model:value="loginForm.username"
-                  :placeholder="authMode === 'login' ? 'admin 或你的用户名' : '设置用户名'"
-                  @keyup.enter="authMode === 'login' ? login() : register()"
-                />
-              </n-form-item>
-              <n-form-item label="密码">
-                <n-input
-                  v-model:value="loginForm.password"
-                  type="password"
-                  show-password-on="mousedown"
-                  placeholder="请输入密码"
-                  @keyup.enter="authMode === 'login' ? login() : register()"
-                />
-              </n-form-item>
-              <n-button
-                v-if="authMode === 'login'"
-                type="primary"
-                block
-                :loading="loggingIn"
-                @click="login"
-              >
-                登录
-              </n-button>
-              <n-button
-                v-else
-                type="primary"
-                block
-                :loading="registering"
-                @click="register"
-              >
-                注册并进入
-              </n-button>
-              <n-button
-                class="mode-switch"
-                text
-                block
-                @click="authMode = authMode === 'login' ? 'register' : 'login'"
-              >
-                {{ authMode === 'login' ? '没有账号？注册普通用户' : '已有账号？返回登录' }}
-              </n-button>
-            </n-form>
-          </n-card>
-        </section>
-
-        <template v-else>
-          <header class="topbar">
-            <div>
-              <h1>{{ auth.isAdmin ? '流量监控大屏' : '充电桩运营看板' }}</h1>
-              <p>{{ auth.isAdmin ? '用户访问、远端请求与异常统计' : '远端接口状态监控' }}</p>
-            </div>
-            <div class="topbar-actions">
-              <div class="user-chip">
-                <strong>{{ auth.currentUser?.username }}</strong>
-                <n-tag size="small" :type="auth.isAdmin ? 'warning' : 'success'">
-                  {{ roleLabel(auth.currentUser?.role || 'user') }}
-                </n-tag>
-              </div>
-              <n-button v-if="!auth.isAdmin" type="primary" :loading="refreshing" @click="refreshStatus">
-                刷新状态
-              </n-button>
-              <n-button v-if="!auth.isAdmin" secondary @click="cookieModalVisible = true">
-                更新我的 Cookie
-              </n-button>
-              <n-button tertiary @click="logout">退出</n-button>
-            </div>
-          </header>
-
-          <template v-if="auth.isAdmin">
-          <n-grid :cols="4" :x-gap="12" :y-gap="12" class="stats-grid monitor-grid">
-            <n-grid-item>
-              <n-card class="monitor-card">
-                <n-statistic label="用户总数" :value="adminTotals.users" />
-              </n-card>
-            </n-grid-item>
-            <n-grid-item>
-              <n-card class="monitor-card">
-                <n-statistic label="远端请求" :value="adminTotals.remoteFetches" />
-              </n-card>
-            </n-grid-item>
-            <n-grid-item>
-              <n-card class="monitor-card">
-                <n-statistic label="缓存命中" :value="adminTotals.cachedRefreshes" />
-              </n-card>
-            </n-grid-item>
-            <n-grid-item>
-              <n-card class="monitor-card danger">
-                <n-statistic label="失败 / 鉴权失败" :value="`${adminTotals.failedRequests} / ${adminTotals.authFailures}`" />
-              </n-card>
-            </n-grid-item>
-          </n-grid>
-
-          <n-card class="admin-card" title="用户管理与流量统计">
-            <n-form inline>
-              <n-form-item label="用户名">
-                <n-input v-model:value="userForm.username" placeholder="新用户" />
-              </n-form-item>
-              <n-form-item label="密码">
-                <n-input v-model:value="userForm.password" type="password" placeholder="初始密码" />
-              </n-form-item>
-              <n-form-item label="角色">
-                <n-select v-model:value="userForm.role" :options="roleOptions" style="width: 120px" />
-              </n-form-item>
-              <n-form-item>
-                <n-button type="primary" :loading="creatingUser" @click="createUser">添加用户</n-button>
-              </n-form-item>
-              <n-form-item>
-                <n-button secondary :loading="adminLoading" @click="loadAdminUsers">刷新统计</n-button>
-              </n-form-item>
-            </n-form>
-
-            <div class="admin-list">
-              <div v-for="summary in adminUsers" :key="summary.user.id" class="admin-user-row">
-                <div class="admin-user-head">
-                  <div>
-                    <strong>{{ summary.user.username }}</strong>
-                    <span>{{ roleLabel(summary.user.role) }}</span>
-                  </div>
-                  <div class="admin-user-actions">
-                    <n-tag size="small" :type="summary.user.enabled ? 'success' : 'error'">
-                      {{ summary.user.enabled ? '启用' : '禁用' }}
-                    </n-tag>
-                    <n-tag size="small" :type="summary.hasCookie ? 'success' : 'warning'">
-                      {{ summary.hasCookie ? '已配置 Cookie' : '未配置 Cookie' }}
-                    </n-tag>
-                    <n-button size="small" secondary @click="toggleUser(summary)">
-                      {{ summary.user.enabled ? '禁用' : '启用' }}
-                    </n-button>
-                    <n-button
-                      size="small"
-                      type="error"
-                      secondary
-                      :disabled="summary.user.id === auth.currentUser?.id"
-                      @click="deleteUser(summary)"
-                    >
-                      删除
-                    </n-button>
-                  </div>
-                </div>
-
-                <div class="traffic-grid">
-                  <span>总请求 {{ summary.stats.totalRequests }}</span>
-                  <span>刷新 {{ summary.stats.refreshRequests }}</span>
-                  <span>远端请求 {{ summary.stats.remoteFetches }}</span>
-                  <span>缓存命中 {{ summary.stats.cachedRefreshes }}</span>
-                  <span>失败 {{ summary.stats.failedRequests }}</span>
-                  <span>鉴权失败 {{ summary.stats.authFailures }}</span>
-                  <span>设备 {{ summary.deviceIds.length }}</span>
-                  <span>最近访问 {{ formatDateTime(summary.stats.lastRequestAt) }}</span>
-                </div>
-              </div>
-            </div>
-          </n-card>
-          </template>
-
-          <template v-else>
-          <n-alert
-            v-if="store.refresh.message"
-            class="refresh-alert"
-            :type="refreshMessageType"
-            :show-icon="false"
-          >
-            {{ store.refresh.message }} · 上次远端请求 {{ lastRemoteAt }} · 下次可请求 {{ nextRemoteAt }}
-          </n-alert>
-
-          <n-grid :cols="4" :x-gap="12" :y-gap="12" class="stats-grid">
-            <n-grid-item>
-              <n-card>
-                <n-statistic label="充电桩总数" :value="store.stats.pileCount" />
-              </n-card>
-            </n-grid-item>
-            <n-grid-item>
-              <n-card>
-                <n-statistic label="充电口总数" :value="store.stats.portCount" />
-              </n-card>
-            </n-grid-item>
-            <n-grid-item>
-              <n-card>
-                <n-statistic label="使用中" :value="store.stats.inUsePortCount" />
-              </n-card>
-            </n-grid-item>
-            <n-grid-item>
-              <n-card>
-                <n-statistic label="最后更新时间" :value="new Date(store.snapshot.updatedAt).toLocaleTimeString()" />
-              </n-card>
-            </n-grid-item>
-          </n-grid>
-
-          <n-card class="create-card" title="动态新增充电桩">
-            <n-form inline>
-              <n-form-item label="设备长ID">
-                <n-input v-model:value="form.id" placeholder="例如 2601201412385560001" />
-              </n-form-item>
-              <n-form-item label="名称">
-                <n-input v-model:value="form.name" placeholder="如：松园3号楼北侧" />
-              </n-form-item>
-              <n-form-item label="桩号">
-                <n-input v-model:value="form.number" placeholder="可选" />
-              </n-form-item>
-              <n-form-item label="口数量">
-                <n-input-number v-model:value="form.openNum" :min="1" :max="20" />
-              </n-form-item>
-              <n-form-item label="状态">
-                <n-input v-model:value="form.status" placeholder="在线/离线" />
-              </n-form-item>
-              <n-form-item label="地址">
-                <n-input v-model:value="form.address" placeholder="可选" />
-              </n-form-item>
-              <n-form-item>
-                <n-button type="primary" :loading="adding" @click="addPile">添加桩</n-button>
-              </n-form-item>
-            </n-form>
-          </n-card>
-
-          <section class="piles-wrap">
-            <n-space vertical :size="14" style="width: 100%">
-              <pile-card
-                v-for="pile in store.piles"
-                :key="pile.id"
-                :pile="pile"
-                @remove-pile="removePile"
+    <section v-else-if="!auth.isLoggedIn" class="auth-shell">
+      <div class="auth-orb one" />
+      <div class="auth-orb two" />
+      <UiCard class="auth-card">
+        <UiCardHeader>
+          <p class="eyebrow">Charge Console</p>
+          <UiCardTitle>{{ authMode === 'login' ? '登录充电桩看板' : '注册普通用户' }}</UiCardTitle>
+          <UiCardDescription>
+            {{ authMode === 'login' ? '管理员进入流量监控，普通用户进入自己的充电桩看板。' : '注册后自动登录，使用你自己的 Cookie 和充电桩列表。' }}
+          </UiCardDescription>
+        </UiCardHeader>
+        <UiCardContent>
+          <form class="auth-form" @submit.prevent="authMode === 'login' ? login() : register()">
+            <label>
+              用户名
+              <UiInput
+                v-model="loginForm.username"
+                :placeholder="authMode === 'login' ? 'admin 或你的用户名' : '设置用户名'"
               />
-            </n-space>
-          </section>
+            </label>
+            <label>
+              密码
+              <UiInput v-model="loginForm.password" type="password" placeholder="请输入密码" />
+            </label>
+            <UiButton type="submit" size="lg" :disabled="loggingIn || registering">
+              <span v-if="authMode === 'login'">{{ loggingIn ? '登录中...' : '登录' }}</span>
+              <span v-else>{{ registering ? '注册中...' : '注册并进入' }}</span>
+            </UiButton>
+            <UiButton
+              type="button"
+              variant="ghost"
+              @click="authMode = authMode === 'login' ? 'register' : 'login'"
+            >
+              {{ authMode === 'login' ? '没有账号？注册普通用户' : '已有账号？返回登录' }}
+            </UiButton>
+          </form>
+        </UiCardContent>
+      </UiCard>
+    </section>
 
-          <n-modal
-            v-model:show="cookieModalVisible"
-            preset="card"
-            title="更新我的远端 Cookie"
-            class="cookie-modal"
-          >
-            <n-alert type="info" :show-icon="false">
-              每个用户只会使用自己的 Cookie。保存后后端会立即尝试刷新你的充电桩数据。
-            </n-alert>
-            <n-divider />
-            <n-input
-              v-model:value="cookieText"
-              type="textarea"
+    <template v-else>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">{{ auth.isAdmin ? 'Operations Control' : 'User Dashboard' }}</p>
+          <h1>{{ auth.isAdmin ? '流量监控大屏' : '充电桩运营看板' }}</h1>
+          <p>{{ auth.isAdmin ? '用户访问、远端请求与异常统计' : '远端接口状态监控' }}</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="user-chip">
+            <strong>{{ auth.currentUser?.username }}</strong>
+            <UiBadge :variant="auth.isAdmin ? 'secondary' : 'default'">
+              {{ roleLabel(auth.currentUser?.role || 'user') }}
+            </UiBadge>
+          </div>
+          <UiButton v-if="!auth.isAdmin" :disabled="refreshing" @click="refreshStatus">
+            {{ refreshing ? '刷新中...' : '刷新状态' }}
+          </UiButton>
+          <UiButton v-if="!auth.isAdmin" variant="secondary" @click="cookieModalVisible = true">
+            更新我的 Cookie
+          </UiButton>
+          <UiButton variant="ghost" @click="logout">退出</UiButton>
+        </div>
+      </header>
+
+      <section v-if="auth.isAdmin" class="admin-dashboard">
+        <div class="admin-hero-panel">
+          <div>
+            <p class="eyebrow">Realtime Risk Radar</p>
+            <h2>流量监控与用户态势</h2>
+            <p>独立统计每个用户的访问、缓存命中、远端请求和 Cookie 鉴权异常。</p>
+          </div>
+          <UiButton variant="secondary" :disabled="adminLoading" @click="loadAdminUsers">
+            {{ adminLoading ? '刷新中...' : '刷新统计' }}
+          </UiButton>
+        </div>
+
+        <div class="admin-metrics-grid">
+          <UiCard class="metric-card">
+            <UiCardHeader>
+              <UiCardDescription>用户总数</UiCardDescription>
+              <UiCardTitle>{{ adminTotals.users }}</UiCardTitle>
+            </UiCardHeader>
+            <UiCardContent>{{ adminTotals.enabledUsers }} 个启用账户</UiCardContent>
+          </UiCard>
+          <UiCard class="metric-card green">
+            <UiCardHeader>
+              <UiCardDescription>远端请求</UiCardDescription>
+              <UiCardTitle>{{ adminTotals.remoteFetches }}</UiCardTitle>
+            </UiCardHeader>
+            <UiCardContent>{{ adminTotals.devices }} 个设备被用户添加</UiCardContent>
+          </UiCard>
+          <UiCard class="metric-card amber">
+            <UiCardHeader>
+              <UiCardDescription>缓存命中</UiCardDescription>
+              <UiCardTitle>{{ adminTotals.cachedRefreshes }}</UiCardTitle>
+            </UiCardHeader>
+            <UiCardContent>减少重复请求，降低风控风险</UiCardContent>
+          </UiCard>
+          <UiCard class="metric-card red">
+            <UiCardHeader>
+              <UiCardDescription>失败 / 鉴权失败</UiCardDescription>
+              <UiCardTitle>{{ adminTotals.failedRequests }} / {{ adminTotals.authFailures }}</UiCardTitle>
+            </UiCardHeader>
+            <UiCardContent>重点关注 Cookie 过期用户</UiCardContent>
+          </UiCard>
+        </div>
+
+        <UiCard class="console-card">
+          <UiCardHeader>
+            <UiCardTitle>用户管理</UiCardTitle>
+            <UiCardDescription>管理员可以创建、禁用或删除用户；普通用户可自行注册。</UiCardDescription>
+          </UiCardHeader>
+          <UiCardContent>
+            <form class="admin-create-form" @submit.prevent="createUser">
+              <label>
+                用户名
+                <UiInput v-model="userForm.username" placeholder="新用户" />
+              </label>
+              <label>
+                初始密码
+                <UiInput v-model="userForm.password" type="password" placeholder="初始密码" />
+              </label>
+              <label>
+                角色
+                <select v-model="userForm.role" class="field-select">
+                  <option v-for="option in roleOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <UiButton type="submit" :disabled="creatingUser">
+                {{ creatingUser ? '创建中...' : '添加用户' }}
+              </UiButton>
+            </form>
+
+            <div class="table-wrap">
+              <UiTable>
+                <UiTableHeader>
+                  <UiTableRow>
+                    <UiTableHead>用户</UiTableHead>
+                    <UiTableHead>状态</UiTableHead>
+                    <UiTableHead>Cookie</UiTableHead>
+                    <UiTableHead>请求</UiTableHead>
+                    <UiTableHead>远端 / 缓存</UiTableHead>
+                    <UiTableHead>失败</UiTableHead>
+                    <UiTableHead>设备</UiTableHead>
+                    <UiTableHead>最近访问</UiTableHead>
+                    <UiTableHead class="text-right">操作</UiTableHead>
+                  </UiTableRow>
+                </UiTableHeader>
+                <UiTableBody>
+                  <UiTableRow v-for="summary in adminUsers" :key="summary.user.id">
+                    <UiTableCell>
+                      <div class="user-cell">
+                        <strong>{{ summary.user.username }}</strong>
+                        <span>{{ roleLabel(summary.user.role) }}</span>
+                      </div>
+                    </UiTableCell>
+                    <UiTableCell>
+                      <UiBadge :variant="summary.user.enabled ? 'default' : 'destructive'">
+                        {{ summary.user.enabled ? '启用' : '禁用' }}
+                      </UiBadge>
+                    </UiTableCell>
+                    <UiTableCell>
+                      <UiBadge :variant="summary.hasCookie ? 'secondary' : 'outline'">
+                        {{ summary.hasCookie ? '已配置' : '未配置' }}
+                      </UiBadge>
+                    </UiTableCell>
+                    <UiTableCell>{{ summary.stats.totalRequests }}</UiTableCell>
+                    <UiTableCell>{{ summary.stats.remoteFetches }} / {{ summary.stats.cachedRefreshes }}</UiTableCell>
+                    <UiTableCell>{{ summary.stats.failedRequests }} / {{ summary.stats.authFailures }}</UiTableCell>
+                    <UiTableCell>{{ summary.deviceIds.length }}</UiTableCell>
+                    <UiTableCell>{{ formatDateTime(summary.stats.lastRequestAt) }}</UiTableCell>
+                    <UiTableCell>
+                      <div class="row-actions">
+                        <UiButton variant="secondary" size="sm" @click="toggleUser(summary)">
+                          {{ summary.user.enabled ? '禁用' : '启用' }}
+                        </UiButton>
+                        <UiButton
+                          variant="destructive"
+                          size="sm"
+                          :disabled="summary.user.id === auth.currentUser?.id"
+                          @click="deleteUser(summary)"
+                        >
+                          删除
+                        </UiButton>
+                      </div>
+                    </UiTableCell>
+                  </UiTableRow>
+                </UiTableBody>
+              </UiTable>
+            </div>
+          </UiCardContent>
+        </UiCard>
+      </section>
+
+      <section v-else class="user-dashboard">
+        <div v-if="store.refresh.message" :class="['refresh-alert', refreshMessageType]">
+          {{ store.refresh.message }} · 上次远端请求 {{ lastRemoteAt }} · 下次可请求 {{ nextRemoteAt }}
+        </div>
+
+        <div class="user-metrics-grid">
+          <UiCard class="metric-card">
+            <UiCardHeader>
+              <UiCardDescription>充电桩总数</UiCardDescription>
+              <UiCardTitle>{{ store.stats.pileCount }}</UiCardTitle>
+            </UiCardHeader>
+          </UiCard>
+          <UiCard class="metric-card green">
+            <UiCardHeader>
+              <UiCardDescription>充电口总数</UiCardDescription>
+              <UiCardTitle>{{ store.stats.portCount }}</UiCardTitle>
+            </UiCardHeader>
+          </UiCard>
+          <UiCard class="metric-card amber">
+            <UiCardHeader>
+              <UiCardDescription>使用中</UiCardDescription>
+              <UiCardTitle>{{ store.stats.inUsePortCount }}</UiCardTitle>
+            </UiCardHeader>
+          </UiCard>
+          <UiCard class="metric-card">
+            <UiCardHeader>
+              <UiCardDescription>最后更新时间</UiCardDescription>
+              <UiCardTitle class="time-title">{{ new Date(store.snapshot.updatedAt).toLocaleTimeString() }}</UiCardTitle>
+            </UiCardHeader>
+          </UiCard>
+        </div>
+
+        <UiCard class="create-card-modern">
+          <UiCardHeader>
+            <UiCardTitle>动态新增充电桩</UiCardTitle>
+            <UiCardDescription>添加后会使用你的 Cookie 请求远端接口，状态彼此独立。</UiCardDescription>
+          </UiCardHeader>
+          <UiCardContent>
+            <form class="pile-form" @submit.prevent="addPile">
+              <label>
+                设备长ID
+                <UiInput v-model="form.id" placeholder="例如 2601201412385560001" />
+              </label>
+              <label>
+                名称
+                <UiInput v-model="form.name" placeholder="如：松园3号楼北侧" />
+              </label>
+              <label>
+                桩号
+                <UiInput v-model="form.number" placeholder="可选" />
+              </label>
+              <label>
+                口数量
+                <input v-model.number="form.openNum" class="field-input" min="1" max="20" type="number">
+              </label>
+              <label>
+                状态
+                <UiInput v-model="form.status" placeholder="在线/离线" />
+              </label>
+              <label>
+                地址
+                <UiInput v-model="form.address" placeholder="可选" />
+              </label>
+              <UiButton type="submit" :disabled="adding">
+                {{ adding ? '添加中...' : '添加桩' }}
+              </UiButton>
+            </form>
+          </UiCardContent>
+        </UiCard>
+
+        <div class="piles-wrap">
+          <PileCard
+            v-for="pile in store.piles"
+            :key="pile.id"
+            :pile="pile"
+            @remove-pile="removePile"
+          />
+          <UiCard v-if="store.piles.length === 0" class="empty-card">
+            <UiCardHeader>
+              <UiCardTitle>还没有充电桩</UiCardTitle>
+              <UiCardDescription>先更新你的 Cookie，再添加一个设备长 ID 开始监控。</UiCardDescription>
+            </UiCardHeader>
+          </UiCard>
+        </div>
+
+        <Dialog v-model:open="cookieModalVisible">
+          <DialogContent class="cookie-dialog">
+            <DialogHeader>
+              <DialogTitle>更新我的远端 Cookie</DialogTitle>
+              <DialogDescription>
+                每个用户只会使用自己的 Cookie。保存后后端会立即尝试刷新你的充电桩数据。
+              </DialogDescription>
+            </DialogHeader>
+            <textarea
+              v-model="cookieText"
+              class="cookie-textarea"
               placeholder="deviceid=...; org=1; wxopenid=...; info=...; verifycode=...; sid=..."
-              :autosize="{ minRows: 5, maxRows: 8 }"
             />
-            <template #footer>
-              <div class="modal-actions">
-                <n-button @click="cookieModalVisible = false">取消</n-button>
-                <n-button type="primary" :loading="updatingCookie" @click="updateCookie">
-                  保存并验证
-                </n-button>
-              </div>
-            </template>
-          </n-modal>
-          </template>
-        </template>
-      </n-layout-content>
-    </n-layout>
-  </n-config-provider>
+            <DialogFooter>
+              <UiButton variant="ghost" @click="cookieModalVisible = false">取消</UiButton>
+              <UiButton :disabled="updatingCookie" @click="updateCookie">
+                {{ updatingCookie ? '验证中...' : '保存并验证' }}
+              </UiButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </section>
+    </template>
+  </main>
 </template>
 
 <style scoped>
-.page-shell {
+.app-shell {
   min-height: 100vh;
+  padding: 24px;
+  color: hsl(var(--foreground));
   background:
+    radial-gradient(circle at 8% 10%, rgb(91 140 110 / 22%), transparent 28%),
+    radial-gradient(circle at 90% 0%, rgb(220 148 78 / 14%), transparent 30%),
     linear-gradient(90deg, rgb(255 255 255 / 3%) 1px, transparent 1px),
     linear-gradient(rgb(255 255 255 / 3%) 1px, transparent 1px),
     linear-gradient(180deg, #121416, #181b1e);
-  background-size: 28px 28px, 28px 28px, auto;
+  background-size: auto, auto, 28px 28px, 28px 28px, auto;
 }
 
-.login-shell {
+.auth-shell {
+  position: relative;
   min-height: calc(100vh - 48px);
   display: grid;
   place-items: center;
+  overflow: hidden;
 }
 
-.login-card {
-  width: min(440px, 100%);
-  border-radius: 14px;
-  background: linear-gradient(160deg, #1f2724, #151719);
-  border: 1px solid rgb(255 255 255 / 10%);
+.auth-orb {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  border-radius: 999px;
+  filter: blur(12px);
+  opacity: 0.35;
 }
 
-.login-hint {
-  margin: 0 0 18px;
-  color: #9fa7a1;
-  line-height: 1.6;
+.auth-orb.one {
+  left: 12%;
+  top: 12%;
+  background: #4eb27d;
 }
 
-.mode-switch {
-  margin-top: 12px;
+.auth-orb.two {
+  right: 16%;
+  bottom: 18%;
+  background: #c58b4a;
+}
+
+.auth-card {
+  position: relative;
+  z-index: 1;
+  width: min(460px, 100%);
+  border-color: rgb(255 255 255 / 12%);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 8%), transparent),
+    rgb(18 22 21 / 92%);
+  box-shadow: 0 24px 90px rgb(0 0 0 / 34%);
+}
+
+.auth-loading {
+  color: #b7c1bb;
+}
+
+.auth-form,
+.admin-create-form,
+.pile-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-form label,
+.admin-create-form label,
+.pile-form label {
+  display: grid;
+  gap: 7px;
+  color: #bdc7c0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #9dd6b2;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .topbar {
@@ -650,23 +749,23 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 18px;
   align-items: center;
-  margin-bottom: 14px;
+  max-width: 1440px;
+  margin: 0 auto 18px;
 }
 
 .topbar h1 {
   margin: 0;
-  font-size: 28px;
-  letter-spacing: 0;
+  font-size: clamp(28px, 4vw, 46px);
+  line-height: 1;
+  letter-spacing: -0.045em;
 }
 
 .topbar p {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   color: #9fa7a1;
 }
 
-.topbar-actions,
-.modal-actions,
-.admin-user-actions {
+.topbar-actions {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
@@ -679,91 +778,223 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
+  border: 1px solid rgb(255 255 255 / 10%);
   border-radius: 999px;
   background: rgb(255 255 255 / 7%);
 }
 
-.admin-card,
-.refresh-alert,
-.stats-grid,
-.create-card {
-  margin-bottom: 16px;
-}
-
-.monitor-grid :deep(.n-statistic-value) {
-  font-size: 30px;
-}
-
-.monitor-card {
-  border: 1px solid rgb(62 205 145 / 22%);
-  background: linear-gradient(160deg, rgb(42 80 64 / 65%), rgb(24 28 29 / 90%));
-}
-
-.monitor-card.danger {
-  border-color: rgb(255 111 97 / 24%);
-  background: linear-gradient(160deg, rgb(88 48 43 / 65%), rgb(24 28 29 / 90%));
-}
-
-.admin-list {
+.admin-dashboard,
+.user-dashboard {
+  max-width: 1440px;
+  margin: 0 auto;
   display: grid;
-  gap: 10px;
+  gap: 18px;
 }
 
-.admin-user-row {
-  padding: 14px;
-  border-radius: 10px;
-  background: rgb(255 255 255 / 5%);
-  border: 1px solid rgb(255 255 255 / 8%);
-}
-
-.admin-user-head {
+.admin-hero-panel {
+  position: relative;
+  overflow: hidden;
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  align-items: center;
+  gap: 18px;
+  align-items: flex-end;
+  padding: 26px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgb(85 130 101 / 42%), transparent 34%),
+    linear-gradient(135deg, rgb(37 43 39 / 96%), rgb(15 18 18 / 96%));
+  box-shadow: 0 18px 70px rgb(0 0 0 / 28%);
 }
 
-.admin-user-head strong {
-  display: block;
-  font-size: 16px;
+.admin-hero-panel h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(30px, 5vw, 54px);
+  line-height: 1;
+  letter-spacing: -0.055em;
 }
 
-.admin-user-head span {
+.admin-hero-panel p {
+  margin: 0;
+  color: #afbab3;
+}
+
+.admin-metrics-grid,
+.user-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metric-card {
+  border-color: rgb(255 255 255 / 10%);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 8%), transparent),
+    rgb(23 26 25 / 92%);
+}
+
+.metric-card.green {
+  background:
+    radial-gradient(circle at top right, rgb(58 171 116 / 24%), transparent 46%),
+    rgb(23 26 25 / 92%);
+}
+
+.metric-card.amber {
+  background:
+    radial-gradient(circle at top right, rgb(218 161 70 / 24%), transparent 46%),
+    rgb(23 26 25 / 92%);
+}
+
+.metric-card.red {
+  background:
+    radial-gradient(circle at top right, rgb(223 92 79 / 24%), transparent 46%),
+    rgb(23 26 25 / 92%);
+}
+
+.metric-card :deep([data-slot="card-title"]) {
+  font-size: 34px;
+  letter-spacing: -0.04em;
+}
+
+.metric-card :deep([data-slot="card-content"]) {
   color: #aeb8b1;
   font-size: 13px;
 }
 
-.traffic-grid {
-  margin-top: 12px;
+.time-title {
+  font-size: 24px !important;
+}
+
+.console-card,
+.create-card-modern,
+.empty-card {
+  border-color: rgb(255 255 255 / 10%);
+  background: rgb(17 20 20 / 94%);
+}
+
+.admin-create-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 180px) auto;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.pile-form {
+  grid-template-columns: repeat(6, minmax(130px, 1fr)) auto;
+  align-items: end;
+}
+
+.field-select,
+.field-input,
+.cookie-textarea {
+  width: 100%;
+  border: 1px solid hsl(var(--input));
+  border-radius: 8px;
+  background: rgb(255 255 255 / 4%);
+  color: hsl(var(--foreground));
+  outline: none;
+}
+
+.field-select,
+.field-input {
+  height: 32px;
+  padding: 0 10px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 14px;
+}
+
+.user-cell {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px;
-  color: #c7d0cb;
+  gap: 2px;
+}
+
+.user-cell strong {
+  font-size: 14px;
+}
+
+.user-cell span {
+  color: #9fa7a1;
   font-size: 12px;
 }
 
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.refresh-alert {
+  padding: 12px 14px;
+  border-radius: 14px;
+  color: #e8f2ec;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 6%);
+}
+
+.refresh-alert.warning {
+  border-color: rgb(226 173 83 / 28%);
+  background: rgb(226 173 83 / 10%);
+}
+
+.refresh-alert.success {
+  border-color: rgb(83 197 129 / 26%);
+  background: rgb(83 197 129 / 10%);
+}
+
 .piles-wrap {
+  display: grid;
+  gap: 14px;
   padding-bottom: 24px;
 }
 
-.cookie-modal {
-  max-width: 720px;
+.cookie-dialog {
+  max-width: 720px !important;
 }
 
-@media (max-width: 900px) {
+.cookie-textarea {
+  min-height: 160px;
+  resize: vertical;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.5;
+}
+
+@media (max-width: 1100px) {
+  .admin-metrics-grid,
+  .user-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pile-form,
+  .admin-create-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 16px;
+  }
+
   .topbar,
-  .admin-user-head {
+  .admin-hero-panel {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .topbar h1 {
-    font-size: 24px;
+  .topbar-actions,
+  .row-actions {
+    justify-content: flex-start;
   }
 
-  .topbar-actions,
-  .admin-user-actions {
-    justify-content: flex-start;
+  .admin-metrics-grid,
+  .user-metrics-grid,
+  .pile-form,
+  .admin-create-form {
+    grid-template-columns: 1fr;
   }
 }
 </style>
