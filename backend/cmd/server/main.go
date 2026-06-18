@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"charge-dashboard/internal/api"
@@ -49,6 +50,23 @@ func main() {
 	if password == "" {
 		password = os.Getenv("CHARGE_ADMIN_PASSWORD")
 	}
+	turnstileSiteKey := os.Getenv("TURNSTILE_SITE_KEY")
+	turnstileSecretKey := os.Getenv("TURNSTILE_SECRET_KEY")
+	if (turnstileSiteKey == "") != (turnstileSecretKey == "") {
+		log.Fatalf("TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY must be configured together")
+	}
+	turnstile := auth.NewTurnstileVerifier(
+		turnstileSiteKey,
+		turnstileSecretKey,
+		os.Getenv("TURNSTILE_HOSTNAME"),
+	)
+	turnstileRequired := strings.EqualFold(os.Getenv("TURNSTILE_REQUIRED"), "true")
+	if turnstileRequired && !turnstile.Enabled() {
+		log.Fatalf("Turnstile is required but TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing")
+	}
+	if !turnstile.Enabled() {
+		log.Printf("warning: Turnstile is disabled; configure TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY in production")
+	}
 
 	const minRefreshInterval = 30 * time.Second
 	manager, err := appruntime.NewManager(absStatePath, requests, password, minRefreshInterval)
@@ -60,7 +78,7 @@ func main() {
 	}
 
 	sessions := auth.NewSessionManager(24 * time.Hour)
-	server := api.NewServer(manager, sessions)
+	server := api.NewServer(manager, sessions, turnstile, auth.NewAuthGuard())
 	mux := http.NewServeMux()
 	server.Register(mux)
 	mux.Handle("/", http.FileServer(http.Dir("../frontend/dist")))

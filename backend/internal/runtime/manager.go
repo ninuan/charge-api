@@ -100,21 +100,48 @@ func (m *Manager) InitialAdminPassword() string {
 func (m *Manager) Authenticate(username string, password string) (model.CurrentUser, error) {
 	username = strings.TrimSpace(username)
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	var matched model.User
+	found := false
 	for _, user := range m.users {
 		if user.Username != username {
 			continue
 		}
-		if !user.Enabled {
-			return model.CurrentUser{}, fmt.Errorf("用户已被禁用")
-		}
-		if !auth.CheckPassword(password, user.PasswordHash) {
-			return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
-		}
-		return publicUser(user), nil
+		matched = user
+		found = true
+		break
 	}
-	return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
+	m.mu.RUnlock()
+
+	if !found {
+		return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
+	}
+	if !matched.Enabled {
+		return model.CurrentUser{}, fmt.Errorf("用户已被禁用")
+	}
+
+	valid, needsUpgrade := auth.VerifyPassword(password, matched.PasswordHash)
+	if !valid {
+		return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
+	}
+	if needsUpgrade {
+		hash, err := auth.HashPassword(password)
+		if err != nil {
+			return model.CurrentUser{}, err
+		}
+		m.mu.Lock()
+		current, ok := m.users[matched.ID]
+		if ok {
+			current.PasswordHash = hash
+			current.UpdatedAt = time.Now()
+			m.users[matched.ID] = current
+			matched = current
+		}
+		m.mu.Unlock()
+		if err := m.Save(); err != nil {
+			return model.CurrentUser{}, err
+		}
+	}
+	return publicUser(matched), nil
 }
 
 func (m *Manager) User(id string) (model.CurrentUser, bool) {
@@ -211,6 +238,10 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	}
 
 	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+		if err := validateNewPassword(*req.Password); err != nil {
+			m.mu.Unlock()
+			return model.CurrentUser{}, err
+		}
 		hash, err := auth.HashPassword(*req.Password)
 		if err != nil {
 			m.mu.Unlock()
@@ -515,8 +546,11 @@ func (r *UserRuntime) state() persistence.UserState {
 
 func newUser(username string, password string, role model.UserRole, enabled bool) (model.User, error) {
 	username = strings.TrimSpace(username)
-	if username == "" {
-		return model.User{}, fmt.Errorf("username is required")
+	if len(username) < 3 || len(username) > 64 {
+		return model.User{}, fmt.Errorf("用户名长度需要在 3 到 64 个字符之间")
+	}
+	if err := validateNewPassword(password); err != nil {
+		return model.User{}, err
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
@@ -532,6 +566,13 @@ func newUser(username string, password string, role model.UserRole, enabled bool
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}, nil
+}
+
+func validateNewPassword(password string) error {
+	if len(password) < 8 || len(password) > 128 {
+		return fmt.Errorf("密码长度需要在 8 到 128 个字符之间")
+	}
+	return nil
 }
 
 func publicUser(user model.User) model.CurrentUser {

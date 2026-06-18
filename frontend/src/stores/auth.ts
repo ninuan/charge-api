@@ -27,12 +27,12 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string, captchaToken: string) {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username, password, captchaToken })
     });
     if (!res.ok) {
       const err = await res.json();
@@ -42,12 +42,12 @@ export const useAuthStore = defineStore("auth", () => {
     return currentUser.value;
   }
 
-  async function register(username: string, password: string) {
+  async function register(username: string, password: string, captchaToken: string) {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username, password, captchaToken })
     });
     if (!res.ok) {
       const err = await res.json();

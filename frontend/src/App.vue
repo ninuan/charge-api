@@ -28,6 +28,7 @@ import {
   TableRow as UiTableRow,
 } from "@/components/ui/table";
 import PileCard from "./components/PileCard.vue";
+import TurnstileWidget from "./components/TurnstileWidget.vue";
 import { useAuthStore } from "./stores/auth";
 import { useDashboardStore } from "./stores/dashboard";
 import type { AdminUserSummary, CurrentUser, UserRole } from "./types/dashboard";
@@ -47,6 +48,11 @@ const authMode = ref<"login" | "register">("login");
 const adminLoading = ref(false);
 const creatingUser = ref(false);
 const adminUsers = ref<AdminUserSummary[]>([]);
+const turnstileRef = ref<InstanceType<typeof TurnstileWidget> | null>(null);
+const captchaToken = ref("");
+const turnstileEnabled = ref(false);
+const turnstileSiteKey = ref("");
+const authConfigReady = ref(false);
 
 const loginForm = reactive({
   username: "",
@@ -107,10 +113,14 @@ async function login() {
     message.error("请输入用户名和密码");
     return;
   }
+  if (turnstileEnabled.value && !captchaToken.value) {
+    message.error("请先完成人机验证");
+    return;
+  }
 
   loggingIn.value = true;
   try {
-    await auth.login(loginForm.username.trim(), loginForm.password);
+    await auth.login(loginForm.username.trim(), loginForm.password, captchaToken.value);
     loginForm.password = "";
     if (auth.isAdmin) {
       await loadAdminUsers();
@@ -122,6 +132,7 @@ async function login() {
     message.error((error as Error).message);
   } finally {
     loggingIn.value = false;
+    resetCaptcha();
   }
 }
 
@@ -130,10 +141,18 @@ async function register() {
     message.error("请输入用户名和密码");
     return;
   }
+  if (loginForm.password.length < 8) {
+    message.error("密码至少需要 8 个字符");
+    return;
+  }
+  if (turnstileEnabled.value && !captchaToken.value) {
+    message.error("请先完成人机验证");
+    return;
+  }
 
   registering.value = true;
   try {
-    await auth.register(loginForm.username.trim(), loginForm.password);
+    await auth.register(loginForm.username.trim(), loginForm.password, captchaToken.value);
     loginForm.password = "";
     await store.fetchSnapshot();
     message.success("注册成功");
@@ -141,6 +160,31 @@ async function register() {
     message.error((error as Error).message);
   } finally {
     registering.value = false;
+    resetCaptcha();
+  }
+}
+
+function resetCaptcha() {
+  captchaToken.value = "";
+  turnstileRef.value?.reset();
+}
+
+async function loadAuthConfig() {
+  try {
+    const res = await fetch("/api/auth/config");
+    if (!res.ok) {
+      throw new Error("load auth config failed");
+    }
+    const config = (await res.json()) as {
+      turnstileEnabled: boolean;
+      turnstileSiteKey: string;
+    };
+    turnstileEnabled.value = config.turnstileEnabled;
+    turnstileSiteKey.value = config.turnstileSiteKey;
+    authConfigReady.value = true;
+  } catch {
+    authConfigReady.value = false;
+    message.error("安全验证配置加载失败，请刷新页面重试");
   }
 }
 
@@ -335,6 +379,7 @@ function roleLabel(role: UserRole) {
 }
 
 onMounted(async () => {
+  await loadAuthConfig();
   const user = await auth.fetchMe();
   if (!user) return;
   if (auth.isAdmin) {
@@ -370,21 +415,35 @@ onMounted(async () => {
               用户名
               <UiInput
                 v-model="loginForm.username"
-                :placeholder="authMode === 'login' ? 'admin 或你的用户名' : '设置用户名'"
+                :placeholder="authMode === 'login' ? '用户名' : '设置用户名'"
               />
             </label>
             <label>
               密码
               <UiInput v-model="loginForm.password" type="password" placeholder="请输入密码" />
             </label>
-            <UiButton type="submit" size="lg" :disabled="loggingIn || registering">
+            <TurnstileWidget
+              v-if="turnstileEnabled && turnstileSiteKey"
+              ref="turnstileRef"
+              :site-key="turnstileSiteKey"
+              :action="authMode"
+              @verified="captchaToken = $event"
+              @expired="captchaToken = ''"
+              @error="captchaToken = ''"
+            />
+            <p v-if="!authConfigReady" class="auth-security-loading">正在加载安全验证...</p>
+            <UiButton
+              type="submit"
+              size="lg"
+              :disabled="!authConfigReady || loggingIn || registering || (turnstileEnabled && !captchaToken)"
+            >
               <span v-if="authMode === 'login'">{{ loggingIn ? '登录中...' : '登录' }}</span>
               <span v-else>{{ registering ? '注册中...' : '注册并进入' }}</span>
             </UiButton>
             <UiButton
               type="button"
               variant="ghost"
-              @click="authMode = authMode === 'login' ? 'register' : 'login'"
+              @click="authMode = authMode === 'login' ? 'register' : 'login'; resetCaptcha()"
             >
               {{ authMode === 'login' ? '没有账号？注册普通用户' : '已有账号？返回登录' }}
             </UiButton>
@@ -733,6 +792,13 @@ onMounted(async () => {
   color: #bdc7c0;
   font-size: 12px;
   font-weight: 600;
+}
+
+.auth-security-loading {
+  margin: 0;
+  color: #9fa7a1;
+  font-size: 12px;
+  text-align: center;
 }
 
 .eyebrow {

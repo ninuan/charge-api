@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,18 +18,28 @@ import (
 const sessionCookieName = "charge_session"
 
 type Server struct {
-	manager  *appruntime.Manager
-	sessions *auth.SessionManager
+	manager   *appruntime.Manager
+	sessions  *auth.SessionManager
+	turnstile *auth.TurnstileVerifier
+	authGuard *auth.AuthGuard
 }
 
-func NewServer(manager *appruntime.Manager, sessions *auth.SessionManager) *Server {
+func NewServer(
+	manager *appruntime.Manager,
+	sessions *auth.SessionManager,
+	turnstile *auth.TurnstileVerifier,
+	authGuard *auth.AuthGuard,
+) *Server {
 	return &Server{
-		manager:  manager,
-		sessions: sessions,
+		manager:   manager,
+		sessions:  sessions,
+		turnstile: turnstile,
+		authGuard: authGuard,
 	}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
+	mux.HandleFunc("/api/auth/config", s.handleAuthConfig)
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/logout", s.handleLogout)
@@ -47,22 +59,52 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"turnstileEnabled": s.turnstile.Enabled(),
+		"turnstileSiteKey": s.turnstile.SiteKey(),
+	})
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
 		return
 	}
+	ip := clientIP(r)
+	if !s.allowAuthRate(w, ip) {
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req model.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
 		return
 	}
-	user, err := s.manager.Authenticate(req.Username, req.Password)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+	if len(strings.TrimSpace(req.Username)) < 3 || len(req.Username) > 64 || len(req.Password) == 0 || len(req.Password) > 128 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "用户名或密码格式无效"})
 		return
 	}
+	if !s.allowAuthIdentity(w, ip, req.Username) {
+		return
+	}
+	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "login"); err != nil {
+		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, err.Error())
+		return
+	}
+
+	user, err := s.manager.Authenticate(req.Username, req.Password)
+	if err != nil {
+		s.writeAuthFailure(w, ip, req.Username, http.StatusUnauthorized, err.Error())
+		return
+	}
+	s.authGuard.RecordSuccess(ip, req.Username)
 
 	session, err := s.sessions.Create(user.ID)
 	if err != nil {
@@ -78,10 +120,26 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
+	ip := clientIP(r)
+	if !s.allowAuthRate(w, ip) {
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req model.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	if len(strings.TrimSpace(req.Username)) < 3 || len(req.Username) > 64 || len(req.Password) < 8 || len(req.Password) > 128 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "用户名需要 3-64 个字符，密码需要 8-128 个字符"})
+		return
+	}
+	if !s.allowAuthIdentity(w, ip, req.Username) {
+		return
+	}
+	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "register"); err != nil {
+		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -90,6 +148,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	s.authGuard.RecordSuccess(ip, req.Username)
 
 	session, err := s.sessions.Create(user.ID)
 	if err != nil {
@@ -410,4 +469,60 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func methodNotAllowed(w http.ResponseWriter) {
 	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+}
+
+func (s *Server) allowAuthRate(w http.ResponseWriter, ip string) bool {
+	if allowed, retryAfter := s.authGuard.AllowRequest(ip); !allowed {
+		writeRateLimit(w, retryAfter, "请求过于频繁，请稍后再试")
+		return false
+	}
+	return true
+}
+
+func (s *Server) allowAuthIdentity(w http.ResponseWriter, ip string, username string) bool {
+	if locked, retryAfter := s.authGuard.Locked(ip, username); locked {
+		writeRateLimit(w, retryAfter, "登录或验证失败次数过多，请稍后再试")
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeAuthFailure(w http.ResponseWriter, ip string, username string, status int, message string) {
+	if locked, retryAfter := s.authGuard.RecordFailure(ip, username); locked {
+		writeRateLimit(w, retryAfter, "失败次数过多，已临时锁定")
+		return
+	}
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func writeRateLimit(w http.ResponseWriter, retryAfter time.Duration, message string) {
+	seconds := int(retryAfter.Round(time.Second).Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":             message,
+		"retryAfterSeconds": seconds,
+	})
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	parsed := net.ParseIP(host)
+	if parsed != nil && parsed.IsLoopback() {
+		if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
+			return forwarded
+		}
+		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+			return realIP
+		}
+	}
+	if host == "" {
+		return "unknown"
+	}
+	return host
 }

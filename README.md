@@ -1,6 +1,6 @@
 # Charge API Dashboard
 
-![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
@@ -15,6 +15,7 @@
 - 自助注册：普通用户可以自行注册并维护自己的充电桩。
 - 管理后台：管理员只查看流量监控大屏，并可以添加、禁用、删除用户。
 - 流量统计：按用户统计访问次数、刷新次数、远端请求次数和失败次数。
+- 登录防护：Argon2id 密码哈希、Cloudflare Turnstile、人机验证失败锁定和 IP 限流。
 - 端口看板：展示每个充电口的空闲、使用中、离线状态。
 - 时间信息：显示使用中端口的已用时间和剩余时间。
 - 主动刷新：由用户点击按钮后请求远端接口，不做自动高频轮询。
@@ -76,7 +77,12 @@ examples/capture-template/ # 脱敏请求模板
 ```bash
 cd backend
 go build -o server ./cmd/server
-CHARGE_ADMIN_PASSWORD="your-admin-password" ./server -listen :8080 -state ../charge_state.json
+CHARGE_ADMIN_PASSWORD="your-admin-password" \
+TURNSTILE_REQUIRED=true \
+TURNSTILE_SITE_KEY="your-site-key" \
+TURNSTILE_SECRET_KEY="your-secret-key" \
+TURNSTILE_HOSTNAME="charge.example.com" \
+./server -listen :8080 -state ../charge_state.json
 ```
 
 首次启动会创建 `admin` 管理员账号。也可以用 `-admin-password` 参数指定初始密码。
@@ -100,6 +106,7 @@ http://localhost:5173
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/healthz` | 健康检查 |
+| GET | `/api/auth/config` | 获取公开的人机验证配置 |
 | POST | `/api/auth/login` | 登录 |
 | POST | `/api/auth/register` | 普通用户注册 |
 | POST | `/api/auth/logout` | 退出 |
@@ -124,6 +131,32 @@ charge_state.json
 ```
 
 服务启动时会先读取本地缓存，不会自动请求远端接口。用户、Cookie、设备列表、看板快照和流量统计都会按用户独立保存。
+
+## 登录安全
+
+- 新密码使用 Argon2id 保存。
+- 旧版 SHA-256 密码在下一次成功登录时自动升级，无需用户重置。
+- 登录和注册必须通过 Cloudflare Turnstile 服务端验证。
+- 同一 IP 5 分钟最多提交 20 次登录或注册请求。
+- 同一账号或 IP 连续失败 5 次后锁定 15 分钟。
+- 验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
+
+生产环境建议在 Cloudflare Turnstile 创建 Managed Widget，并将域名加入允许列表。服务器环境文件示例：
+
+```text
+CHARGE_ADMIN_PASSWORD=your-admin-password
+TURNSTILE_REQUIRED=true
+TURNSTILE_SITE_KEY=your-site-key
+TURNSTILE_SECRET_KEY=your-secret-key
+TURNSTILE_HOSTNAME=charge.example.com
+```
+
+本地测试可以使用 Cloudflare 官方测试密钥：
+
+```text
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+```
 
 ## 说明
 
