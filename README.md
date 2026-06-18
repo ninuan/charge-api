@@ -66,40 +66,63 @@ examples/capture-template/ # 脱敏请求模板
 
 ## 快速开始
 
-### 1. 准备请求模板
-
-后端已经内置默认请求模板，普通部署不需要额外准备抓包目录。
-
-如果远端接口发生变化，也可以通过 `-capture` 参数指定自定义模板目录。
-
-### 2. 启动后端
+### 1. 安装依赖
 
 ```bash
-cd backend
-go build -o server ./cmd/server
-CHARGE_ADMIN_PASSWORD="your-admin-password" \
-TURNSTILE_REQUIRED=true \
-TURNSTILE_SITE_KEY="your-site-key" \
-TURNSTILE_SECRET_KEY="your-secret-key" \
-TURNSTILE_HOSTNAME="charge.example.com" \
-./server -listen :8080 -state ../charge_state.json
+make setup
 ```
 
-首次启动会创建 `admin` 管理员账号。也可以用 `-admin-password` 参数指定初始密码。
+只需首次安装或依赖变化后执行。
 
-### 3. 启动前端
+### 2. 一键启动本地环境
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make dev
 ```
 
-默认访问地址：
+该命令会同时启动 Go 后端和 Vite 前端，并自动使用 Cloudflare Turnstile 官方测试密钥：
 
 ```text
-http://localhost:5173
+前端地址：http://127.0.0.1:5173
+管理员账号：admin
+管理员密码：localadmin123
+本地状态：.local/charge_state.json
 ```
+
+按 `Ctrl+C` 会同时停止前后端。`.local/charge_state.json` 会保留，所以下次启动仍能读取上次的用户和设备状态。
+
+如需自定义：
+
+```bash
+LOCAL_ADMIN_PASSWORD="your-local-password" make dev
+BACKEND_PORT=18080 FRONTEND_PORT=5174 make dev
+LOCAL_STATE_FILE=/private/tmp/charge-test.json make dev
+```
+
+管理员密码只在首次创建该状态文件时生效。已有状态文件不会因为修改环境变量而重置密码。
+
+如果想清空本地测试用户、Cookie 和设备状态：
+
+```bash
+make reset-local
+```
+
+命令会先要求确认，不影响服务器上的状态文件。
+
+### 3. 一键验证
+
+```bash
+make check
+```
+
+它会依次执行：
+
+- Go 单元测试
+- Go 后端构建
+- Vue TypeScript 检查
+- 前端生产构建
+
+后端已经内置默认充电桩请求模板，不需要额外准备抓包目录。
 
 ## API
 

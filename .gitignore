@@ -5,6 +5,7 @@ frontend/src/**/*.js
 frontend/**/*.tsbuildinfo
 20260601_202646/
 charge_state.json
+.local/
 
 # Local secrets and runtime data
 .env
