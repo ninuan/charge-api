@@ -14,7 +14,12 @@ const emptySnapshot: DashboardSnapshot = {
   },
   refresh: {
     minIntervalSeconds: 30,
-    cached: false
+    attemptedDevices: 0,
+    successfulDevices: 0,
+    failedDevices: 0,
+    skippedDevices: 0,
+    cached: false,
+    partial: false
   }
 };
 

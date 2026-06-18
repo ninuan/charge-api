@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,14 +15,51 @@ import (
 	"charge-dashboard/internal/parser"
 )
 
-var ErrAuthExpired = errors.New("cookie expired or unauthorized")
+var (
+	ErrAuthExpired = errors.New("cookie expired or unauthorized")
+	ErrDeviceLimit = errors.New("device limit reached")
+)
+
+const (
+	defaultMaxConcurrency = 3
+	initialBackoff        = 30 * time.Second
+	maxBackoff            = 15 * time.Minute
+)
+
+type FetchResult struct {
+	Piles       []model.Pile
+	Failures    []DeviceFailure
+	Attempted   int
+	Skipped     int
+	NextRetryAt *time.Time
+}
+
+type DeviceFailure struct {
+	DeviceID string
+	Err      error
+	RetryAt  time.Time
+	Skipped  bool
+}
+
+type backoffState struct {
+	failures int
+	retryAt  time.Time
+}
+
+type deviceRequest struct {
+	id      string
+	request parser.CaptureRequest
+}
 
 type Client struct {
-	httpClient *http.Client
-	mu         sync.RWMutex
-	template   parser.CaptureRequest
-	requests   map[string]parser.CaptureRequest
-	order      []string
+	httpClient     *http.Client
+	mu             sync.RWMutex
+	template       parser.CaptureRequest
+	requests       map[string]parser.CaptureRequest
+	order          []string
+	backoffs       map[string]backoffState
+	maxConcurrency int
+	now            func() time.Time
 }
 
 func NewClient(requests []parser.CaptureRequest) *Client {
@@ -56,28 +94,111 @@ func newClient(requests []parser.CaptureRequest, preload bool) *Client {
 	}
 
 	return &Client{
-		httpClient: &http.Client{Timeout: 12 * time.Second},
-		template:   template,
-		requests:   requestMap,
-		order:      order,
+		httpClient:     &http.Client{Timeout: 12 * time.Second},
+		template:       template,
+		requests:       requestMap,
+		order:          order,
+		backoffs:       make(map[string]backoffState),
+		maxConcurrency: defaultMaxConcurrency,
+		now:            time.Now,
 	}
 }
 
-func (c *Client) FetchPiles() ([]model.Pile, error) {
+func (c *Client) FetchPiles(force bool) FetchResult {
 	requests := c.snapshotRequests()
-
-	piles := make([]model.Pile, 0, len(requests))
-	for _, captureRequest := range requests {
-		pile, err := c.fetchPile(captureRequest)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", captureRequest.Name, err)
-		}
-		piles = append(piles, pile)
+	result := FetchResult{
+		Piles:    make([]model.Pile, 0, len(requests)),
+		Failures: make([]DeviceFailure, 0),
 	}
-	return piles, nil
+	if len(requests) == 0 {
+		return result
+	}
+
+	now := c.now()
+	pending := make([]deviceRequest, 0, len(requests))
+	for _, request := range requests {
+		if retryAt, backedOff := c.retryAt(request.id, now); !force && backedOff {
+			result.Skipped++
+			result.Failures = append(result.Failures, DeviceFailure{
+				DeviceID: request.id,
+				RetryAt:  retryAt,
+				Skipped:  true,
+			})
+			result.NextRetryAt = earlierTime(result.NextRetryAt, retryAt)
+			continue
+		}
+		pending = append(pending, request)
+	}
+
+	type deviceResult struct {
+		id   string
+		pile model.Pile
+		err  error
+	}
+	results := make(chan deviceResult, len(pending))
+	workers := c.maxConcurrency
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(pending) {
+		workers = len(pending)
+	}
+
+	var wg sync.WaitGroup
+	jobs := make(chan deviceRequest)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for request := range jobs {
+				pile, err := c.fetchPile(request.request)
+				results <- deviceResult{id: request.id, pile: pile, err: err}
+			}
+		}()
+	}
+	go func() {
+		for _, request := range pending {
+			jobs <- request
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+
+	for item := range results {
+		result.Attempted++
+		if item.err == nil {
+			c.clearBackoff(item.id)
+			result.Piles = append(result.Piles, item.pile)
+			continue
+		}
+		retryAt := c.recordFailure(item.id)
+		result.Failures = append(result.Failures, DeviceFailure{
+			DeviceID: item.id,
+			Err:      fmt.Errorf("%s: %w", item.id, item.err),
+			RetryAt:  retryAt,
+		})
+		result.NextRetryAt = earlierTime(result.NextRetryAt, retryAt)
+	}
+
+	sort.Slice(result.Piles, func(i, j int) bool {
+		return result.Piles[i].ID < result.Piles[j].ID
+	})
+	sort.Slice(result.Failures, func(i, j int) bool {
+		return result.Failures[i].DeviceID < result.Failures[j].DeviceID
+	})
+	return result
 }
 
 func (c *Client) AddDevice(id string) error {
+	return c.addDevice(id, 0)
+}
+
+func (c *Client) AddDeviceWithLimit(id string, limit int) error {
+	return c.addDevice(id, limit)
+}
+
+func (c *Client) addDevice(id string, limit int) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return fmt.Errorf("device id is required")
@@ -85,6 +206,10 @@ func (c *Client) AddDevice(id string) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if _, exists := c.requests[id]; !exists && limit > 0 && len(c.requests) >= limit {
+		return fmt.Errorf("%w: %d", ErrDeviceLimit, limit)
+	}
 
 	request := c.template
 	request.Name = id
@@ -124,6 +249,7 @@ func (c *Client) RemoveDevice(id string) {
 	defer c.mu.Unlock()
 
 	delete(c.requests, id)
+	delete(c.backoffs, id)
 	nextOrder := c.order[:0]
 	for _, existingID := range c.order {
 		if existingID != id {
@@ -147,6 +273,7 @@ func (c *Client) UpdateCookie(cookie string) error {
 		request.Headers["Cookie"] = withCookieValue(cookie, "deviceid", id)
 		c.requests[id] = request
 	}
+	clear(c.backoffs)
 
 	return nil
 }
@@ -160,6 +287,28 @@ func (c *Client) Cookie() string {
 
 func IsAuthExpired(err error) bool {
 	return errors.Is(err, ErrAuthExpired)
+}
+
+func IsDeviceLimit(err error) bool {
+	return errors.Is(err, ErrDeviceLimit)
+}
+
+func (r FetchResult) AuthExpired() bool {
+	for _, failure := range r.Failures {
+		if failure.Err != nil && IsAuthExpired(failure.Err) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r FetchResult) FirstError() error {
+	for _, failure := range r.Failures {
+		if failure.Err != nil {
+			return failure.Err
+		}
+	}
+	return nil
 }
 
 func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, error) {
@@ -200,17 +349,57 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 	return pile, err
 }
 
-func (c *Client) snapshotRequests() []parser.CaptureRequest {
+func (c *Client) snapshotRequests() []deviceRequest {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	requests := make([]parser.CaptureRequest, 0, len(c.order))
+	requests := make([]deviceRequest, 0, len(c.order))
 	for _, id := range c.order {
 		if request, ok := c.requests[id]; ok {
-			requests = append(requests, request)
+			requests = append(requests, deviceRequest{id: id, request: request})
 		}
 	}
 	return requests
+}
+
+func (c *Client) retryAt(id string, now time.Time) (time.Time, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	state, ok := c.backoffs[id]
+	return state.retryAt, ok && now.Before(state.retryAt)
+}
+
+func (c *Client) recordFailure(id string) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	state := c.backoffs[id]
+	state.failures++
+	delay := initialBackoff
+	for i := 1; i < state.failures && delay < maxBackoff; i++ {
+		delay *= 2
+		if delay >= maxBackoff {
+			delay = maxBackoff
+			break
+		}
+	}
+	state.retryAt = c.now().Add(delay)
+	c.backoffs[id] = state
+	return state.retryAt
+}
+
+func (c *Client) clearBackoff(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.backoffs, id)
+}
+
+func earlierTime(current *time.Time, candidate time.Time) *time.Time {
+	if current == nil || candidate.Before(*current) {
+		value := candidate
+		return &value
+	}
+	return current
 }
 
 func requestDeviceID(request parser.CaptureRequest) string {

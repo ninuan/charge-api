@@ -56,8 +56,14 @@ type DashboardCounters struct {
 type RefreshInfo struct {
 	LastRemoteAt       *time.Time `json:"lastRemoteAt,omitempty"`
 	NextRemoteAt       *time.Time `json:"nextRemoteAt,omitempty"`
+	NextRetryAt        *time.Time `json:"nextRetryAt,omitempty"`
 	MinIntervalSeconds int        `json:"minIntervalSeconds"`
+	AttemptedDevices   int        `json:"attemptedDevices"`
+	SuccessfulDevices  int        `json:"successfulDevices"`
+	FailedDevices      int        `json:"failedDevices"`
+	SkippedDevices     int        `json:"skippedDevices"`
 	Cached             bool       `json:"cached"`
+	Partial            bool       `json:"partial"`
 	Message            string     `json:"message,omitempty"`
 }
 

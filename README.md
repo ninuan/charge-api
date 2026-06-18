@@ -86,20 +86,20 @@ make dev
 前端地址：http://127.0.0.1:5173
 管理员账号：admin
 管理员密码：localadmin123
-本地状态：.local/charge_state.json
+本地数据库：.local/charge_state.db
 ```
 
-按 `Ctrl+C` 会同时停止前后端。`.local/charge_state.json` 会保留，所以下次启动仍能读取上次的用户和设备状态。
+按 `Ctrl+C` 会同时停止前后端。SQLite 数据库和本地 Cookie 加密密钥会保存在 `.local/`，下次启动会继续读取原有状态。
 
 如需自定义：
 
 ```bash
 LOCAL_ADMIN_PASSWORD="your-local-password" make dev
 BACKEND_PORT=18080 FRONTEND_PORT=5174 make dev
-LOCAL_STATE_FILE=/private/tmp/charge-test.json make dev
+LOCAL_DATABASE_FILE=/private/tmp/charge-test.db make dev
 ```
 
-管理员密码只在首次创建该状态文件时生效。已有状态文件不会因为修改环境变量而重置密码。
+管理员密码只在首次创建数据库时生效。已有数据库不会因为修改环境变量而重置密码。
 
 如果想清空本地测试用户、Cookie 和设备状态：
 
@@ -107,7 +107,7 @@ LOCAL_STATE_FILE=/private/tmp/charge-test.json make dev
 make reset-local
 ```
 
-命令会先要求确认，不影响服务器上的状态文件。
+命令会先要求确认，不影响服务器上的数据库。
 
 ### 3. 一键验证
 
@@ -145,15 +145,29 @@ make check
 | DELETE | `/api/admin/users/:id` | 管理员删除用户 |
 | GET | `/api/stream` | SSE 快照推送 |
 
-## 本地缓存
+## 数据存储
 
-运行状态会保存到：
+运行状态会保存到 SQLite：
 
 ```text
-charge_state.json
+charge_state.db
 ```
 
-服务启动时会先读取本地缓存，不会自动请求远端接口。用户、Cookie、设备列表、看板快照和流量统计都会按用户独立保存。
+用户、设备列表、看板快照和流量统计会按用户独立保存。Cookie 使用 AES-256-GCM 加密后写入数据库，密钥通过 `CHARGE_COOKIE_KEY` 提供。
+
+从旧版本升级时，数据库为空的情况下会自动导入 `charge_state.json`。迁移成功后，原 JSON 会被删除，并生成不含 Cookie 的 `charge_state.json.migrated` 记录。
+
+生成服务器加密密钥：
+
+```bash
+openssl rand -base64 32
+```
+
+将输出保存到服务器环境变量中。该密钥必须保持不变，否则已有 Cookie 无法解密：
+
+```text
+CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
+```
 
 ## 登录安全
 
@@ -163,15 +177,39 @@ charge_state.json
 - 同一 IP 5 分钟最多提交 20 次登录或注册请求。
 - 同一账号或 IP 连续失败 5 次后锁定 15 分钟。
 - 验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
+- Session 默认有效期为 7 天，每个用户最多保留 5 个登录会话。
+- Session 持久化到 SQLite，数据库只保存 Token 的 SHA-256 摘要；服务重启后登录状态仍然有效。
+- 修改密码、角色、禁用或删除用户时，该用户的全部 Session 会立即失效。
+- 管理员只能访问用户管理与流量统计接口，不能访问普通用户的充电桩接口。
+- `/api/` 默认按 IP 限制为每分钟 300 次请求，超限返回 `429`。
+- JSON 接口启用请求体大小限制、未知字段检查和单对象检查。
+
+生产环境默认只允许同源请求。只有前后端使用不同域名时，才需要配置跨域白名单，多个来源使用逗号分隔：
+
+```text
+CORS_ALLOWED_ORIGINS=https://console.example.com,https://admin.example.com
+```
+
+不要使用 `*`。Nginx反向代理需要保留：
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
 
 生产环境建议在 Cloudflare Turnstile 创建 Managed Widget，并将域名加入允许列表。服务器环境文件示例：
 
 ```text
 CHARGE_ADMIN_PASSWORD=your-admin-password
+CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
 TURNSTILE_REQUIRED=true
 TURNSTILE_SITE_KEY=your-site-key
 TURNSTILE_SECRET_KEY=your-secret-key
 TURNSTILE_HOSTNAME=charge.example.com
+# 仅当前后端跨域部署时填写
+CORS_ALLOWED_ORIGINS=https://console.example.com
 ```
 
 本地测试可以使用 Cloudflare 官方测试密钥：

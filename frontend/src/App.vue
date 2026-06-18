@@ -81,7 +81,8 @@ const roleOptions = [
 
 const lastRemoteAt = computed(() => formatTime(store.refresh.lastRemoteAt));
 const nextRemoteAt = computed(() => formatTime(store.refresh.nextRemoteAt));
-const refreshMessageType = computed(() => (store.refresh.cached ? "warning" : "success"));
+const nextRetryAt = computed(() => formatTime(store.refresh.nextRetryAt));
+const refreshMessageType = computed(() => (store.refresh.cached || store.refresh.partial ? "warning" : "success"));
 const adminTotals = computed(() => {
   return adminUsers.value.reduce(
     (totals, summary) => {
@@ -611,6 +612,7 @@ onMounted(async () => {
       <section v-else class="user-dashboard">
         <div v-if="store.refresh.message" :class="['refresh-alert', refreshMessageType]">
           {{ store.refresh.message }} · 上次远端请求 {{ lastRemoteAt }} · 下次可请求 {{ nextRemoteAt }}
+          <span v-if="store.refresh.nextRetryAt"> · 最早退避重试 {{ nextRetryAt }}</span>
         </div>
 
         <div class="user-metrics-grid">
@@ -643,7 +645,7 @@ onMounted(async () => {
         <UiCard class="create-card-modern">
           <UiCardHeader>
             <UiCardTitle>动态新增充电桩</UiCardTitle>
-            <UiCardDescription>添加后会使用你的 Cookie 请求远端接口，状态彼此独立。</UiCardDescription>
+            <UiCardDescription>每个用户最多添加 10 台；刷新采用有限并发，失败设备会保留上次数据并自动退避。</UiCardDescription>
           </UiCardHeader>
           <UiCardContent>
             <form class="pile-form" @submit.prevent="addPile">

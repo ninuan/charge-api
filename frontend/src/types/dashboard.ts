@@ -39,8 +39,14 @@ export interface DashboardCounters {
 export interface RefreshInfo {
   lastRemoteAt?: string;
   nextRemoteAt?: string;
+  nextRetryAt?: string;
   minIntervalSeconds: number;
+  attemptedDevices: number;
+  successfulDevices: number;
+  failedDevices: number;
+  skippedDevices: number;
   cached: boolean;
+  partial: boolean;
   message?: string;
 }
 

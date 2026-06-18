@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"charge-dashboard/internal/model"
@@ -31,40 +30,38 @@ type UserState struct {
 	Stats     model.TrafficStats `json:"stats"`
 }
 
-func Load(path string) (State, bool, error) {
+func LoadJSON(path string) (State, bool, error) {
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return State{}, false, nil
 	}
 	if err != nil {
-		return State{}, false, fmt.Errorf("read state: %w", err)
+		return State{}, false, fmt.Errorf("read legacy state: %w", err)
 	}
 
 	var state State
 	if err := json.Unmarshal(body, &state); err != nil {
-		return State{}, false, fmt.Errorf("parse state: %w", err)
+		return State{}, false, fmt.Errorf("parse legacy state: %w", err)
 	}
 	return state, true, nil
 }
 
-func Save(path string, state State) error {
-	state.SavedAt = time.Now()
-
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("create state dir: %w", err)
+func ArchiveMigratedJSON(path string, state State) error {
+	state.Cookie = ""
+	for userID, userState := range state.UserStates {
+		userState.Cookie = ""
+		state.UserStates[userID] = userState
 	}
-
 	body, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode state: %w", err)
+		return fmt.Errorf("encode sanitized migration archive: %w", err)
 	}
-
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0600); err != nil {
-		return fmt.Errorf("write state: %w", err)
+	archivePath := path + ".migrated"
+	if err := os.WriteFile(archivePath, body, 0600); err != nil {
+		return fmt.Errorf("write sanitized migration archive: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("replace state: %w", err)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove plaintext legacy state: %w", err)
 	}
 	return nil
 }

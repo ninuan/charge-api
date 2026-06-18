@@ -5,14 +5,19 @@ frontend/src/**/*.js
 frontend/**/*.tsbuildinfo
 20260601_202646/
 charge_state.json
+*.migrated
 .local/
 
 # Local secrets and runtime data
 .env
 .env.*
 *.db
+*.db-*
 *.sqlite
+*.sqlite-*
 *.sqlite3
+*.sqlite3-*
+*.key
 *.log
 logs/*.log
 

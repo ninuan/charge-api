@@ -2,10 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +18,15 @@ import (
 	appruntime "charge-dashboard/internal/runtime"
 )
 
-const sessionCookieName = "charge_session"
+const (
+	sessionCookieName = "charge_session"
+	authBodyLimit     = 16 * 1024
+	adminBodyLimit    = 16 * 1024
+	pileBodyLimit     = 4 * 1024
+	cookieBodyLimit   = 32 * 1024
+)
+
+var deviceIDPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 
 type Server struct {
 	manager   *appruntime.Manager
@@ -81,10 +92,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req model.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+	if !decodeJSON(w, r, authBodyLimit, &req) {
 		return
 	}
 	if len(strings.TrimSpace(req.Username)) < 3 || len(req.Username) > 64 || len(req.Password) == 0 || len(req.Password) > 128 {
@@ -125,10 +134,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req model.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+	if !decodeJSON(w, r, authBodyLimit, &req) {
 		return
 	}
 	if len(strings.TrimSpace(req.Username)) < 3 || len(req.Username) > 64 || len(req.Password) < 8 || len(req.Password) > 128 {
@@ -184,7 +191,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
 		return
 	}
@@ -199,8 +206,20 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPost:
 		var req model.PileUpsertRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		if !decodeJSON(w, r, pileBodyLimit, &req) {
+			return
+		}
+		req.ID = strings.TrimSpace(req.ID)
+		if !deviceIDPattern.MatchString(req.ID) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "设备ID必须是 6-64 位数字"})
+			return
+		}
+		if len(req.Name) > 128 || len(req.Number) > 64 || len(req.Status) > 32 || len(req.Address) > 256 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "充电桩字段长度超出限制"})
+			return
+		}
+		if req.OpenNum < 0 || req.OpenNum > 20 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "充电口数量必须在 1-20 之间"})
 			return
 		}
 		pile, err := s.manager.AddPile(user.ID, req)
@@ -215,7 +234,7 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
 		return
 	}
@@ -229,6 +248,10 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
+	if !deviceIDPattern.MatchString(parts[2]) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid device id"})
+		return
+	}
 
 	if err := s.manager.DeletePile(user.ID, parts[2]); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -238,7 +261,7 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
 		return
 	}
@@ -256,7 +279,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
 		return
 	}
@@ -268,12 +291,16 @@ func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Cookie string `json:"cookie"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+	if !decodeJSON(w, r, cookieBodyLimit, &req) {
 		return
 	}
-	if strings.TrimSpace(req.Cookie) == "" {
+	req.Cookie = strings.TrimSpace(req.Cookie)
+	if req.Cookie == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cookie is required"})
+		return
+	}
+	if len(req.Cookie) > 24*1024 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cookie is too large"})
 		return
 	}
 
@@ -295,8 +322,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.manager.ListUsers())
 	case http.MethodPost:
 		var req model.UserCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		if !decodeJSON(w, r, adminBodyLimit, &req) {
 			return
 		}
 		user, err := s.manager.CreateUser(req)
@@ -311,7 +337,8 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireAdmin(w, r); !ok {
+	admin, ok := s.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 
@@ -325,8 +352,7 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 	switch r.Method {
 	case http.MethodPatch:
 		var req model.UserUpdateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		if !decodeJSON(w, r, adminBodyLimit, &req) {
 			return
 		}
 		user, err := s.manager.UpdateUser(userID, req)
@@ -334,10 +360,26 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		if req.Password != nil || req.Role != nil || req.Enabled != nil {
+			if err := s.sessions.DeleteUser(userID); err != nil {
+				log.Printf("revoke sessions for user %s: %v", userID, err)
+				clearSessionCookie(w, r)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "用户已更新，但撤销旧登录状态失败"})
+				return
+			}
+		}
+		if userID == admin.ID {
+			clearSessionCookie(w, r)
+		}
 		writeJSON(w, http.StatusOK, user)
 	case http.MethodDelete:
 		if err := s.manager.DeleteUser(userID); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := s.sessions.DeleteUser(userID); err != nil {
+			log.Printf("revoke sessions for deleted user %s: %v", userID, err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "用户已删除，但清理登录状态失败"})
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -358,7 +400,7 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
 		return
 	}
@@ -414,6 +456,18 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) (model.Cur
 	return user, true
 }
 
+func (s *Server) requireDashboardUser(w http.ResponseWriter, r *http.Request) (model.CurrentUser, bool) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return model.CurrentUser{}, false
+	}
+	if user.Role != model.RoleUser {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "ordinary user permission required"})
+		return model.CurrentUser{}, false
+	}
+	return user, true
+}
+
 func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (model.CurrentUser, bool) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil || cookie.Value == "" {
@@ -442,7 +496,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, session auth.Sessi
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 		Expires:  session.ExpiresAt,
 		MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
 	})
@@ -455,7 +509,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 	})
@@ -465,6 +519,45 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, limit int64, target any) bool {
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+	if contentType != "application/json" {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "content type must be application/json"})
+		return false
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+			return false
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain one JSON object"})
+		return false
+	}
+	return true
+}
+
+func requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback() &&
+		strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 func methodNotAllowed(w http.ResponseWriter) {

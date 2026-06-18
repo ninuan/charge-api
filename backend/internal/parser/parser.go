@@ -97,6 +97,7 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 	if openNum <= 0 {
 		openNum = 10
 	}
+	online := statusIsOnline(raw.Status)
 
 	usedMap := make(map[int]bool, len(raw.Used))
 	for _, u := range raw.Used {
@@ -114,8 +115,6 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 	ports := make([]model.Port, 0, openNum)
 	for i := 1; i <= openNum; i++ {
 		status := model.PortIdle
-		power := 0.0
-		energy := 0.0
 		var start *time.Time
 		minutes := 0
 		usedSeconds := 0
@@ -124,28 +123,20 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 
 		if usedMap[i] {
 			status = model.PortInUse
-			power = 0.45
-			energy = 0.12
 			if usedStatus, ok := usedStatusMap[i]; ok {
 				usedSeconds = usedStatus.UsedSeconds
 				usedText = formatDuration(usedSeconds)
 				remainingText = strings.TrimSpace(usedStatus.RemainingText)
 			}
 			if usedSeconds > 0 {
-				minutes = usedSeconds / 60
-			} else {
-				minutes = 15
-				usedSeconds = minutes * 60
-				usedText = formatDuration(usedSeconds)
+				minutes = (usedSeconds + 59) / 60
+				startedAt := now.Add(-time.Duration(usedSeconds) * time.Second)
+				start = &startedAt
 			}
-			startedAt := now.Add(-time.Duration(usedSeconds) * time.Second)
-			start = &startedAt
 		}
 
-		if !strings.Contains(raw.Status, "在线") {
+		if !online {
 			status = model.PortOffline
-			power = 0
-			energy = 0
 			start = nil
 			minutes = 0
 			usedSeconds = 0
@@ -156,8 +147,6 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 		ports = append(ports, model.Port{
 			ID:            i,
 			Status:        status,
-			PowerKW:       power,
-			EnergyKWh:     energy,
 			UpdatedAt:     now,
 			StartedAt:     start,
 			SessionMin:    minutes,
@@ -169,7 +158,7 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 
 	usedPortIDs := make([]int, 0, len(usedMap))
 	for portID, used := range usedMap {
-		if used {
+		if online && used {
 			usedPortIDs = append(usedPortIDs, portID)
 		}
 	}
@@ -182,13 +171,28 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 		Status:      raw.Status,
 		Address:     raw.Address,
 		OpenNum:     openNum,
-		Online:      strings.Contains(raw.Status, "在线"),
+		Online:      online,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		Source:      source,
 		Ports:       ports,
 		UsedPortIDs: usedPortIDs,
 	}, nil
+}
+
+func statusIsOnline(status string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if normalized == "" {
+		return false
+	}
+
+	offlineMarkers := []string{"不在线", "离线", "未连接", "断开", "offline"}
+	for _, marker := range offlineMarkers {
+		if strings.Contains(normalized, marker) {
+			return false
+		}
+	}
+	return strings.Contains(normalized, "在线") || strings.Contains(normalized, "online")
 }
 
 func compactPayload(body []byte) string {

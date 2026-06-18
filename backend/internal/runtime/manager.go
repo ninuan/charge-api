@@ -17,16 +17,21 @@ import (
 	"charge-dashboard/internal/store"
 )
 
-const stateVersion = 2
+const (
+	stateVersion      = 2
+	maxDevicesPerUser = 10
+)
 
 type Manager struct {
 	mu          sync.RWMutex
-	statePath   string
+	saveMu      sync.Mutex
+	repository  *persistence.Store
 	requests    []parser.CaptureRequest
 	minInterval time.Duration
 	users       map[string]model.User
 	runtimes    map[string]*UserRuntime
 	initialPass string
+	migrated    bool
 }
 
 type UserRuntime struct {
@@ -38,18 +43,46 @@ type UserRuntime struct {
 	minInterval     time.Duration
 }
 
-func NewManager(statePath string, requests []parser.CaptureRequest, adminPassword string, minInterval time.Duration) (*Manager, error) {
+func NewManager(
+	repository *persistence.Store,
+	legacyJSONPath string,
+	requests []parser.CaptureRequest,
+	adminPassword string,
+	minInterval time.Duration,
+) (*Manager, error) {
 	m := &Manager{
-		statePath:   statePath,
+		repository:  repository,
 		requests:    requests,
 		minInterval: minInterval,
 		users:       make(map[string]model.User),
 		runtimes:    make(map[string]*UserRuntime),
 	}
 
-	state, hasState, err := persistence.Load(statePath)
+	state, hasState, err := repository.Load()
 	if err != nil {
 		return nil, err
+	}
+	if hasState && legacyJSONPath != "" {
+		legacyState, exists, err := persistence.LoadJSON(legacyJSONPath)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			if err := persistence.ArchiveMigratedJSON(legacyJSONPath, legacyState); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if !hasState && legacyJSONPath != "" {
+		legacyState, exists, err := persistence.LoadJSON(legacyJSONPath)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			state = legacyState
+			hasState = true
+			m.migrated = true
+		}
 	}
 
 	if hasState && len(state.Users) > 0 {
@@ -57,6 +90,14 @@ func NewManager(statePath string, requests []parser.CaptureRequest, adminPasswor
 			m.users[user.ID] = user
 			userState := state.UserStates[user.ID]
 			m.runtimes[user.ID] = newUserRuntime(requests, userState, minInterval)
+		}
+		if m.migrated {
+			if err := m.Save(); err != nil {
+				return nil, err
+			}
+			if err := persistence.ArchiveMigratedJSON(legacyJSONPath, state); err != nil {
+				return nil, err
+			}
 		}
 		return m, nil
 	}
@@ -90,11 +131,20 @@ func NewManager(statePath string, requests []parser.CaptureRequest, adminPasswor
 	if err := m.Save(); err != nil {
 		return nil, err
 	}
+	if m.migrated {
+		if err := persistence.ArchiveMigratedJSON(legacyJSONPath, state); err != nil {
+			return nil, err
+		}
+	}
 	return m, nil
 }
 
 func (m *Manager) InitialAdminPassword() string {
 	return m.initialPass
+}
+
+func (m *Manager) MigratedLegacyJSON() bool {
+	return m.migrated
 }
 
 func (m *Manager) Authenticate(username string, password string) (model.CurrentUser, error) {
@@ -259,6 +309,19 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	if req.Enabled != nil {
 		user.Enabled = *req.Enabled
 	}
+	activeAdmins := 0
+	for userID, existing := range m.users {
+		if userID == id {
+			existing = user
+		}
+		if existing.Role == model.RoleAdmin && existing.Enabled {
+			activeAdmins++
+		}
+	}
+	if activeAdmins == 0 {
+		m.mu.Unlock()
+		return model.CurrentUser{}, fmt.Errorf("至少保留一个可用管理员")
+	}
 	user.UpdatedAt = time.Now()
 	m.users[id] = user
 	m.mu.Unlock()
@@ -304,9 +367,12 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 		return model.Pile{}, err
 	}
 	runtime.recordRequest()
-	if err := runtime.client.AddDevice(req.ID); err != nil {
+	if err := runtime.client.AddDeviceWithLimit(req.ID, maxDevicesPerUser); err != nil {
 		runtime.recordFailure(false)
 		_ = m.Save()
+		if charger.IsDeviceLimit(err) {
+			return model.Pile{}, fmt.Errorf("每个用户最多添加 %d 台充电桩", maxDevicesPerUser)
+		}
 		return model.Pile{}, err
 	}
 	if err := runtime.refresh(true); err != nil {
@@ -320,6 +386,9 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 			return pile, m.Save()
 		}
 	}
+	runtime.client.RemoveDevice(req.ID)
+	runtime.recordFailure(false)
+	_ = m.Save()
 	return model.Pile{}, fmt.Errorf("device %s was not returned by remote API", req.ID)
 }
 
@@ -391,6 +460,9 @@ func (m *Manager) Unsubscribe(userID string, ch chan model.DashboardSnapshot) {
 }
 
 func (m *Manager) Save() error {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
+
 	m.mu.RLock()
 	users := make([]model.User, 0, len(m.users))
 	userStates := make(map[string]persistence.UserState, len(m.runtimes))
@@ -405,7 +477,7 @@ func (m *Manager) Save() error {
 	}
 	m.mu.RUnlock()
 
-	return persistence.Save(m.statePath, persistence.State{
+	return m.repository.Save(persistence.State{
 		Version:    stateVersion,
 		Users:      users,
 		UserStates: userStates,
@@ -478,30 +550,68 @@ func (r *UserRuntime) refresh(force bool) error {
 		return nil
 	}
 
-	piles, err := r.client.FetchPiles()
-	if err != nil {
-		if charger.IsAuthExpired(err) {
-			r.store.SetRefreshInfo(model.RefreshInfo{
-				MinIntervalSeconds: int(r.minInterval.Seconds()),
-				Cached:             true,
-				Message:            "Cookie 可能已过期，请更新 Cookie 后重试",
-			})
-		}
-		return err
+	result := r.client.FetchPiles(force)
+	if result.Attempted > 0 {
+		r.lastRemoteFetch = time.Now()
+		r.stats.RemoteFetches += result.Attempted
+		r.stats.LastRemoteFetchAt = &r.lastRemoteFetch
+	}
+	if len(result.Piles) > 0 {
+		r.store.MergeCapturePiles(result.Piles)
 	}
 
-	r.store.ReplaceCapturePiles(piles)
-	r.lastRemoteFetch = time.Now()
-	r.stats.RemoteFetches++
-	r.stats.LastRemoteFetchAt = &r.lastRemoteFetch
-	next := r.lastRemoteFetch.Add(r.minInterval)
-	r.store.SetRefreshInfo(model.RefreshInfo{
-		LastRemoteAt:       &r.lastRemoteFetch,
-		NextRemoteAt:       &next,
+	failed := 0
+	for _, failure := range result.Failures {
+		if !failure.Skipped {
+			failed++
+		}
+	}
+	info := model.RefreshInfo{
+		NextRetryAt:        result.NextRetryAt,
 		MinIntervalSeconds: int(r.minInterval.Seconds()),
-		Cached:             false,
-		Message:            "已请求远端接口",
+		AttemptedDevices:   result.Attempted,
+		SuccessfulDevices:  len(result.Piles),
+		FailedDevices:      failed,
+		SkippedDevices:     result.Skipped,
+		Cached:             len(result.Piles) == 0,
+		Partial:            len(result.Piles) > 0 && (failed > 0 || result.Skipped > 0),
+	}
+	if !r.lastRemoteFetch.IsZero() {
+		lastRemoteAt := r.lastRemoteFetch
+		nextRemoteAt := lastRemoteAt.Add(r.minInterval)
+		info.LastRemoteAt = &lastRemoteAt
+		info.NextRemoteAt = &nextRemoteAt
+	}
+	switch {
+	case result.AuthExpired() && len(result.Piles) == 0:
+		info.Message = "Cookie 可能已过期，请更新 Cookie 后重试"
+	case len(result.Piles) > 0 && (failed > 0 || result.Skipped > 0):
+		info.Message = fmt.Sprintf("已更新 %d 台，%d 台失败，%d 台退避中；失败设备保留上次数据", len(result.Piles), failed, result.Skipped)
+	case len(result.Piles) > 0:
+		info.Message = fmt.Sprintf("已更新 %d 台充电桩", len(result.Piles))
+	case result.Skipped > 0 && failed == 0:
+		info.Message = fmt.Sprintf("%d 台设备处于请求退避期，已返回缓存数据", result.Skipped)
+	case failed > 0:
+		info.Message = fmt.Sprintf("%d 台设备请求失败，已保留上次数据", failed)
+	default:
+		info.Message = "没有需要刷新的充电桩"
+	}
+	r.store.SetRefreshInfo(model.RefreshInfo{
+		LastRemoteAt:       info.LastRemoteAt,
+		NextRemoteAt:       info.NextRemoteAt,
+		NextRetryAt:        info.NextRetryAt,
+		MinIntervalSeconds: info.MinIntervalSeconds,
+		AttemptedDevices:   info.AttemptedDevices,
+		SuccessfulDevices:  info.SuccessfulDevices,
+		FailedDevices:      info.FailedDevices,
+		SkippedDevices:     info.SkippedDevices,
+		Cached:             info.Cached,
+		Partial:            info.Partial,
+		Message:            info.Message,
 	})
+	if len(result.Piles) == 0 && failed > 0 {
+		return result.FirstError()
+	}
 	return nil
 }
 

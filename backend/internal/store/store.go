@@ -128,25 +128,16 @@ func (s *DashboardStore) DeletePile(id string) bool {
 	return true
 }
 
-func (s *DashboardStore) ReplaceCapturePiles(captured []model.Pile) {
+func (s *DashboardStore) MergeCapturePiles(captured []model.Pile) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	next := make(map[string]model.Pile, len(captured))
-	for _, pile := range s.piles {
-		if pile.Source == "manual" {
-			next[pile.ID] = pile
-		}
-	}
 
 	for _, pile := range captured {
 		if existing, ok := s.piles[pile.ID]; ok {
 			pile.CreatedAt = existing.CreatedAt
 		}
-		next[pile.ID] = pile
+		s.piles[pile.ID] = pile
 	}
-
-	s.piles = next
 	s.publishLocked()
 }
 
