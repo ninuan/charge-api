@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { CircleCheck, Clock3, MapPin, MoreVertical, PlugZap, Trash2, WifiOff, Zap } from "@lucide/vue";
-import { Badge as UiBadge } from "@/components/ui/badge";
+import { BatteryCharging, CircleCheck, Clock3, MapPin, MoreVertical, PlugZap, Trash2, WifiOff, Zap } from "@lucide/vue";
 import { Button as UiButton } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +11,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { getPortPresentation } from "@/lib/port-status";
+import { getPilePresentation } from "@/lib/pile-status";
 import type { Pile, Port } from "@/types/dashboard";
 
 const props = defineProps<{ pile: Pile }>();
@@ -20,22 +20,48 @@ const confirmOpen = ref(false);
 
 const inUseCount = computed(() => props.pile.ports.filter((port) => port.status === "in_use").length);
 const idleCount = computed(() => props.pile.ports.filter((port) => port.status === "idle").length);
+const pilePresentation = computed(() => getPilePresentation(props.pile));
 
 function iconFor(port: Port) {
   const icon = getPortPresentation(port.status).icon;
   return icon === "Zap" ? Zap : icon === "WifiOff" ? WifiOff : CircleCheck;
 }
+
+function pileClass() {
+  if (pilePresentation.value.tone === "charging") return "pile-panel pile-panel--charging";
+  if (pilePresentation.value.tone === "offline") return "pile-panel pile-panel--offline";
+  return "pile-panel pile-panel--idle";
+}
+
+function portClass(port: Port) {
+  if (port.status === "in_use") return "port-tile port-tile--charging";
+  if (port.status === "offline") return "port-tile port-tile--offline";
+  return "port-tile port-tile--idle";
+}
+
+function pileIcon() {
+  if (pilePresentation.value.tone === "charging") return BatteryCharging;
+  if (pilePresentation.value.tone === "offline") return WifiOff;
+  return CircleCheck;
+}
+
+function pileBadgeClass() {
+  if (pilePresentation.value.tone === "charging") return "pile-state-badge pile-state-badge--charging";
+  if (pilePresentation.value.tone === "offline") return "pile-state-badge pile-state-badge--offline";
+  return "pile-state-badge pile-state-badge--idle";
+}
 </script>
 
 <template>
-  <article class="pile-panel">
+  <article :class="pileClass()" :data-pile-state="pilePresentation.tone">
     <header class="flex flex-col gap-4 border-b border-border/70 p-5 sm:flex-row sm:items-start sm:justify-between lg:p-6">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <h2 class="truncate text-xl font-bold tracking-tight">{{ pile.name }}</h2>
-          <UiBadge :variant="pile.online ? 'default' : 'destructive'">
-            {{ pile.online ? "在线" : "离线" }}
-          </UiBadge>
+          <span :class="pileBadgeClass()">
+            <component :is="pileIcon()" />
+            {{ pilePresentation.label }}
+          </span>
         </div>
         <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span class="inline-flex items-center gap-1.5"><PlugZap class="size-3.5" />桩号 {{ pile.number || pile.id }}</span>
@@ -57,7 +83,8 @@ function iconFor(port: Port) {
       <section
         v-for="port in pile.ports"
         :key="port.id"
-        :class="['port-tile', `port-tile--${getPortPresentation(port.status).tone}`]"
+        :class="portClass(port)"
+        :data-port-state="getPortPresentation(port.status).tone"
       >
         <div class="flex items-center justify-between gap-2">
           <span class="font-mono text-lg font-bold tabular-nums">{{ String(port.id).padStart(2, "0") }}</span>

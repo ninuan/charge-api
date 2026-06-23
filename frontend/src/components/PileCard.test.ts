@@ -31,5 +31,7 @@ describe("PileCard", () => {
     expect(wrapper.text()).toContain("离线");
     expect(wrapper.text()).toContain("已用 12 分钟");
     expect(wrapper.text()).toContain("剩余 48 分钟");
+    expect(wrapper.text()).toContain("充电中");
+    expect(wrapper.get("article").attributes("data-pile-state")).toBe("charging");
   });
 });

@@ -30,6 +30,12 @@
     --chart-3: 6 61% 47%;
     --chart-4: 197 52% 42%;
     --chart-5: 260 35% 52%;
+    --status-idle: 154 30% 38%;
+    --status-charging: 38 48% 45%;
+    --status-offline: 7 38% 48%;
+    --status-idle-foreground: 154 36% 25%;
+    --status-charging-foreground: 36 48% 27%;
+    --status-offline-foreground: 7 44% 36%;
     --radius: 0.85rem;
   }
 
@@ -53,6 +59,12 @@
     --border: 155 10% 21%;
     --input: 155 10% 25%;
     --ring: 151 48% 59%;
+    --status-idle: 151 32% 61%;
+    --status-charging: 39 52% 65%;
+    --status-offline: 7 48% 66%;
+    --status-idle-foreground: 151 42% 73%;
+    --status-charging-foreground: 39 62% 74%;
+    --status-offline-foreground: 7 58% 76%;
   }
 
   * {
@@ -149,6 +161,48 @@
     @apply relative rounded-2xl border border-border/80 bg-card/90 shadow-[0_14px_45px_hsl(155_25%_15%/.055)] backdrop-blur-sm;
   }
 
+  .pile-panel {
+    @apply overflow-hidden border-t-[3px] transition-colors duration-200;
+  }
+
+  .pile-panel--idle {
+    border-top-color: hsl(var(--status-idle) / 0.48);
+  }
+
+  .pile-panel--charging {
+    border-top-color: hsl(var(--status-charging) / 0.58);
+  }
+
+  .pile-panel--offline {
+    border-top-color: hsl(var(--status-offline) / 0.48);
+  }
+
+  .pile-state-badge {
+    @apply inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-bold;
+  }
+
+  .pile-state-badge svg {
+    @apply size-3.5;
+  }
+
+  .pile-state-badge--idle {
+    border-color: hsl(var(--status-idle) / 0.22);
+    background: hsl(var(--status-idle) / 0.075);
+    color: hsl(var(--status-idle-foreground));
+  }
+
+  .pile-state-badge--charging {
+    border-color: hsl(var(--status-charging) / 0.25);
+    background: hsl(var(--status-charging) / 0.085);
+    color: hsl(var(--status-charging-foreground));
+  }
+
+  .pile-state-badge--offline {
+    border-color: hsl(var(--status-offline) / 0.22);
+    background: hsl(var(--status-offline) / 0.07);
+    color: hsl(var(--status-offline-foreground));
+  }
+
   .metric-panel {
     @apply relative overflow-hidden rounded-2xl border border-border/80 bg-card/90 p-5 shadow-[0_12px_34px_hsl(155_25%_15%/.045)];
   }
@@ -193,16 +247,42 @@
   .refresh-status--warning { @apply border-amber-700/20 bg-amber-50 text-amber-950; }
 
   .port-tile {
-    @apply min-h-32 rounded-xl border p-3.5 transition-[transform,box-shadow,border-color] duration-200;
+    @apply relative min-h-32 rounded-xl border bg-card p-3.5 text-foreground transition-[background-color,border-color] duration-200;
   }
 
   .port-tile:hover {
-    transform: translateY(-2px);
+    background: hsl(var(--muted) / 0.45);
   }
 
-  .port-tile--idle { @apply border-emerald-800/15 bg-emerald-50 text-emerald-950; }
-  .port-tile--charging { @apply border-amber-800/20 bg-amber-50 text-amber-950 shadow-[inset_0_3px_0_hsl(38_75%_53%)]; }
-  .port-tile--offline { @apply border-red-800/15 bg-red-50 text-red-950; }
+  .port-tile--idle {
+    border-color: hsl(var(--status-idle) / 0.18);
+    background: hsl(var(--status-idle) / 0.045);
+    box-shadow: inset 3px 0 0 hsl(var(--status-idle) / 0.52);
+  }
+
+  .port-tile--charging {
+    border-color: hsl(var(--status-charging) / 0.22);
+    background: hsl(var(--status-charging) / 0.06);
+    box-shadow: inset 3px 0 0 hsl(var(--status-charging) / 0.62);
+  }
+
+  .port-tile--offline {
+    border-color: hsl(var(--status-offline) / 0.18);
+    background: hsl(var(--status-offline) / 0.04);
+    box-shadow: inset 3px 0 0 hsl(var(--status-offline) / 0.48);
+  }
+
+  .port-tile--idle svg {
+    color: hsl(var(--status-idle));
+  }
+
+  .port-tile--charging svg {
+    color: hsl(var(--status-charging));
+  }
+
+  .port-tile--offline svg {
+    color: hsl(var(--status-offline));
+  }
 
   .form-field {
     @apply grid gap-2 text-sm font-medium;
