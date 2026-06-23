@@ -1,235 +1,95 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { CircleCheck, Clock3, MapPin, MoreVertical, PlugZap, Trash2, WifiOff, Zap } from "@lucide/vue";
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button as UiButton } from "@/components/ui/button";
 import {
-  Card as UiCard,
-  CardContent as UiCardContent,
-  CardHeader as UiCardHeader,
-  CardTitle as UiCardTitle,
-} from "@/components/ui/card";
-import type { Pile, Port } from "../types/dashboard";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { getPortPresentation } from "@/lib/port-status";
+import type { Pile, Port } from "@/types/dashboard";
 
-const props = defineProps<{
-  pile: Pile;
-}>();
+const props = defineProps<{ pile: Pile }>();
+const emit = defineEmits<{ removePile: [pileId: string] }>();
+const confirmOpen = ref(false);
 
-const emit = defineEmits<{
-  removePile: [pileId: string];
-}>();
+const inUseCount = computed(() => props.pile.ports.filter((port) => port.status === "in_use").length);
+const idleCount = computed(() => props.pile.ports.filter((port) => port.status === "idle").length);
 
-const inUseCount = computed(() => props.pile.ports.filter((p) => p.status === "in_use").length);
-
-function statusLabel(port: Port) {
-  if (port.status === "in_use") return "充电中";
-  if (port.status === "offline") return "离线";
-  return "空闲";
-}
-
-function statusClass(port: Port) {
-  if (port.status === "in_use") return "port-cell in-use";
-  if (port.status === "offline") return "port-cell offline";
-  return "port-cell idle";
+function iconFor(port: Port) {
+  const icon = getPortPresentation(port.status).icon;
+  return icon === "Zap" ? Zap : icon === "WifiOff" ? WifiOff : CircleCheck;
 }
 </script>
 
 <template>
-  <UiCard class="pile-card">
-    <UiCardHeader class="pile-head">
-      <div>
-        <UiCardTitle>{{ pile.name }}</UiCardTitle>
-        <p>桩号 {{ pile.number || pile.id }}</p>
+  <article class="pile-panel">
+    <header class="flex flex-col gap-4 border-b border-border/70 p-5 sm:flex-row sm:items-start sm:justify-between lg:p-6">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="truncate text-xl font-bold tracking-tight">{{ pile.name }}</h2>
+          <UiBadge :variant="pile.online ? 'default' : 'destructive'">
+            {{ pile.online ? "在线" : "离线" }}
+          </UiBadge>
+        </div>
+        <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span class="inline-flex items-center gap-1.5"><PlugZap class="size-3.5" />桩号 {{ pile.number || pile.id }}</span>
+          <span v-if="pile.address" class="inline-flex items-center gap-1.5"><MapPin class="size-3.5" />{{ pile.address }}</span>
+        </div>
       </div>
-      <div class="head-actions">
-        <UiBadge :variant="pile.online ? 'default' : 'destructive'">{{ pile.status }}</UiBadge>
-        <UiButton variant="destructive" size="sm" @click="emit('removePile', pile.id)">删除桩</UiButton>
+      <div class="flex items-center justify-between gap-3 sm:justify-end">
+        <div class="flex gap-4 text-right text-xs text-muted-foreground">
+          <span><strong class="block font-mono text-lg text-foreground">{{ inUseCount }}</strong>使用中</span>
+          <span><strong class="block font-mono text-lg text-foreground">{{ idleCount }}</strong>空闲</span>
+        </div>
+        <UiButton variant="ghost" aria-label="删除充电桩" title="删除充电桩" @click="confirmOpen = true">
+          <MoreVertical />
+        </UiButton>
       </div>
-    </UiCardHeader>
+    </header>
 
-    <UiCardContent>
-      <div class="meta-grid">
-        <div>
-          <span>总口数</span>
-          <strong>{{ pile.openNum }}</strong>
+    <div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5 lg:p-6">
+      <section
+        v-for="port in pile.ports"
+        :key="port.id"
+        :class="['port-tile', `port-tile--${getPortPresentation(port.status).tone}`]"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-mono text-lg font-bold tabular-nums">{{ String(port.id).padStart(2, "0") }}</span>
+          <component :is="iconFor(port)" class="size-4" aria-hidden="true" />
         </div>
-        <div>
-          <span>使用中</span>
-          <strong>{{ inUseCount }}</strong>
+        <p class="mt-5 text-sm font-semibold">{{ getPortPresentation(port.status).label }}</p>
+        <div class="mt-2 min-h-9 space-y-1 text-[11px] leading-4 opacity-80">
+          <p v-if="port.status === 'in_use' && port.usedText" class="flex items-center gap-1">
+            <Clock3 class="size-3" />已用 {{ port.usedText }}
+          </p>
+          <p v-if="port.status === 'in_use' && port.remainingText">剩余 {{ port.remainingText }}</p>
+          <p v-if="port.status !== 'in_use'">等待连接</p>
         </div>
-        <div>
-          <span>来源</span>
-          <strong>{{ pile.source === 'manual' ? '手动添加' : '远端接口' }}</strong>
-        </div>
-      </div>
+      </section>
+    </div>
+  </article>
 
-      <div class="ports-grid">
-        <div v-for="port in pile.ports" :key="port.id" :class="statusClass(port)">
-          <div class="port-top">
-            <strong>{{ port.id }}</strong>
-            <span>{{ statusLabel(port) }}</span>
-          </div>
-          <div class="port-time">
-            <small v-if="port.status === 'in_use' && port.usedText">已用 {{ port.usedText }}</small>
-            <small v-if="port.status === 'in_use' && port.remainingText">剩余 {{ port.remainingText }}</small>
-            <small v-if="port.status !== 'in_use'">--</small>
-          </div>
-        </div>
-      </div>
-    </UiCardContent>
-  </UiCard>
+  <Dialog v-model:open="confirmOpen">
+    <DialogContent class="max-w-md">
+      <DialogHeader>
+        <DialogTitle>删除“{{ pile.name }}”？</DialogTitle>
+        <DialogDescription>设备会从你的看板中移除。该操作不会影响充电桩本身。</DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <UiButton variant="ghost" @click="confirmOpen = false">取消</UiButton>
+        <UiButton
+          variant="destructive"
+          @click="confirmOpen = false; emit('removePile', pile.id)"
+        >
+          <Trash2 />确认删除
+        </UiButton>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
-
-<style scoped>
-.pile-card {
-  border-color: rgb(255 255 255 / 10%);
-  background:
-    radial-gradient(circle at top left, rgb(58 171 116 / 13%), transparent 38%),
-    rgb(17 20 20 / 94%);
-}
-
-.pile-head {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: flex-start;
-}
-
-.pile-head p {
-  margin: 8px 0 0;
-  color: #9fa7a1;
-  font-size: 13px;
-}
-
-.head-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.meta-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.meta-grid div {
-  padding: 10px 12px;
-  border: 1px solid rgb(255 255 255 / 8%);
-  border-radius: 12px;
-  background: rgb(255 255 255 / 4%);
-}
-
-.meta-grid span {
-  display: block;
-  color: #9fa7a1;
-  font-size: 12px;
-}
-
-.meta-grid strong {
-  display: block;
-  margin-top: 4px;
-  font-size: 18px;
-}
-
-.ports-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 10px;
-}
-
-.port-cell {
-  position: relative;
-  overflow: hidden;
-  min-height: 94px;
-  border: 1px solid rgb(255 255 255 / 8%);
-  border-radius: 14px;
-  padding: 11px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  color: #fff;
-}
-
-.port-cell::after {
-  content: "";
-  position: absolute;
-  inset: auto -20px -30px auto;
-  width: 70px;
-  height: 70px;
-  border-radius: 999px;
-  opacity: 0.22;
-}
-
-.port-top,
-.port-time {
-  position: relative;
-  z-index: 1;
-}
-
-.port-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.port-top strong {
-  font-size: 18px;
-}
-
-.port-top span {
-  font-size: 12px;
-  opacity: 0.88;
-}
-
-.port-time {
-  display: grid;
-  gap: 3px;
-  margin-top: 10px;
-  color: rgb(255 255 255 / 86%);
-  font-size: 11px;
-  line-height: 1.25;
-}
-
-.port-cell.idle {
-  background: linear-gradient(145deg, rgb(51 66 61 / 92%), rgb(34 42 39 / 92%));
-}
-
-.port-cell.idle::after {
-  background: #a7c4b4;
-}
-
-.port-cell.in-use {
-  background: linear-gradient(145deg, rgb(12 122 84 / 96%), rgb(12 75 62 / 96%));
-}
-
-.port-cell.in-use::after {
-  background: #7df0b0;
-}
-
-.port-cell.offline {
-  background: linear-gradient(145deg, rgb(127 61 61 / 96%), rgb(72 45 45 / 96%));
-}
-
-.port-cell.offline::after {
-  background: #ff9d91;
-}
-
-@media (max-width: 760px) {
-  .pile-head {
-    flex-direction: column;
-  }
-
-  .head-actions {
-    justify-content: flex-start;
-  }
-
-  .meta-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

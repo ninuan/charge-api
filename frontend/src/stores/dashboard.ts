@@ -31,6 +31,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const stats = computed(() => snapshot.value.statistics);
   const refresh = computed(() => snapshot.value.refresh);
 
+  function setSnapshot(nextSnapshot: DashboardSnapshot) {
+    snapshot.value = nextSnapshot;
+  }
+
   function reset() {
     snapshot.value = {
       ...emptySnapshot,
@@ -62,7 +66,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
       const err = await res.json();
       throw new Error(err.error ?? "add pile failed");
     }
-    return (await res.json()) as Pile;
+    const pile = (await res.json()) as Pile;
+    await fetchSnapshot();
+    return pile;
   }
 
   async function deletePile(id: string) {
@@ -74,6 +80,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       const err = await res.json();
       throw new Error(err.error ?? "delete pile failed");
     }
+    await fetchSnapshot();
   }
 
   async function refreshFromCapture() {
@@ -108,6 +115,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     piles,
     stats,
     refresh,
+    setSnapshot,
     reset,
     fetchSnapshot,
     addPile,

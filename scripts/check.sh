@@ -11,19 +11,25 @@ if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
   exit 1
 fi
 
-echo "1/3 Go 测试"
+echo "1/4 Go 测试"
 (
   cd "$ROOT_DIR/backend"
   GOCACHE="$GO_CACHE" go test ./...
 )
 
-echo "2/3 Go 构建"
+echo "2/4 Go 构建"
 (
   cd "$ROOT_DIR/backend"
   GOCACHE="$GO_CACHE" go build -o "$BUILD_OUTPUT" ./cmd/server
 )
 
-echo "3/3 前端类型检查与生产构建"
+echo "3/4 前端测试"
+(
+  cd "$ROOT_DIR/frontend"
+  npm test
+)
+
+echo "4/4 前端类型检查与生产构建"
 (
   cd "$ROOT_DIR/frontend"
   npm run build

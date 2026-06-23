@@ -5,6 +5,7 @@ import type { CurrentUser } from "../types/dashboard";
 export const useAuthStore = defineStore("auth", () => {
   const currentUser = ref<CurrentUser | null>(null);
   const loading = ref(false);
+  const initialized = ref(false);
 
   const isLoggedIn = computed(() => currentUser.value !== null);
   const isAdmin = computed(() => currentUser.value?.role === "admin");
@@ -24,6 +25,7 @@ export const useAuthStore = defineStore("auth", () => {
       return currentUser.value;
     } finally {
       loading.value = false;
+      initialized.value = true;
     }
   }
 
@@ -39,6 +41,7 @@ export const useAuthStore = defineStore("auth", () => {
       throw new Error(err.error ?? "login failed");
     }
     currentUser.value = (await res.json()) as CurrentUser;
+    initialized.value = true;
     return currentUser.value;
   }
 
@@ -60,6 +63,7 @@ export const useAuthStore = defineStore("auth", () => {
       throw new Error(err.error ?? "register failed");
     }
     currentUser.value = (await res.json()) as CurrentUser;
+    initialized.value = true;
     return currentUser.value;
   }
 
@@ -69,11 +73,13 @@ export const useAuthStore = defineStore("auth", () => {
       credentials: "include"
     });
     currentUser.value = null;
+    initialized.value = true;
   }
 
   return {
     currentUser,
     loading,
+    initialized,
     isLoggedIn,
     isAdmin,
     fetchMe,
