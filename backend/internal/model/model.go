@@ -36,6 +36,7 @@ type Pile struct {
 	Source      string    `json:"source"`
 	Ports       []Port    `json:"ports"`
 	UsedPortIDs []int     `json:"usedPortIds"`
+	SortOrder   int       `json:"sortOrder"`
 }
 
 type DashboardSnapshot struct {
@@ -84,21 +85,25 @@ const (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"passwordHash,omitempty"`
-	Role         UserRole  `json:"role"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	PasswordHash   string    `json:"passwordHash,omitempty"`
+	Role           UserRole  `json:"role"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	DeviceLimit    int       `json:"deviceLimit"`
+	RefreshEnabled bool      `json:"refreshEnabled"`
 }
 
 type CurrentUser struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	Role      UserRole  `json:"role"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	Role           UserRole  `json:"role"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"createdAt"`
+	DeviceLimit    int       `json:"deviceLimit"`
+	RefreshEnabled bool      `json:"refreshEnabled"`
 }
 
 type LoginRequest struct {
@@ -107,19 +112,81 @@ type LoginRequest struct {
 	CaptchaToken  string `json:"captchaToken"`
 	CaptchaID     string `json:"captchaId,omitempty"`
 	CaptchaAnswer string `json:"captchaAnswer,omitempty"`
+	InviteCode    string `json:"inviteCode,omitempty"`
 }
 
 type UserCreateRequest struct {
-	Username string   `json:"username"`
-	Password string   `json:"password"`
-	Role     UserRole `json:"role"`
-	Enabled  *bool    `json:"enabled,omitempty"`
+	Username       string   `json:"username"`
+	Password       string   `json:"password"`
+	Role           UserRole `json:"role"`
+	Enabled        *bool    `json:"enabled,omitempty"`
+	DeviceLimit    *int     `json:"deviceLimit,omitempty"`
+	RefreshEnabled *bool    `json:"refreshEnabled,omitempty"`
 }
 
 type UserUpdateRequest struct {
-	Password *string   `json:"password,omitempty"`
-	Role     *UserRole `json:"role,omitempty"`
-	Enabled  *bool     `json:"enabled,omitempty"`
+	Password       *string   `json:"password,omitempty"`
+	Role           *UserRole `json:"role,omitempty"`
+	Enabled        *bool     `json:"enabled,omitempty"`
+	DeviceLimit    *int      `json:"deviceLimit,omitempty"`
+	RefreshEnabled *bool     `json:"refreshEnabled,omitempty"`
+}
+
+type PasswordChangeRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+type RegistrationSettings struct {
+	OpenRegistration      bool `json:"openRegistration"`
+	InviteRequired        bool `json:"inviteRequired"`
+	DefaultDeviceLimit    int  `json:"defaultDeviceLimit"`
+	DefaultRefreshEnabled bool `json:"defaultRefreshEnabled"`
+	StatsRetentionDays    int  `json:"statsRetentionDays"`
+}
+
+type InviteCode struct {
+	ID        string     `json:"id"`
+	Code      string     `json:"code"`
+	Enabled   bool       `json:"enabled"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	UsedCount int        `json:"usedCount"`
+}
+
+type SessionView struct {
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Current   bool      `json:"current"`
+}
+
+type MetricPoint struct {
+	Time         time.Time `json:"time"`
+	Requests     int       `json:"requests"`
+	Remote       int       `json:"remote"`
+	CacheHits    int       `json:"cacheHits"`
+	RemoteOK     int       `json:"remoteOk"`
+	CookieErrors int       `json:"cookieErrors"`
+	ActiveUsers  int       `json:"activeUsers"`
+}
+
+type AdminStats struct {
+	Users      []AdminUserSummary `json:"users"`
+	Hourly     []MetricPoint      `json:"hourly"`
+	Daily      []MetricPoint      `json:"daily"`
+	Exceptions []SystemException  `json:"exceptions"`
+}
+
+type SystemException struct {
+	ID       string    `json:"id"`
+	UserID   string    `json:"userId"`
+	Username string    `json:"username"`
+	DeviceID string    `json:"deviceId,omitempty"`
+	Type     string    `json:"type"`
+	Level    string    `json:"level"`
+	Message  string    `json:"message"`
+	Time     time.Time `json:"time"`
 }
 
 type TrafficStats struct {

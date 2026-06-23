@@ -22,11 +22,21 @@ const turnstileSiteKey = ref("");
 const captchaToken = ref("");
 const turnstileRef = ref<InstanceType<typeof TurnstileWidget> | null>(null);
 const registerCaptchaEnabled = ref(true);
+const registrationOpen = ref(true);
+const inviteRequired = ref(true);
+const authConfigVersion = ref(0);
 const captchaID = ref("");
 const captchaImage = ref("");
 const captchaAnswer = ref("");
 const captchaLoading = ref(false);
-const form = reactive({ username: "", password: "" });
+const form = reactive({ username: "", password: "", inviteCode: "" });
+const registrationAvailable = computed(() => registrationOpen.value || inviteRequired.value);
+const registerDescription = computed(() => {
+  if (inviteRequired.value && !registrationOpen.value) return "输入管理员提供的邀请码，创建你的独立账户。";
+  if (inviteRequired.value && registrationOpen.value) return "可以直接注册，也可以填写管理员提供的邀请码。";
+  if (registrationOpen.value) return "创建账户后，即可配置个人 Cookie 和充电桩。";
+  return "当前未开放自助注册，请联系管理员开通账户。";
+});
 
 async function loadConfig() {
   try {
@@ -35,11 +45,17 @@ async function loadConfig() {
     const config = await res.json() as {
       turnstileEnabled: boolean;
       turnstileSiteKey: string;
+      authConfigVersion?: number;
       registerCaptchaEnabled?: boolean;
+      registrationOpen?: boolean;
+      inviteRequired?: boolean;
     };
     turnstileEnabled.value = config.turnstileEnabled;
+    authConfigVersion.value = config.authConfigVersion ?? 0;
     turnstileSiteKey.value = config.turnstileSiteKey;
     registerCaptchaEnabled.value = config.registerCaptchaEnabled ?? true;
+    registrationOpen.value = config.registrationOpen ?? true;
+    inviteRequired.value = config.inviteRequired ?? false;
     authConfigReady.value = true;
     if (mode.value === "register") await loadCaptcha();
   } catch (error) {
@@ -81,6 +97,14 @@ async function submit() {
     message.error("注册密码至少需要 8 个字符");
     return;
   }
+  if (mode.value === "register" && !registrationOpen.value && inviteRequired.value && !form.inviteCode.trim()) {
+    message.error("请输入邀请码");
+    return;
+  }
+  if (mode.value === "register" && !registrationOpen.value && inviteRequired.value && authConfigVersion.value < 2) {
+    message.error("后端服务仍是旧版本，请重启后端服务后再使用邀请码注册");
+    return;
+  }
   if (turnstileEnabled.value && !captchaToken.value) {
     message.error("请先完成人机验证");
     return;
@@ -95,13 +119,22 @@ async function submit() {
     if (mode.value === "login") {
       await auth.login(username, form.password, captchaToken.value);
     } else {
-      await auth.register(username, form.password, captchaToken.value, captchaID.value, captchaAnswer.value.trim());
+      await auth.register(username, form.password, captchaToken.value, captchaID.value, captchaAnswer.value.trim(), form.inviteCode.trim());
     }
     form.password = "";
     await router.replace(resolveHomeRoute(auth.currentUser?.role ?? null));
     message.success(mode.value === "login" ? "登录成功" : "注册成功");
   } catch (error) {
-    message.error((error as Error).message);
+    const errorMessage = (error as Error).message;
+    if (
+      mode.value === "register" &&
+      form.inviteCode.trim() &&
+      errorMessage.includes("未开放注册")
+    ) {
+      message.error("邀请码已填写，但后端仍在运行旧版本。请重启后端服务后重试");
+    } else {
+      message.error(errorMessage);
+    }
     if (mode.value === "register") await loadCaptcha();
   } finally {
     submitting.value = false;
@@ -160,7 +193,7 @@ onMounted(loadConfig);
           {{ mode === "login" ? "登录运营工作台" : "注册普通用户" }}
         </h2>
         <p class="mt-3 text-sm leading-6 text-muted-foreground">
-          {{ mode === "login" ? "管理员进入流量监控，普通用户进入自己的设备看板。" : "注册完成后即可配置个人 Cookie 和充电桩。" }}
+          {{ mode === "login" ? "管理员进入监控中心，普通用户进入个人设备看板。" : registerDescription }}
         </p>
 
         <div class="mt-7 grid grid-cols-2 rounded-xl bg-muted p-1" aria-label="登录注册切换">
@@ -169,9 +202,27 @@ onMounted(loadConfig);
         </div>
 
         <form class="mt-7 space-y-5" @submit.prevent="submit">
+          <div v-if="mode === 'register' && !registrationAvailable" class="auth-notice" role="status">
+            <ShieldCheck aria-hidden="true" />
+            <div>
+              <strong>自助注册暂未开放</strong>
+              <p>请联系管理员为你创建账户。</p>
+            </div>
+          </div>
           <label class="form-field">
             <span><UserRound />用户名</span>
             <UiInput v-model="form.username" autocomplete="username" placeholder="请输入用户名" />
+          </label>
+
+          <label v-if="mode === 'register' && inviteRequired" class="form-field">
+            <span>
+              <ShieldCheck />
+              邀请码
+              <b v-if="!registrationOpen">*</b>
+              <small v-else class="ml-auto">选填</small>
+            </span>
+            <UiInput v-model="form.inviteCode" autocomplete="off" placeholder="请输入管理员提供的邀请码" />
+            <small v-if="!registrationOpen">当前仅开放邀请注册。</small>
           </label>
           <label class="form-field">
             <span><LockKeyhole />密码</span>
@@ -221,7 +272,7 @@ onMounted(loadConfig);
             class="w-full"
             size="lg"
             type="submit"
-            :disabled="!authConfigReady || submitting || captchaLoading || (turnstileEnabled && !captchaToken)"
+            :disabled="!authConfigReady || submitting || captchaLoading || (mode === 'register' && !registrationAvailable) || (turnstileEnabled && !captchaToken)"
           >
             {{ submitting ? "正在处理…" : mode === "login" ? "登录" : "注册并进入" }}
             <ArrowRight />

@@ -34,4 +34,16 @@ describe("PileCard", () => {
     expect(wrapper.text()).toContain("充电中");
     expect(wrapper.get("article").attributes("data-pile-state")).toBe("charging");
   });
+
+  it("renders only matching ports while preserving whole-pile totals", () => {
+    const wrapper = mount(PileCard, {
+      props: { pile, filtering: true, visiblePortIds: [2] }
+    });
+
+    expect(wrapper.text()).toContain("当前显示 1 / 3 个匹配端口");
+    expect(wrapper.text()).toContain("使用中");
+    expect(wrapper.text()).toContain("空闲");
+    expect(wrapper.findAll("[data-port-state]")).toHaveLength(1);
+    expect(wrapper.get("[data-port-state]").attributes("data-port-state")).toBe("charging");
+  });
 });

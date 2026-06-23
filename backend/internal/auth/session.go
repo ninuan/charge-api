@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/persistence"
 )
 
@@ -145,6 +147,50 @@ func (m *SessionManager) DeleteUser(userID string) error {
 		if err := m.store.DeleteUserSessions(userID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView, error) {
+	currentHash := hashSessionToken(currentToken)
+	if m.store != nil {
+		records, err := m.store.ListUserSessions(userID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]model.SessionView, 0, len(records))
+		for _, record := range records {
+			result = append(result, model.SessionView{
+				ID:        base64.RawURLEncoding.EncodeToString(record.TokenHash[:8]),
+				CreatedAt: record.CreatedAt, ExpiresAt: record.ExpiresAt,
+				Current: bytes.Equal(record.TokenHash, currentHash),
+			})
+		}
+		return result, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []model.SessionView
+	for token, session := range m.sessions {
+		if session.UserID != userID {
+			continue
+		}
+		hash := hashSessionToken(token)
+		result = append(result, model.SessionView{ID: base64.RawURLEncoding.EncodeToString(hash[:8]), CreatedAt: session.CreatedAt, ExpiresAt: session.ExpiresAt, Current: token == currentToken})
+	}
+	return result, nil
+}
+
+func (m *SessionManager) DeleteOthers(userID, currentToken string) error {
+	m.mu.Lock()
+	for token, session := range m.sessions {
+		if session.UserID == userID && token != currentToken {
+			delete(m.sessions, token)
+		}
+	}
+	m.mu.Unlock()
+	if m.store != nil {
+		return m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken))
 	}
 	return nil
 }

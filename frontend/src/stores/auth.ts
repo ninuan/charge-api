@@ -50,13 +50,14 @@ export const useAuthStore = defineStore("auth", () => {
     password: string,
     captchaToken: string,
     captchaId: string,
-    captchaAnswer: string
+    captchaAnswer: string,
+    inviteCode: string
   ) {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, captchaToken, captchaId, captchaAnswer })
+      body: JSON.stringify({ username, password, captchaToken, captchaId, captchaAnswer, inviteCode })
     });
     if (!res.ok) {
       const err = await res.json();
@@ -76,6 +77,14 @@ export const useAuthStore = defineStore("auth", () => {
     initialized.value = true;
   }
 
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const res = await fetch("/api/auth/password", {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    if (!res.ok) throw new Error((await res.json()).error ?? "修改密码失败");
+  }
+
   return {
     currentUser,
     loading,
@@ -85,6 +94,7 @@ export const useAuthStore = defineStore("auth", () => {
     fetchMe,
     login,
     register,
-    logout
+    logout,
+    changePassword
   };
 });

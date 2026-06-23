@@ -5,6 +5,7 @@ import { LogOut, RefreshCw, ShieldCheck, UserRound } from "@lucide/vue";
 import { Button as UiButton } from "@/components/ui/button";
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { useAuthStore } from "@/stores/auth";
+import SecurityDialog from "@/components/SecurityDialog.vue";
 
 const props = withDefaults(defineProps<{
   title: string;
@@ -23,6 +24,7 @@ const emit = defineEmits<{
 const auth = useAuthStore();
 const router = useRouter();
 const roleLabel = computed(() => auth.isAdmin ? "管理员" : "普通用户");
+const roleIcon = computed(() => auth.isAdmin ? ShieldCheck : UserRound);
 
 async function logout() {
   await auth.logout();
@@ -55,11 +57,12 @@ async function logout() {
             <RefreshCw :class="{ 'animate-spin': props.refreshing }" />
             <span class="hidden sm:inline">{{ props.refreshing ? "刷新中" : "刷新状态" }}</span>
           </UiButton>
-          <div class="hidden items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 sm:flex">
-            <UserRound class="size-4 text-muted-foreground" />
+          <SecurityDialog v-if="!auth.isAdmin" />
+          <div class="identity-pill hidden sm:flex">
+            <span class="identity-avatar" aria-hidden="true">{{ auth.currentUser?.username?.slice(0, 1).toUpperCase() }}</span>
             <span class="max-w-32 truncate text-sm font-semibold">{{ auth.currentUser?.username }}</span>
-            <UiBadge variant="secondary">
-              <ShieldCheck v-if="auth.isAdmin" />
+            <UiBadge :variant="auth.isAdmin ? 'default' : 'secondary'">
+              <component :is="roleIcon" />
               {{ roleLabel }}
             </UiBadge>
           </div>

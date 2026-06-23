@@ -135,6 +135,16 @@ func (s *DashboardStore) MergeCapturePiles(captured []model.Pile) {
 	for _, pile := range captured {
 		if existing, ok := s.piles[pile.ID]; ok {
 			pile.CreatedAt = existing.CreatedAt
+			if existing.Source == "custom" && existing.Name != "" {
+				pile.Name = existing.Name
+			}
+			if existing.Source == "custom" && existing.Address != "" {
+				pile.Address = existing.Address
+			}
+			if existing.Source == "custom" {
+				pile.SortOrder = existing.SortOrder
+				pile.Source = "custom"
+			}
 		}
 		s.piles[pile.ID] = pile
 	}
@@ -180,7 +190,10 @@ func (s *DashboardStore) snapshotLocked() model.DashboardSnapshot {
 	}
 
 	sort.Slice(piles, func(i, j int) bool {
-		return piles[i].ID < piles[j].ID
+		if piles[i].SortOrder == piles[j].SortOrder {
+			return piles[i].ID < piles[j].ID
+		}
+		return piles[i].SortOrder < piles[j].SortOrder
 	})
 
 	stats := model.DashboardCounters{
@@ -206,6 +219,25 @@ func (s *DashboardStore) snapshotLocked() model.DashboardSnapshot {
 		Statistics: stats,
 		Refresh:    s.refresh,
 	}
+}
+
+func (s *DashboardStore) UpdatePile(id, name, address string, sortOrder int) (model.Pile, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pile, ok := s.piles[id]
+	if !ok {
+		return model.Pile{}, false
+	}
+	if name != "" {
+		pile.Name = name
+	}
+	pile.Address = address
+	pile.SortOrder = sortOrder
+	pile.Source = "custom"
+	pile.UpdatedAt = time.Now()
+	s.piles[id] = pile
+	s.publishLocked()
+	return pile, true
 }
 
 func normalizePorts(existing []model.Port, openNum int, online bool, now time.Time) []model.Port {

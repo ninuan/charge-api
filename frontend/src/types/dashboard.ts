@@ -26,6 +26,7 @@ export interface Pile {
   source: string;
   ports: Port[];
   usedPortIds: number[];
+  sortOrder?: number;
 }
 
 export interface DashboardCounters {
@@ -65,6 +66,8 @@ export interface CurrentUser {
   role: UserRole;
   enabled: boolean;
   createdAt: string;
+  deviceLimit: number;
+  refreshEnabled: boolean;
 }
 
 export interface TrafficStats {
@@ -87,4 +90,56 @@ export interface AdminUserSummary {
   deviceIds: string[];
   hasCookie: boolean;
   lastRefresh: RefreshInfo;
+}
+
+export interface RegistrationSettings {
+  openRegistration: boolean;
+  inviteRequired: boolean;
+  defaultDeviceLimit: number;
+  defaultRefreshEnabled: boolean;
+  statsRetentionDays: number;
+}
+
+export interface InviteCode {
+  id: string;
+  code: string;
+  enabled: boolean;
+  createdAt: string;
+  expiresAt?: string;
+  usedCount: number;
+}
+
+export interface SessionView {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  current: boolean;
+}
+
+export interface MetricPoint {
+  time: string;
+  requests: number;
+  remote: number;
+  cacheHits: number;
+  remoteOk: number;
+  cookieErrors: number;
+  activeUsers: number;
+}
+
+export interface SystemException {
+  id: string;
+  userId: string;
+  username: string;
+  deviceId?: string;
+  type: string;
+  level: string;
+  message: string;
+  time: string;
+}
+
+export interface AdminStats {
+  users: AdminUserSummary[];
+  hourly: MetricPoint[];
+  daily: MetricPoint[];
+  exceptions: SystemException[];
 }

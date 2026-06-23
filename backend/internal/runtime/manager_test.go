@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -101,6 +102,80 @@ func TestAddPileEnforcesPerUserDeviceLimit(t *testing.T) {
 	_, err := manager.AddPile("user-1", model.PileUpsertRequest{ID: "device-over-limit"})
 	if err == nil {
 		t.Fatal("expected device limit error")
+	}
+}
+
+func TestRegistrationPolicySupportsPublicAndInviteEntryPoints(t *testing.T) {
+	manager, err := NewManager(
+		testRepository(t),
+		"",
+		parser.DefaultCaptureRequests(),
+		"admin-password-123",
+		30*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	settings := manager.Settings()
+	settings.OpenRegistration = true
+	settings.InviteRequired = true
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("enable public and invite registration: %v", err)
+	}
+	if _, err := manager.RegisterUser("public-user", "password123", ""); err != nil {
+		t.Fatalf("public registration should not require an invite: %v", err)
+	}
+
+	settings.OpenRegistration = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("switch to invite-only registration: %v", err)
+	}
+	invite, err := manager.CreateInvite("INVITE-ONLY", nil)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if _, err := manager.RegisterUser("invited-user", "password123", invite.Code); err != nil {
+		t.Fatalf("invite registration failed: %v", err)
+	}
+	if _, err := manager.RegisterUser("missing-invite", "password123", ""); err == nil {
+		t.Fatal("invite-only registration accepted a missing invite")
+	}
+
+	settings.InviteRequired = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable all registration: %v", err)
+	}
+	if _, err := manager.RegisterUser("closed-user", "password123", ""); err == nil {
+		t.Fatal("registration succeeded while both entry points were disabled")
+	}
+}
+
+func TestCreateInviteGeneratesRandomCode(t *testing.T) {
+	manager, err := NewManager(
+		testRepository(t),
+		"",
+		parser.DefaultCaptureRequests(),
+		"admin-password-123",
+		30*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	first, err := manager.CreateInvite("", nil)
+	if err != nil {
+		t.Fatalf("CreateInvite first: %v", err)
+	}
+	second, err := manager.CreateInvite("", nil)
+	if err != nil {
+		t.Fatalf("CreateInvite second: %v", err)
+	}
+	if !strings.HasPrefix(first.Code, "CHG-") || len(first.Code) < 12 {
+		t.Fatalf("unexpected generated invite format: %q", first.Code)
+	}
+	if first.Code == second.Code {
+		t.Fatalf("generated duplicate invite codes: %q", first.Code)
 	}
 }
 

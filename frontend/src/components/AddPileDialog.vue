@@ -14,8 +14,10 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import { useDashboardStore } from "@/stores/dashboard";
+import { useAuthStore } from "@/stores/auth";
 
 const store = useDashboardStore();
+const auth = useAuthStore();
 const { message } = createDiscreteApi(["message"]);
 const open = ref(false);
 const advanced = ref(false);
@@ -63,7 +65,7 @@ async function submit() {
     <DialogContent class="max-w-xl">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2"><ServerCog class="size-5 text-primary" />添加充电桩</DialogTitle>
-        <DialogDescription>每个账户最多添加 10 台设备。添加本身不会请求远端状态接口。</DialogDescription>
+        <DialogDescription>当前账户最多添加 {{ auth.currentUser?.deviceLimit ?? 10 }} 台设备。添加时会验证一次远端数据，成功后不会重复请求。</DialogDescription>
       </DialogHeader>
       <form class="space-y-5" @submit.prevent="submit">
         <label class="form-field">

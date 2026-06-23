@@ -16,10 +16,12 @@ type State struct {
 	UserStates map[string]UserState `json:"userStates"`
 	SavedAt    time.Time            `json:"savedAt"`
 
-	Piles     []model.Pile      `json:"piles,omitempty"`
-	Refresh   model.RefreshInfo `json:"refresh,omitempty"`
-	DeviceIDs []string          `json:"deviceIds,omitempty"`
-	Cookie    string            `json:"cookie,omitempty"`
+	Piles     []model.Pile               `json:"piles,omitempty"`
+	Refresh   model.RefreshInfo          `json:"refresh,omitempty"`
+	DeviceIDs []string                   `json:"deviceIds,omitempty"`
+	Cookie    string                     `json:"cookie,omitempty"`
+	Settings  model.RegistrationSettings `json:"settings"`
+	Invites   []model.InviteCode         `json:"invites"`
 }
 
 type UserState struct {

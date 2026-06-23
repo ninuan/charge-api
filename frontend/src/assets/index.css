@@ -74,6 +74,7 @@
   html {
     color-scheme: light;
     scroll-behavior: smooth;
+    scrollbar-gutter: stable;
   }
 
   body {
@@ -150,6 +151,14 @@
 
   .brand-mark--large {
     @apply size-12 bg-emerald-400;
+  }
+
+  .identity-pill {
+    @apply min-h-11 items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 shadow-sm;
+  }
+
+  .identity-avatar {
+    @apply grid size-7 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground;
   }
 
   .section-kicker {
@@ -246,6 +255,18 @@
   .refresh-status--success { @apply border-emerald-700/20 bg-emerald-50 text-emerald-900; }
   .refresh-status--warning { @apply border-amber-700/20 bg-amber-50 text-amber-950; }
 
+  .filter-panel {
+    @apply grid gap-4 rounded-2xl border border-border/80 bg-card/90 p-4 shadow-[0_12px_34px_hsl(155_25%_15%/.045)] lg:grid-cols-[minmax(180px,.7fr)_minmax(420px,1.3fr)_auto] lg:items-center lg:p-5;
+  }
+
+  .filter-controls {
+    @apply flex min-w-0 flex-col gap-2 sm:flex-row;
+  }
+
+  .filter-summary {
+    @apply rounded-lg bg-secondary px-3 py-2 text-center text-xs font-semibold text-secondary-foreground lg:whitespace-nowrap;
+  }
+
   .port-tile {
     @apply relative min-h-32 rounded-xl border bg-card p-3.5 text-foreground transition-[background-color,border-color] duration-200;
   }
@@ -302,6 +323,106 @@
 
   .form-field small {
     @apply text-xs font-normal leading-5 text-muted-foreground;
+  }
+
+  .auth-notice {
+    @apply flex items-start gap-3 rounded-xl border border-amber-700/20 bg-amber-50 p-4 text-amber-950;
+  }
+
+  .auth-notice > svg {
+    @apply mt-0.5 size-5 shrink-0;
+  }
+
+  .auth-notice strong {
+    @apply text-sm font-bold;
+  }
+
+  .auth-notice p {
+    @apply mt-1 text-xs leading-5 text-amber-900/80;
+  }
+
+  .setting-option {
+    @apply flex min-h-16 cursor-pointer items-center justify-between gap-4 self-start rounded-xl border border-border bg-background/60 p-4 transition-colors hover:border-primary/30 hover:bg-secondary/35;
+  }
+
+  .setting-option > span {
+    @apply grid gap-1;
+  }
+
+  .setting-option strong {
+    @apply text-sm font-semibold;
+  }
+
+  .setting-option small {
+    @apply text-xs font-normal leading-5 text-muted-foreground;
+  }
+
+  .setting-checkbox {
+    @apply size-5 shrink-0 cursor-pointer accent-primary;
+  }
+
+  .setting-option--compact {
+    @apply min-h-0 py-3;
+  }
+
+  .setting-group-label {
+    @apply text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .setting-field {
+    @apply rounded-xl border border-border bg-background/60 p-4;
+  }
+
+  .panel-action-bar {
+    @apply mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .panel-action-bar p {
+    @apply flex items-center gap-2 text-xs text-muted-foreground;
+  }
+
+  .panel-action-bar p svg {
+    @apply size-4 text-primary;
+  }
+
+  .invite-item {
+    @apply flex min-h-16 items-center justify-between gap-3 rounded-xl border border-border bg-background/60 p-3 transition-colors hover:bg-secondary/25;
+  }
+
+  .security-dialog-header {
+    @apply flex-row items-center gap-3 border-b border-border bg-secondary/35 p-5 pr-14 sm:p-6 sm:pr-16;
+  }
+
+  .security-dialog-icon {
+    @apply grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm;
+  }
+
+  .security-dialog-icon svg {
+    @apply size-5;
+  }
+
+  .section-heading {
+    @apply flex items-start gap-3;
+  }
+
+  .section-heading > svg {
+    @apply mt-0.5 size-5 shrink-0 text-primary;
+  }
+
+  .section-heading h3 {
+    @apply text-sm font-bold;
+  }
+
+  .section-heading p {
+    @apply mt-1 text-xs leading-5 text-muted-foreground;
+  }
+
+  .session-item {
+    @apply rounded-xl border border-border bg-card p-3 text-sm;
+  }
+
+  .security-dialog-footer {
+    @apply border-t border-border bg-muted/35 px-5 py-4 text-xs leading-5 text-muted-foreground sm:px-6;
   }
 
   .native-input,
@@ -407,6 +528,26 @@
 @media (min-width: 640px) {
   .mobile-refresh-bar {
     display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .auth-page {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .auth-story {
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .auth-form-side {
+    height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 

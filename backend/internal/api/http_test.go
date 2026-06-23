@@ -125,7 +125,11 @@ func TestRegisterRequiresCaptcha(t *testing.T) {
 }
 
 func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
-	server, _, _ := newTestServer(t)
+	server, manager, _ := newTestServer(t)
+	invite, err := manager.CreateInvite("TEST-INVITE", nil)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
 
 	captchaRecorder := httptest.NewRecorder()
 	captchaRequest := httptest.NewRequest(http.MethodGet, "/api/auth/register-captcha", nil)
@@ -148,6 +152,7 @@ func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 		"captchaToken":  "",
 		"captchaId":     challenge.ID,
 		"captchaAnswer": answer,
+		"inviteCode":    invite.Code,
 	}
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -160,6 +165,48 @@ func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("register returned %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestInviteOnlyRegistrationThroughAPI(t *testing.T) {
+	server, manager, _ := newTestServer(t)
+	settings := manager.Settings()
+	settings.OpenRegistration = false
+	settings.InviteRequired = true
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	invite, err := manager.CreateInvite("", nil)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	captchaRecorder := httptest.NewRecorder()
+	server.handleRegisterCaptcha(captchaRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/register-captcha", nil))
+	var challenge struct {
+		ID    string `json:"id"`
+		Image string `json:"image"`
+	}
+	if err := json.NewDecoder(captchaRecorder.Body).Decode(&challenge); err != nil {
+		t.Fatalf("decode captcha: %v", err)
+	}
+	payload, err := json.Marshal(map[string]string{
+		"username":      "invite-only-user",
+		"password":      "password123",
+		"captchaToken":  "",
+		"captchaId":     challenge.ID,
+		"captchaAnswer": captchaAnswerFromImage(t, challenge.Image),
+		"inviteCode":    invite.Code,
+	})
+	if err != nil {
+		t.Fatalf("marshal registration payload: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.handleRegister(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("invite-only register returned %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 

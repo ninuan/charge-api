@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/base64"
 	"fmt"
 	"sort"
@@ -18,8 +19,9 @@ import (
 )
 
 const (
-	stateVersion      = 2
-	maxDevicesPerUser = 10
+	stateVersion       = 2
+	defaultDeviceLimit = 10
+	maxDevicesPerUser  = defaultDeviceLimit
 )
 
 type Manager struct {
@@ -32,6 +34,8 @@ type Manager struct {
 	runtimes    map[string]*UserRuntime
 	initialPass string
 	migrated    bool
+	settings    model.RegistrationSettings
+	invites     map[string]model.InviteCode
 }
 
 type UserRuntime struct {
@@ -56,6 +60,12 @@ func NewManager(
 		minInterval: minInterval,
 		users:       make(map[string]model.User),
 		runtimes:    make(map[string]*UserRuntime),
+		invites:     make(map[string]model.InviteCode),
+		settings: model.RegistrationSettings{
+			OpenRegistration: true, InviteRequired: true,
+			DefaultDeviceLimit: defaultDeviceLimit, DefaultRefreshEnabled: true,
+			StatsRetentionDays: 90,
+		},
 	}
 
 	state, hasState, err := repository.Load()
@@ -86,7 +96,16 @@ func NewManager(
 	}
 
 	if hasState && len(state.Users) > 0 {
+		if state.Settings.DefaultDeviceLimit > 0 {
+			m.settings = state.Settings
+		}
+		for _, invite := range state.Invites {
+			m.invites[invite.ID] = invite
+		}
 		for _, user := range state.Users {
+			if user.DeviceLimit <= 0 {
+				user.DeviceLimit = m.settings.DefaultDeviceLimit
+			}
 			m.users[user.ID] = user
 			userState := state.UserStates[user.ID]
 			m.runtimes[user.ID] = newUserRuntime(requests, userState, minInterval)
@@ -115,6 +134,8 @@ func NewManager(
 	if err != nil {
 		return nil, err
 	}
+	admin.DeviceLimit = m.settings.DefaultDeviceLimit
+	admin.RefreshEnabled = m.settings.DefaultRefreshEnabled
 	m.users[admin.ID] = admin
 
 	initialState := persistence.UserState{}
@@ -256,6 +277,19 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 	if err != nil {
 		return model.CurrentUser{}, err
 	}
+	m.mu.RLock()
+	user.DeviceLimit = m.settings.DefaultDeviceLimit
+	user.RefreshEnabled = m.settings.DefaultRefreshEnabled
+	m.mu.RUnlock()
+	if req.DeviceLimit != nil {
+		user.DeviceLimit = *req.DeviceLimit
+	}
+	if req.RefreshEnabled != nil {
+		user.RefreshEnabled = *req.RefreshEnabled
+	}
+	if user.DeviceLimit < 1 || user.DeviceLimit > 100 {
+		return model.CurrentUser{}, fmt.Errorf("设备额度需要在 1 到 100 之间")
+	}
 
 	m.mu.Lock()
 	for _, existing := range m.users {
@@ -271,12 +305,55 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 	return publicUser(user), m.Save()
 }
 
-func (m *Manager) RegisterUser(username string, password string) (model.CurrentUser, error) {
-	return m.CreateUser(model.UserCreateRequest{
+func (m *Manager) RegisterUser(username string, password string, inviteCode string) (model.CurrentUser, error) {
+	m.mu.Lock()
+	if !m.settings.OpenRegistration && !m.settings.InviteRequired {
+		m.mu.Unlock()
+		return model.CurrentUser{}, fmt.Errorf("当前未开放注册")
+	}
+	var usedInviteID string
+	inviteCode = strings.TrimSpace(inviteCode)
+	if inviteCode != "" {
+		if !m.settings.InviteRequired {
+			m.mu.Unlock()
+			return model.CurrentUser{}, fmt.Errorf("当前未开放邀请码注册")
+		}
+		now := time.Now()
+		for id, invite := range m.invites {
+			if invite.Enabled && invite.Code == inviteCode &&
+				(invite.ExpiresAt == nil || invite.ExpiresAt.After(now)) {
+				usedInviteID = id
+				break
+			}
+		}
+		if usedInviteID == "" {
+			m.mu.Unlock()
+			return model.CurrentUser{}, fmt.Errorf("邀请码无效或已过期")
+		}
+	} else if !m.settings.OpenRegistration {
+		m.mu.Unlock()
+		return model.CurrentUser{}, fmt.Errorf("请输入有效邀请码")
+	}
+	m.mu.Unlock()
+	user, err := m.CreateUser(model.UserCreateRequest{
 		Username: username,
 		Password: password,
 		Role:     model.RoleUser,
 	})
+	if err != nil {
+		return model.CurrentUser{}, err
+	}
+	if usedInviteID != "" {
+		m.mu.Lock()
+		invite := m.invites[usedInviteID]
+		invite.UsedCount++
+		m.invites[usedInviteID] = invite
+		m.mu.Unlock()
+		if err := m.Save(); err != nil {
+			return model.CurrentUser{}, err
+		}
+	}
+	return user, nil
 }
 
 func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.CurrentUser, error) {
@@ -308,6 +385,16 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	}
 	if req.Enabled != nil {
 		user.Enabled = *req.Enabled
+	}
+	if req.DeviceLimit != nil {
+		if *req.DeviceLimit < 1 || *req.DeviceLimit > 100 {
+			m.mu.Unlock()
+			return model.CurrentUser{}, fmt.Errorf("设备额度需要在 1 到 100 之间")
+		}
+		user.DeviceLimit = *req.DeviceLimit
+	}
+	if req.RefreshEnabled != nil {
+		user.RefreshEnabled = *req.RefreshEnabled
 	}
 	activeAdmins := 0
 	for userID, existing := range m.users {
@@ -358,6 +445,7 @@ func (m *Manager) Snapshot(userID string) (model.DashboardSnapshot, error) {
 		return model.DashboardSnapshot{}, err
 	}
 	runtime.recordRequest()
+	m.recordMetric(userID, "request")
 	return runtime.store.Snapshot(), m.Save()
 }
 
@@ -367,23 +455,32 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 		return model.Pile{}, err
 	}
 	runtime.recordRequest()
-	if err := runtime.client.AddDeviceWithLimit(req.ID, maxDevicesPerUser); err != nil {
+	m.recordMetric(userID, "request")
+	user, _ := m.User(userID)
+	if !user.RefreshEnabled {
+		return model.Pile{}, fmt.Errorf("管理员已暂停此账户的远端刷新，暂时无法验证新设备")
+	}
+	if err := runtime.client.AddDeviceWithLimit(req.ID, user.DeviceLimit); err != nil {
 		runtime.recordFailure(false)
 		_ = m.Save()
 		if charger.IsDeviceLimit(err) {
-			return model.Pile{}, fmt.Errorf("每个用户最多添加 %d 台充电桩", maxDevicesPerUser)
+			return model.Pile{}, fmt.Errorf("当前账户最多添加 %d 台充电桩", user.DeviceLimit)
 		}
 		return model.Pile{}, err
 	}
 	if err := runtime.refresh(true); err != nil {
+		m.recordMetric(userID, "cookie_error")
 		runtime.client.RemoveDevice(req.ID)
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
 		return model.Pile{}, err
 	}
+	m.recordMetric(userID, "remote")
+	m.recordMetric(userID, "remote_ok")
 	for _, pile := range runtime.store.Snapshot().Piles {
 		if pile.ID == req.ID {
-			return pile, m.Save()
+			updated, _ := runtime.store.UpdatePile(req.ID, req.Name, req.Address, pile.SortOrder)
+			return updated, m.Save()
 		}
 	}
 	runtime.client.RemoveDevice(req.ID)
@@ -398,6 +495,7 @@ func (m *Manager) DeletePile(userID string, id string) error {
 		return err
 	}
 	runtime.recordRequest()
+	m.recordMetric(userID, "request")
 	if !runtime.store.DeletePile(id) {
 		runtime.recordFailure(false)
 		_ = m.Save()
@@ -407,18 +505,51 @@ func (m *Manager) DeletePile(userID string, id string) error {
 	return m.Save()
 }
 
+func (m *Manager) UpdatePile(userID, id, name, address string, sortOrder int) (model.Pile, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return model.Pile{}, err
+	}
+	runtime.recordRequest()
+	m.recordMetric(userID, "request")
+	pile, ok := runtime.store.UpdatePile(id, strings.TrimSpace(name), strings.TrimSpace(address), sortOrder)
+	if !ok {
+		return model.Pile{}, fmt.Errorf("pile not found")
+	}
+	return pile, m.Save()
+}
+
 func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, error) {
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
 		return model.DashboardSnapshot{}, err
 	}
 	runtime.recordRequest()
+	m.recordMetric(userID, "request")
+	user, _ := m.User(userID)
+	if !user.RefreshEnabled {
+		m.recordMetric(userID, "cache")
+		snapshot := runtime.store.Snapshot()
+		snapshot.Refresh.Cached = true
+		snapshot.Refresh.Message = "管理员已暂停此账户的远端刷新，当前展示缓存数据"
+		return snapshot, nil
+	}
 	if err := runtime.refresh(force); err != nil {
+		m.recordMetric(userID, "cookie_error")
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
-	return runtime.store.Snapshot(), m.Save()
+	snapshot := runtime.store.Snapshot()
+	if snapshot.Refresh.Cached {
+		m.recordMetric(userID, "cache")
+	} else {
+		m.recordMetric(userID, "remote")
+		if snapshot.Refresh.SuccessfulDevices > 0 {
+			m.recordMetric(userID, "remote_ok")
+		}
+	}
+	return snapshot, m.Save()
 }
 
 func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSnapshot, error) {
@@ -427,11 +558,23 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		return model.DashboardSnapshot{}, err
 	}
 	runtime.recordRequest()
+	m.recordMetric(userID, "request")
 	previous := runtime.client.Cookie()
 	if err := runtime.client.UpdateCookie(cookie); err != nil {
 		runtime.recordFailure(false)
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
+	}
+	user, _ := m.User(userID)
+	if !user.RefreshEnabled {
+		snapshot := runtime.store.Snapshot()
+		snapshot.Refresh.Cached = true
+		snapshot.Refresh.Message = "Cookie 已保存；远端刷新当前已暂停，继续展示缓存数据"
+		runtime.store.SetRefreshInfo(snapshot.Refresh)
+		if err := m.Save(); err != nil {
+			return model.DashboardSnapshot{}, err
+		}
+		return snapshot, nil
 	}
 	if err := runtime.refresh(true); err != nil {
 		_ = runtime.client.UpdateCookie(previous)
@@ -439,6 +582,8 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
+	m.recordMetric(userID, "remote")
+	m.recordMetric(userID, "remote_ok")
 	return runtime.store.Snapshot(), m.Save()
 }
 
@@ -466,6 +611,8 @@ func (m *Manager) Save() error {
 	m.mu.RLock()
 	users := make([]model.User, 0, len(m.users))
 	userStates := make(map[string]persistence.UserState, len(m.runtimes))
+	invites := make([]model.InviteCode, 0, len(m.invites))
+	settings := m.settings
 	for _, user := range m.users {
 		users = append(users, user)
 	}
@@ -475,12 +622,18 @@ func (m *Manager) Save() error {
 	for userID, runtime := range m.runtimes {
 		userStates[userID] = runtime.state()
 	}
+	for _, invite := range m.invites {
+		invites = append(invites, invite)
+	}
 	m.mu.RUnlock()
+	sort.Slice(invites, func(i, j int) bool { return invites[i].CreatedAt.After(invites[j].CreatedAt) })
 
 	return m.repository.Save(persistence.State{
 		Version:    stateVersion,
 		Users:      users,
 		UserStates: userStates,
+		Settings:   settings,
+		Invites:    invites,
 	})
 }
 
@@ -687,12 +840,155 @@ func validateNewPassword(password string) error {
 
 func publicUser(user model.User) model.CurrentUser {
 	return model.CurrentUser{
-		ID:        user.ID,
-		Username:  user.Username,
-		Role:      user.Role,
-		Enabled:   user.Enabled,
-		CreatedAt: user.CreatedAt,
+		ID:             user.ID,
+		Username:       user.Username,
+		Role:           user.Role,
+		Enabled:        user.Enabled,
+		CreatedAt:      user.CreatedAt,
+		DeviceLimit:    user.DeviceLimit,
+		RefreshEnabled: user.RefreshEnabled,
 	}
+}
+
+func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) error {
+	m.mu.Lock()
+	user, ok := m.users[userID]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("用户不存在")
+	}
+	valid, _ := auth.VerifyPassword(currentPassword, user.PasswordHash)
+	if !valid {
+		m.mu.Unlock()
+		return fmt.Errorf("当前密码错误")
+	}
+	if err := validateNewPassword(newPassword); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	hash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	user.PasswordHash = hash
+	user.UpdatedAt = time.Now()
+	m.users[userID] = user
+	m.mu.Unlock()
+	return m.Save()
+}
+
+func (m *Manager) Settings() model.RegistrationSettings {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings
+}
+
+func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
+	if settings.DefaultDeviceLimit < 1 || settings.DefaultDeviceLimit > 100 {
+		return fmt.Errorf("默认设备额度需要在 1 到 100 之间")
+	}
+	if settings.StatsRetentionDays < 1 || settings.StatsRetentionDays > 365 {
+		return fmt.Errorf("统计保留天数需要在 1 到 365 之间")
+	}
+	m.mu.Lock()
+	m.settings = settings
+	m.mu.Unlock()
+	_ = m.repository.PruneMetrics(time.Now().AddDate(0, 0, -settings.StatsRetentionDays))
+	return m.Save()
+}
+
+func (m *Manager) InviteCodes() []model.InviteCode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]model.InviteCode, 0, len(m.invites))
+	for _, invite := range m.invites {
+		result = append(result, invite)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result
+}
+
+func (m *Manager) CreateInvite(code string, expiresAt *time.Time) (model.InviteCode, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		var err error
+		code, err = randomInviteCode()
+		if err != nil {
+			return model.InviteCode{}, err
+		}
+	}
+	if len(code) < 4 || len(code) > 64 {
+		return model.InviteCode{}, fmt.Errorf("邀请码长度需要在 4 到 64 个字符之间")
+	}
+	m.mu.Lock()
+	for _, existing := range m.invites {
+		if existing.Code == code {
+			m.mu.Unlock()
+			return model.InviteCode{}, fmt.Errorf("邀请码已存在")
+		}
+	}
+	invite := model.InviteCode{ID: randomID("inv"), Code: code, Enabled: true, CreatedAt: time.Now(), ExpiresAt: expiresAt}
+	m.invites[invite.ID] = invite
+	m.mu.Unlock()
+	return invite, m.Save()
+}
+
+func randomInviteCode() (string, error) {
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		return "", fmt.Errorf("generate invite code: %w", err)
+	}
+	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(token)
+	return "CHG-" + encoded, nil
+}
+
+func (m *Manager) DeleteInvite(id string) error {
+	m.mu.Lock()
+	if _, ok := m.invites[id]; !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("邀请码不存在")
+	}
+	delete(m.invites, id)
+	m.mu.Unlock()
+	return m.Save()
+}
+
+func (m *Manager) AdminStats() model.AdminStats {
+	hourly, _ := m.repository.MetricSeries(time.Now().Add(-24*time.Hour), 3600)
+	daily, _ := m.repository.MetricSeries(time.Now().AddDate(0, 0, -30), 86400)
+	users := m.ListUsers()
+	var exceptions []model.SystemException
+	now := time.Now()
+	for _, summary := range users {
+		if summary.User.Role != model.RoleUser {
+			continue
+		}
+		if !summary.HasCookie {
+			exceptions = append(exceptions, model.SystemException{ID: "cookie-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "cookie", Level: "warning", Message: "尚未配置 Cookie", Time: now})
+		}
+		if summary.Stats.AuthFailures > 0 {
+			at := now
+			if summary.Stats.LastAuthFailureAt != nil {
+				at = *summary.Stats.LastAuthFailureAt
+			}
+			exceptions = append(exceptions, model.SystemException{ID: "auth-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "cookie_expired", Level: "critical", Message: "远端鉴权失败，Cookie 可能已失效", Time: at})
+		}
+		if summary.LastRefresh.FailedDevices > 0 {
+			exceptions = append(exceptions, model.SystemException{ID: "refresh-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "refresh", Level: "warning", Message: fmt.Sprintf("%d 台设备刷新失败", summary.LastRefresh.FailedDevices), Time: now})
+		}
+		if summary.LastRefresh.LastRemoteAt != nil && now.Sub(*summary.LastRefresh.LastRemoteAt) > 24*time.Hour {
+			exceptions = append(exceptions, model.SystemException{ID: "stale-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "stale", Level: "warning", Message: "设备数据已超过 24 小时未更新", Time: *summary.LastRefresh.LastRemoteAt})
+		}
+		if summary.Dashboard.OfflinePorts > 0 {
+			exceptions = append(exceptions, model.SystemException{ID: "offline-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "offline", Level: "warning", Message: fmt.Sprintf("%d 个充电口处于离线状态", summary.Dashboard.OfflinePorts), Time: now})
+		}
+	}
+	return model.AdminStats{Users: users, Hourly: hourly, Daily: daily, Exceptions: exceptions}
+}
+
+func (m *Manager) recordMetric(userID, kind string) {
+	_ = m.repository.RecordMetric(userID, kind, time.Now())
 }
 
 func randomID(prefix string) string {

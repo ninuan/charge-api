@@ -83,6 +83,15 @@ export const useDashboardStore = defineStore("dashboard", () => {
     await fetchSnapshot();
   }
 
+  async function updatePile(id: string, payload: { name: string; address: string; sortOrder: number }) {
+    const res = await fetch(`/api/piles/${id}`, {
+      method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error((await res.json()).error ?? "更新充电桩失败");
+    await fetchSnapshot();
+  }
+
   async function refreshFromCapture() {
     const res = await fetch("/api/refresh", {
       method: "POST",
@@ -120,6 +129,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     fetchSnapshot,
     addPile,
     deletePile,
+    updatePile,
     refreshFromCapture,
     updateCookie
   };

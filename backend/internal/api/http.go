@@ -58,9 +58,15 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/logout", s.handleLogout)
 	mux.HandleFunc("/api/auth/me", s.handleMe)
+	mux.HandleFunc("/api/auth/password", s.handlePassword)
+	mux.HandleFunc("/api/auth/sessions", s.handleSessions)
+	mux.HandleFunc("/api/auth/sessions/others", s.handleOtherSessions)
 	mux.HandleFunc("/api/admin/users", s.handleAdminUsers)
 	mux.HandleFunc("/api/admin/users/", s.handleAdminUserActions)
 	mux.HandleFunc("/api/admin/stats", s.handleAdminStats)
+	mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
+	mux.HandleFunc("/api/admin/invites", s.handleAdminInvites)
+	mux.HandleFunc("/api/admin/invites/", s.handleAdminInviteActions)
 	mux.HandleFunc("/api/piles", s.handlePiles)
 	mux.HandleFunc("/api/piles/", s.handlePileActions)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)
@@ -80,9 +86,12 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
+		"authConfigVersion":      2,
 		"turnstileEnabled":       s.turnstile.Enabled(),
 		"turnstileSiteKey":       s.turnstile.SiteKey(),
 		"registerCaptchaEnabled": true,
+		"registrationOpen":       s.manager.Settings().OpenRegistration,
+		"inviteRequired":         s.manager.Settings().InviteRequired,
 	})
 }
 
@@ -176,7 +185,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.manager.RegisterUser(req.Username, req.Password)
+	user, err := s.manager.RegisterUser(req.Username, req.Password, req.InviteCode)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -214,6 +223,78 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req model.PasswordChangeRequest
+	if !decodeJSON(w, r, authBodyLimit, &req) {
+		return
+	}
+	if err := s.manager.ChangePassword(user.ID, req.CurrentPassword, req.NewPassword); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	cookie, _ := r.Cookie(sessionCookieName)
+	current := ""
+	if cookie != nil {
+		current = cookie.Value
+	}
+	if err := s.sessions.DeleteOthers(user.ID, current); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码已修改，但撤销其他会话失败"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	cookie, _ := r.Cookie(sessionCookieName)
+	current := ""
+	if cookie != nil {
+		current = cookie.Value
+	}
+	sessions, err := s.sessions.List(user.ID, current)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func (s *Server) handleOtherSessions(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodDelete {
+		methodNotAllowed(w)
+		return
+	}
+	cookie, _ := r.Cookie(sessionCookieName)
+	current := ""
+	if cookie != nil {
+		current = cookie.Value
+	}
+	if err := s.sessions.DeleteOthers(user.ID, current); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
@@ -270,20 +351,36 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	if r.Method != http.MethodDelete {
-		methodNotAllowed(w)
-		return
-	}
 	if !deviceIDPattern.MatchString(parts[2]) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid device id"})
 		return
 	}
 
-	if err := s.manager.DeletePile(user.ID, parts[2]); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-		return
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.manager.DeletePile(user.ID, parts[2]); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodPatch:
+		var req struct {
+			Name      string `json:"name"`
+			Address   string `json:"address"`
+			SortOrder int    `json:"sortOrder"`
+		}
+		if !decodeJSON(w, r, pileBodyLimit, &req) {
+			return
+		}
+		pile, err := s.manager.UpdatePile(user.ID, parts[2], req.Name, req.Address, req.SortOrder)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, pile)
+	default:
+		methodNotAllowed(w)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -422,7 +519,75 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.manager.ListUsers())
+	writeJSON(w, http.StatusOK, s.manager.AdminStats())
+}
+
+func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.manager.Settings())
+	case http.MethodPut:
+		var req model.RegistrationSettings
+		if !decodeJSON(w, r, adminBodyLimit, &req) {
+			return
+		}
+		if err := s.manager.UpdateSettings(req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, s.manager.Settings())
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.manager.InviteCodes())
+	case http.MethodPost:
+		var req struct {
+			Code      string     `json:"code,omitempty"`
+			ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+		}
+		if !decodeJSON(w, r, adminBodyLimit, &req) {
+			return
+		}
+		invite, err := s.manager.CreateInvite(req.Code, req.ExpiresAt)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, invite)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleAdminInviteActions(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	if r.Method != http.MethodDelete {
+		methodNotAllowed(w)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/admin/invites/")
+	if id == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err := s.manager.DeleteInvite(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {

@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 type Store struct {
 	db     *sql.DB
@@ -87,11 +87,33 @@ func (s *Store) initialize() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS invite_codes (
+			id TEXT PRIMARY KEY,
+			code TEXT NOT NULL UNIQUE,
+			enabled INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			expires_at TEXT,
+			used_count INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS metrics (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS metrics_created_at_idx ON metrics(created_at)`,
+		`CREATE INDEX IF NOT EXISTS metrics_user_time_idx ON metrics(user_id, created_at)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {
 			return fmt.Errorf("initialize sqlite database: %w", err)
 		}
+	}
+	if err := s.ensureColumn("users", "device_limit", "INTEGER NOT NULL DEFAULT 10"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("users", "refresh_enabled", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO metadata(key, value) VALUES('schema_version', ?)
@@ -100,6 +122,30 @@ func (s *Store) initialize() error {
 	)
 	if err != nil {
 		return fmt.Errorf("write schema version: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return fmt.Errorf("inspect %s schema: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if _, err := s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
 	}
 	return nil
 }
@@ -196,9 +242,35 @@ func (s *Store) DeleteExpiredSessions(now time.Time) error {
 	return nil
 }
 
+func (s *Store) ListUserSessions(userID string) ([]SessionRecord, error) {
+	rows, err := s.db.Query(`SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE user_id=? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []SessionRecord
+	for rows.Next() {
+		var record SessionRecord
+		var createdAt, expiresAt int64
+		if err := rows.Scan(&record.TokenHash, &record.UserID, &createdAt, &expiresAt); err != nil {
+			return nil, err
+		}
+		record.CreatedAt = time.Unix(0, createdAt)
+		record.ExpiresAt = time.Unix(0, expiresAt)
+		result = append(result, record)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) DeleteOtherSessions(userID string, currentHash []byte) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id=? AND token_hash<>?`, userID, currentHash)
+	return err
+}
+
 func (s *Store) Load() (State, bool, error) {
 	rows, err := s.db.Query(`
-		SELECT id, username, password_hash, role, enabled, created_at, updated_at
+		SELECT id, username, password_hash, role, enabled, created_at, updated_at,
+		       device_limit, refresh_enabled
 		FROM users ORDER BY username
 	`)
 	if err != nil {
@@ -213,7 +285,7 @@ func (s *Store) Load() (State, bool, error) {
 	for rows.Next() {
 		var user model.User
 		var role string
-		var enabled int
+		var enabled, refreshEnabled int
 		var createdAt string
 		var updatedAt string
 		if err := rows.Scan(
@@ -224,11 +296,14 @@ func (s *Store) Load() (State, bool, error) {
 			&enabled,
 			&createdAt,
 			&updatedAt,
+			&user.DeviceLimit,
+			&refreshEnabled,
 		); err != nil {
 			return State{}, false, fmt.Errorf("scan user: %w", err)
 		}
 		user.Role = model.UserRole(role)
 		user.Enabled = enabled != 0
+		user.RefreshEnabled = refreshEnabled != 0
 		user.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
 			return State{}, false, fmt.Errorf("parse user created_at: %w", err)
@@ -245,6 +320,37 @@ func (s *Store) Load() (State, bool, error) {
 	if len(state.Users) == 0 {
 		return state, false, nil
 	}
+	if raw, ok, err := s.metadata("registration_settings"); err != nil {
+		return State{}, false, err
+	} else if ok {
+		if err := json.Unmarshal([]byte(raw), &state.Settings); err != nil {
+			return State{}, false, fmt.Errorf("parse registration settings: %w", err)
+		}
+	}
+	inviteRows, err := s.db.Query(`SELECT id, code, enabled, created_at, expires_at, used_count FROM invite_codes ORDER BY created_at DESC`)
+	if err != nil {
+		return State{}, false, err
+	}
+	for inviteRows.Next() {
+		var invite model.InviteCode
+		var enabled int
+		var createdAt string
+		var expiresAt sql.NullString
+		if err := inviteRows.Scan(&invite.ID, &invite.Code, &enabled, &createdAt, &expiresAt, &invite.UsedCount); err != nil {
+			inviteRows.Close()
+			return State{}, false, err
+		}
+		invite.Enabled = enabled != 0
+		invite.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		if expiresAt.Valid {
+			value, parseErr := time.Parse(time.RFC3339Nano, expiresAt.String)
+			if parseErr == nil {
+				invite.ExpiresAt = &value
+			}
+		}
+		state.Invites = append(state.Invites, invite)
+	}
+	inviteRows.Close()
 
 	stateRows, err := s.db.Query(`
 		SELECT user_id, piles_json, refresh_json, device_ids_json,
@@ -297,6 +403,15 @@ func (s *Store) Load() (State, bool, error) {
 	return state, true, nil
 }
 
+func (s *Store) metadata(key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM metadata WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return value, err == nil, err
+}
+
 func (s *Store) Save(state State) error {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -309,15 +424,16 @@ func (s *Store) Save(state State) error {
 	if _, err := tx.Exec(`DELETE FROM user_states`); err != nil {
 		return fmt.Errorf("clear user states: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM users`); err != nil {
-		return fmt.Errorf("clear users: %w", err)
-	}
-
 	for _, user := range state.Users {
 		if _, err := tx.Exec(`
 			INSERT INTO users(
-				id, username, password_hash, role, enabled, created_at, updated_at
-			) VALUES(?, ?, ?, ?, ?, ?, ?)
+				id, username, password_hash, role, enabled, created_at, updated_at,
+				device_limit, refresh_enabled
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				username=excluded.username, password_hash=excluded.password_hash,
+				role=excluded.role, enabled=excluded.enabled, updated_at=excluded.updated_at,
+				device_limit=excluded.device_limit, refresh_enabled=excluded.refresh_enabled
 		`,
 			user.ID,
 			user.Username,
@@ -326,6 +442,8 @@ func (s *Store) Save(state State) error {
 			user.Enabled,
 			user.CreatedAt.Format(time.RFC3339Nano),
 			user.UpdatedAt.Format(time.RFC3339Nano),
+			user.DeviceLimit,
+			user.RefreshEnabled,
 		); err != nil {
 			return fmt.Errorf("insert user %s: %w", user.ID, err)
 		}
@@ -369,6 +487,30 @@ func (s *Store) Save(state State) error {
 			return fmt.Errorf("insert state for user %s: %w", user.ID, err)
 		}
 	}
+	if _, err := tx.Exec(`DELETE FROM users WHERE id NOT IN (SELECT user_id FROM user_states)`); err != nil {
+		return fmt.Errorf("remove deleted users: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM invite_codes`); err != nil {
+		return err
+	}
+	for _, invite := range state.Invites {
+		var expiresAt any
+		if invite.ExpiresAt != nil {
+			expiresAt = invite.ExpiresAt.Format(time.RFC3339Nano)
+		}
+		if _, err := tx.Exec(`INSERT INTO invite_codes(id, code, enabled, created_at, expires_at, used_count) VALUES(?,?,?,?,?,?)`,
+			invite.ID, invite.Code, invite.Enabled, invite.CreatedAt.Format(time.RFC3339Nano), expiresAt, invite.UsedCount); err != nil {
+			return err
+		}
+	}
+	settingsJSON, err := json.Marshal(state.Settings)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO metadata(key,value) VALUES('registration_settings',?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(settingsJSON)); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(`
 		INSERT INTO metadata(key, value) VALUES('state_version', ?)
@@ -387,4 +529,60 @@ func (s *Store) Save(state State) error {
 		return fmt.Errorf("commit state transaction: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) RecordMetric(userID, kind string, at time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO metrics(user_id, kind, created_at) VALUES(?,?,?)`, userID, kind, at.Unix())
+	return err
+}
+
+func (s *Store) PruneMetrics(before time.Time) error {
+	_, err := s.db.Exec(`DELETE FROM metrics WHERE created_at < ?`, before.Unix())
+	return err
+}
+
+func (s *Store) MetricSeries(since time.Time, bucketSeconds int64) ([]model.MetricPoint, error) {
+	rows, err := s.db.Query(`
+		SELECT (created_at / ?) * ?, kind, COUNT(*), COUNT(DISTINCT user_id)
+		FROM metrics WHERE created_at >= ?
+		GROUP BY 1, kind ORDER BY 1
+	`, bucketSeconds, bucketSeconds, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	points := map[int64]*model.MetricPoint{}
+	var order []int64
+	for rows.Next() {
+		var bucket int64
+		var kind string
+		var count, active int
+		if err := rows.Scan(&bucket, &kind, &count, &active); err != nil {
+			return nil, err
+		}
+		point := points[bucket]
+		if point == nil {
+			point = &model.MetricPoint{Time: time.Unix(bucket, 0)}
+			points[bucket] = point
+			order = append(order, bucket)
+		}
+		switch kind {
+		case "request":
+			point.Requests += count
+			point.ActiveUsers += active
+		case "remote":
+			point.Remote += count
+		case "cache":
+			point.CacheHits += count
+		case "remote_ok":
+			point.RemoteOK += count
+		case "cookie_error":
+			point.CookieErrors += count
+		}
+	}
+	result := make([]model.MetricPoint, 0, len(order))
+	for _, bucket := range order {
+		result = append(result, *points[bucket])
+	}
+	return result, rows.Err()
 }
