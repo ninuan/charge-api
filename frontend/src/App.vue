@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { createDiscreteApi } from "naive-ui";
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button as UiButton } from "@/components/ui/button";
@@ -52,6 +52,11 @@ const turnstileRef = ref<InstanceType<typeof TurnstileWidget> | null>(null);
 const captchaToken = ref("");
 const turnstileEnabled = ref(false);
 const turnstileSiteKey = ref("");
+const registerCaptchaEnabled = ref(true);
+const registerCaptchaID = ref("");
+const registerCaptchaImage = ref("");
+const registerCaptchaAnswer = ref("");
+const registerCaptchaLoading = ref(false);
 const authConfigReady = ref(false);
 
 const loginForm = reactive({
@@ -150,15 +155,27 @@ async function register() {
     message.error("请先完成人机验证");
     return;
   }
+  if (registerCaptchaEnabled.value && (!registerCaptchaID.value || !registerCaptchaAnswer.value.trim())) {
+    message.error("请输入图片验证码");
+    return;
+  }
 
   registering.value = true;
   try {
-    await auth.register(loginForm.username.trim(), loginForm.password, captchaToken.value);
+    await auth.register(
+      loginForm.username.trim(),
+      loginForm.password,
+      captchaToken.value,
+      registerCaptchaID.value,
+      registerCaptchaAnswer.value.trim()
+    );
     loginForm.password = "";
+    clearRegisterCaptcha();
     await store.fetchSnapshot();
     message.success("注册成功");
   } catch (error) {
     message.error((error as Error).message);
+    await loadRegisterCaptcha();
   } finally {
     registering.value = false;
     resetCaptcha();
@@ -179,13 +196,62 @@ async function loadAuthConfig() {
     const config = (await res.json()) as {
       turnstileEnabled: boolean;
       turnstileSiteKey: string;
+      registerCaptchaEnabled?: boolean;
     };
     turnstileEnabled.value = config.turnstileEnabled;
     turnstileSiteKey.value = config.turnstileSiteKey;
+    registerCaptchaEnabled.value = config.registerCaptchaEnabled ?? true;
     authConfigReady.value = true;
+    if (authMode.value === "register") {
+      await loadRegisterCaptcha();
+    }
   } catch {
     authConfigReady.value = false;
     message.error("安全验证配置加载失败，请刷新页面重试");
+  }
+}
+
+async function loadRegisterCaptcha() {
+  if (!registerCaptchaEnabled.value) return;
+  registerCaptchaLoading.value = true;
+  registerCaptchaAnswer.value = "";
+  try {
+    const res = await fetch("/api/auth/register-captcha", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error ?? "load captcha failed");
+    }
+    const captcha = (await res.json()) as {
+      id: string;
+      image: string;
+      expiresAt: string;
+    };
+    registerCaptchaID.value = captcha.id;
+    registerCaptchaImage.value = captcha.image;
+  } catch (error) {
+    clearRegisterCaptcha();
+    message.error((error as Error).message);
+  } finally {
+    registerCaptchaLoading.value = false;
+  }
+}
+
+function clearRegisterCaptcha() {
+  registerCaptchaID.value = "";
+  registerCaptchaImage.value = "";
+  registerCaptchaAnswer.value = "";
+}
+
+function switchAuthMode() {
+  authMode.value = authMode.value === "login" ? "register" : "login";
+  resetCaptcha();
+  if (authMode.value === "register") {
+    void loadRegisterCaptcha();
+  } else {
+    clearRegisterCaptcha();
   }
 }
 
@@ -379,6 +445,12 @@ function roleLabel(role: UserRole) {
   return role === "admin" ? "管理员" : "普通用户";
 }
 
+watch(authMode, (mode) => {
+  if (mode === "register" && authConfigReady.value && !registerCaptchaImage.value) {
+    void loadRegisterCaptcha();
+  }
+});
+
 onMounted(async () => {
   await loadAuthConfig();
   const user = await auth.fetchMe();
@@ -423,6 +495,28 @@ onMounted(async () => {
               密码
               <UiInput v-model="loginForm.password" type="password" placeholder="请输入密码" />
             </label>
+            <label v-if="authMode === 'register' && registerCaptchaEnabled" class="captcha-field">
+              图片验证码
+              <div class="captcha-row">
+                <UiInput
+                  v-model="registerCaptchaAnswer"
+                  autocomplete="off"
+                  inputmode="text"
+                  maxlength="12"
+                  placeholder="输入右侧验证码"
+                />
+                <button
+                  class="captcha-image-button"
+                  type="button"
+                  :disabled="registerCaptchaLoading"
+                  title="点击刷新验证码"
+                  @click="loadRegisterCaptcha"
+                >
+                  <img v-if="registerCaptchaImage" :src="registerCaptchaImage" alt="注册验证码">
+                  <span v-else>{{ registerCaptchaLoading ? '加载中' : '刷新' }}</span>
+                </button>
+              </div>
+            </label>
             <TurnstileWidget
               v-if="turnstileEnabled && turnstileSiteKey"
               ref="turnstileRef"
@@ -436,7 +530,7 @@ onMounted(async () => {
             <UiButton
               type="submit"
               size="lg"
-              :disabled="!authConfigReady || loggingIn || registering || (turnstileEnabled && !captchaToken)"
+              :disabled="!authConfigReady || loggingIn || registering || registerCaptchaLoading || (turnstileEnabled && !captchaToken)"
             >
               <span v-if="authMode === 'login'">{{ loggingIn ? '登录中...' : '登录' }}</span>
               <span v-else>{{ registering ? '注册中...' : '注册并进入' }}</span>
@@ -444,7 +538,7 @@ onMounted(async () => {
             <UiButton
               type="button"
               variant="ghost"
-              @click="authMode = authMode === 'login' ? 'register' : 'login'; resetCaptcha()"
+              @click="switchAuthMode"
             >
               {{ authMode === 'login' ? '没有账号？注册普通用户' : '已有账号？返回登录' }}
             </UiButton>
@@ -803,6 +897,50 @@ onMounted(async () => {
   text-align: center;
 }
 
+.captcha-field {
+  gap: 8px !important;
+}
+
+.captcha-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 168px;
+  gap: 10px;
+  align-items: center;
+}
+
+.captcha-image-button {
+  height: 54px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 14%), rgb(255 255 255 / 6%)),
+    rgb(20 35 27 / 80%);
+  color: #d7e3dc;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.captcha-image-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(157 214 178 / 45%);
+}
+
+.captcha-image-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.captcha-image-button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: #9dd6b2;
@@ -1061,8 +1199,14 @@ onMounted(async () => {
   .admin-metrics-grid,
   .user-metrics-grid,
   .pile-form,
-  .admin-create-form {
+  .admin-create-form,
+  .captcha-row {
     grid-template-columns: 1fr;
+  }
+
+  .captcha-image-button {
+    width: 168px;
+    max-width: 100%;
   }
 }
 </style>

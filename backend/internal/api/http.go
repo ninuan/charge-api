@@ -33,6 +33,7 @@ type Server struct {
 	sessions  *auth.SessionManager
 	turnstile *auth.TurnstileVerifier
 	authGuard *auth.AuthGuard
+	captcha   *auth.CaptchaStore
 }
 
 func NewServer(
@@ -46,11 +47,13 @@ func NewServer(
 		sessions:  sessions,
 		turnstile: turnstile,
 		authGuard: authGuard,
+		captcha:   auth.NewCaptchaStore(),
 	}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/config", s.handleAuthConfig)
+	mux.HandleFunc("/api/auth/register-captcha", s.handleRegisterCaptcha)
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/logout", s.handleLogout)
@@ -77,9 +80,28 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"turnstileEnabled": s.turnstile.Enabled(),
-		"turnstileSiteKey": s.turnstile.SiteKey(),
+		"turnstileEnabled":       s.turnstile.Enabled(),
+		"turnstileSiteKey":       s.turnstile.SiteKey(),
+		"registerCaptchaEnabled": true,
 	})
+}
+
+func (s *Server) handleRegisterCaptcha(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.allowAuthRate(w, clientIP(r)) {
+		return
+	}
+
+	challenge, err := s.captcha.Generate()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, challenge)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +165,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.allowAuthIdentity(w, ip, req.Username) {
+		return
+	}
+	if err := s.captcha.Verify(req.CaptchaID, req.CaptchaAnswer); err != nil {
+		s.writeAuthFailure(w, ip, req.Username, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "register"); err != nil {

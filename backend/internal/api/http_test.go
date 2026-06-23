@@ -2,9 +2,11 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +107,62 @@ func TestDecodeJSONRejectsOversizedAndUnknownFields(t *testing.T) {
 	})
 }
 
+func TestRegisterRequiresCaptcha(t *testing.T) {
+	server, _, _ := newTestServer(t)
+
+	body := strings.NewReader(`{"username":"alice","password":"password123","captchaToken":""}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.handleRegister(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("register returned %d, want 400: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "验证码") {
+		t.Fatalf("response does not mention captcha: %s", recorder.Body.String())
+	}
+}
+
+func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
+	server, _, _ := newTestServer(t)
+
+	captchaRecorder := httptest.NewRecorder()
+	captchaRequest := httptest.NewRequest(http.MethodGet, "/api/auth/register-captcha", nil)
+	server.handleRegisterCaptcha(captchaRecorder, captchaRequest)
+	if captchaRecorder.Code != http.StatusOK {
+		t.Fatalf("captcha returned %d: %s", captchaRecorder.Code, captchaRecorder.Body.String())
+	}
+	var challenge struct {
+		ID    string `json:"id"`
+		Image string `json:"image"`
+	}
+	if err := json.NewDecoder(captchaRecorder.Body).Decode(&challenge); err != nil {
+		t.Fatalf("decode captcha: %v", err)
+	}
+	answer := captchaAnswerFromImage(t, challenge.Image)
+
+	payload := map[string]string{
+		"username":      "alice",
+		"password":      "password123",
+		"captchaToken":  "",
+		"captchaId":     challenge.ID,
+		"captchaAnswer": answer,
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(bodyBytes))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.handleRegister(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("register returned %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestSecureCookieHonorsTrustedForwardedProto(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "http://charge.example/api/auth/login", nil)
 	request.RemoteAddr = "127.0.0.1:54321"
@@ -162,4 +220,21 @@ func findUser(t *testing.T, manager *appruntime.Manager, username string) model.
 	encoded, _ := json.Marshal(manager.ListUsers())
 	t.Fatalf("user %q not found in %s", username, encoded)
 	return model.CurrentUser{}
+}
+
+func captchaAnswerFromImage(t *testing.T, image string) string {
+	t.Helper()
+	const prefix = "data:image/svg+xml;base64,"
+	if !strings.HasPrefix(image, prefix) {
+		t.Fatalf("captcha image has unexpected prefix: %q", image)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(image, prefix))
+	if err != nil {
+		t.Fatalf("decode captcha image: %v", err)
+	}
+	matches := regexp.MustCompile(`>([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5})</text>`).FindSubmatch(decoded)
+	if len(matches) != 2 {
+		t.Fatalf("captcha answer not found in svg: %s", decoded)
+	}
+	return string(matches[1])
 }

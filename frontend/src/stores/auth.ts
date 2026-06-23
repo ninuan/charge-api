@@ -42,12 +42,18 @@ export const useAuthStore = defineStore("auth", () => {
     return currentUser.value;
   }
 
-  async function register(username: string, password: string, captchaToken: string) {
+  async function register(
+    username: string,
+    password: string,
+    captchaToken: string,
+    captchaId: string,
+    captchaAnswer: string
+  ) {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, captchaToken })
+      body: JSON.stringify({ username, password, captchaToken, captchaId, captchaAnswer })
     });
     if (!res.ok) {
       const err = await res.json();
