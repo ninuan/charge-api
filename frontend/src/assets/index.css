@@ -161,6 +161,14 @@
     @apply grid size-7 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground;
   }
 
+  .identity-role {
+    @apply inline-flex min-h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-xs font-semibold text-secondary-foreground;
+  }
+
+  .identity-role svg {
+    @apply size-3.5 shrink-0;
+  }
+
   .section-kicker {
     @apply text-[11px] font-bold uppercase tracking-[0.18em] text-primary;
   }

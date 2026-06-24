@@ -3,7 +3,6 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { LogOut, RefreshCw, ShieldCheck, UserRound } from "@lucide/vue";
 import { Button as UiButton } from "@/components/ui/button";
-import { Badge as UiBadge } from "@/components/ui/badge";
 import { useAuthStore } from "@/stores/auth";
 import SecurityDialog from "@/components/SecurityDialog.vue";
 
@@ -61,10 +60,10 @@ async function logout() {
           <div class="identity-pill hidden sm:flex">
             <span class="identity-avatar" aria-hidden="true">{{ auth.currentUser?.username?.slice(0, 1).toUpperCase() }}</span>
             <span class="max-w-32 truncate text-sm font-semibold">{{ auth.currentUser?.username }}</span>
-            <UiBadge :variant="auth.isAdmin ? 'default' : 'secondary'">
+            <span class="identity-role">
               <component :is="roleIcon" />
               {{ roleLabel }}
-            </UiBadge>
+            </span>
           </div>
           <UiButton variant="ghost" aria-label="退出登录" title="退出登录" @click="logout">
             <LogOut />
