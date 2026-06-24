@@ -53,7 +53,7 @@ onMounted(loadSessions);
 <template>
   <Dialog>
     <DialogTrigger as-child>
-      <UiButton variant="outline"><KeyRound />安全中心</UiButton>
+      <UiButton class="shell-action" variant="outline"><KeyRound />安全中心</UiButton>
     </DialogTrigger>
     <DialogContent class="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto rounded-2xl p-0 sm:max-w-4xl">
       <DialogHeader class="security-dialog-header">

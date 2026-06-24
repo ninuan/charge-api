@@ -42,7 +42,7 @@ async function save() {
 <template>
   <Dialog v-model:open="open">
     <DialogTrigger as-child>
-      <UiButton variant="outline"><Cookie />更新 Cookie</UiButton>
+      <UiButton class="dashboard-action" variant="outline"><Cookie />更新 Cookie</UiButton>
     </DialogTrigger>
     <DialogContent class="max-w-2xl">
       <DialogHeader>

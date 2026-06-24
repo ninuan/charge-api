@@ -24,14 +24,15 @@ describe("AppShell", () => {
     setActivePinia(createPinia());
   });
 
-  it("renders the identity role as part of the shell instead of a generic badge", () => {
+  it("renders header actions with one shared sizing system", () => {
     const auth = useAuthStore();
     auth.currentUser = user;
 
     const wrapper = mount(AppShell, {
       props: {
         title: "充电桩运营看板",
-        description: "查看端口状态"
+        description: "查看端口状态",
+        showRefresh: true
       },
       global: {
         stubs: {
@@ -41,7 +42,10 @@ describe("AppShell", () => {
     });
 
     const identity = wrapper.get(".identity-pill");
+    const refresh = wrapper.get('[aria-label="刷新状态"]');
 
+    expect(refresh.classes()).toContain("shell-action");
+    expect(identity.classes()).toContain("shell-identity");
     expect(identity.find(".identity-role").exists()).toBe(true);
     expect(identity.find(".identity-role").text()).toContain("普通用户");
     expect(identity.find('[data-slot="badge"]').exists()).toBe(false);

@@ -7,7 +7,7 @@ defineProps<{
 </script>
 
 <template>
-  <span :class="['connection-badge', `connection-badge--${state}`]" role="status">
+  <span :class="['connection-badge dashboard-action', `connection-badge--${state}`]" role="status">
     <Radio v-if="state === 'connected'" />
     <CircleAlert v-else-if="state === 'connecting'" />
     <WifiOff v-else />

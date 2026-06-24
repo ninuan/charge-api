@@ -49,7 +49,9 @@ async function logout() {
         <div class="flex items-center gap-2">
           <UiButton
             v-if="props.showRefresh"
+            class="shell-action"
             variant="outline"
+            aria-label="刷新状态"
             :disabled="props.refreshing"
             @click="emit('refresh')"
           >
@@ -57,7 +59,7 @@ async function logout() {
             <span class="hidden sm:inline">{{ props.refreshing ? "刷新中" : "刷新状态" }}</span>
           </UiButton>
           <SecurityDialog v-if="!auth.isAdmin" />
-          <div class="identity-pill hidden sm:flex">
+          <div class="identity-pill shell-identity hidden sm:flex">
             <span class="identity-avatar" aria-hidden="true">{{ auth.currentUser?.username?.slice(0, 1).toUpperCase() }}</span>
             <span class="max-w-32 truncate text-sm font-semibold">{{ auth.currentUser?.username }}</span>
             <span class="identity-role">

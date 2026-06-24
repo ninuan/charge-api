@@ -60,7 +60,7 @@ async function submit() {
 <template>
   <Dialog v-model:open="open">
     <DialogTrigger as-child>
-      <UiButton><Plus />添加充电桩</UiButton>
+      <UiButton class="dashboard-action dashboard-action--primary"><Plus />添加充电桩</UiButton>
     </DialogTrigger>
     <DialogContent class="max-w-xl">
       <DialogHeader>

@@ -153,8 +153,16 @@
     @apply size-12 bg-emerald-400;
   }
 
+  .shell-action {
+    @apply h-11 min-w-36 rounded-lg px-3.5 text-sm font-medium;
+  }
+
   .identity-pill {
-    @apply min-h-11 items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 shadow-sm;
+    @apply items-center gap-2 border border-border bg-card shadow-sm;
+  }
+
+  .shell-identity {
+    @apply h-11 min-w-48 justify-center rounded-lg px-3;
   }
 
   .identity-avatar {
@@ -162,7 +170,7 @@
   }
 
   .identity-role {
-    @apply inline-flex min-h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-xs font-semibold text-secondary-foreground;
+    @apply inline-flex h-8 items-center gap-1.5 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground;
   }
 
   .identity-role svg {
@@ -248,13 +256,21 @@
   .metric-panel--blue .metric-icon { @apply bg-sky-700/10 text-sky-800; }
 
   .connection-badge {
-    @apply inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3.5 text-sm font-medium text-foreground transition-colors;
+    @apply inline-flex shrink-0 items-center justify-center gap-2 border border-border bg-background text-foreground transition-colors;
   }
 
   .connection-badge svg { @apply size-4 shrink-0; }
   .connection-badge--connected svg { @apply text-primary; }
   .connection-badge--connecting svg { @apply text-amber-700; }
   .connection-badge--offline svg { @apply text-destructive; }
+
+  .dashboard-action {
+    @apply h-11 min-w-36 rounded-lg px-3.5 text-sm font-medium;
+  }
+
+  .dashboard-action--primary {
+    @apply min-w-40;
+  }
 
   .refresh-status {
     @apply mt-4 flex items-start gap-3 rounded-2xl border p-4 text-sm;
