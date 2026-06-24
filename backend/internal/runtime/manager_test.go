@@ -179,6 +179,35 @@ func TestCreateInviteGeneratesRandomCode(t *testing.T) {
 	}
 }
 
+func TestAdminStatsJSONUsesEmptyArrays(t *testing.T) {
+	manager, err := NewManager(
+		testRepository(t),
+		"",
+		parser.DefaultCaptureRequests(),
+		"admin-password-123",
+		30*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	body, err := json.Marshal(manager.AdminStats())
+	if err != nil {
+		t.Fatalf("marshal admin stats: %v", err)
+	}
+	for _, forbidden := range []string{
+		`"users":null`,
+		`"hourly":null`,
+		`"daily":null`,
+		`"exceptions":null`,
+		`"deviceIds":null`,
+	} {
+		if bytes.Contains(body, []byte(forbidden)) {
+			t.Fatalf("admin stats JSON contains %s: %s", forbidden, body)
+		}
+	}
+}
+
 func TestNewManagerMigratesLegacyJSONAndRemovesPlaintextCookie(t *testing.T) {
 	dir := t.TempDir()
 	legacyPath := dir + "/charge_state.json"

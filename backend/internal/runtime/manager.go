@@ -246,7 +246,7 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 	summaries := make([]model.AdminUserSummary, 0, len(users))
 	for i, user := range users {
 		runtime := runtimes[i]
-		summary := model.AdminUserSummary{User: publicUser(user)}
+		summary := model.AdminUserSummary{User: publicUser(user), DeviceIDs: []string{}}
 		if runtime != nil {
 			snapshot := runtime.store.Snapshot()
 			summary.Stats = runtime.statsSnapshot()
@@ -958,7 +958,7 @@ func (m *Manager) AdminStats() model.AdminStats {
 	hourly, _ := m.repository.MetricSeries(time.Now().Add(-24*time.Hour), 3600)
 	daily, _ := m.repository.MetricSeries(time.Now().AddDate(0, 0, -30), 86400)
 	users := m.ListUsers()
-	var exceptions []model.SystemException
+	exceptions := make([]model.SystemException, 0)
 	now := time.Now()
 	for _, summary := range users {
 		if summary.User.Role != model.RoleUser {
@@ -983,6 +983,15 @@ func (m *Manager) AdminStats() model.AdminStats {
 		if summary.Dashboard.OfflinePorts > 0 {
 			exceptions = append(exceptions, model.SystemException{ID: "offline-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "offline", Level: "warning", Message: fmt.Sprintf("%d 个充电口处于离线状态", summary.Dashboard.OfflinePorts), Time: now})
 		}
+	}
+	if hourly == nil {
+		hourly = []model.MetricPoint{}
+	}
+	if daily == nil {
+		daily = []model.MetricPoint{}
+	}
+	if users == nil {
+		users = []model.AdminUserSummary{}
 	}
 	return model.AdminStats{Users: users, Hourly: hourly, Daily: daily, Exceptions: exceptions}
 }

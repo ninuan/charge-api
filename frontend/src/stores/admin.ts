@@ -1,6 +1,61 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import type { AdminStats, AdminUserSummary, CurrentUser, InviteCode, RegistrationSettings, SystemException, UserRole } from "@/types/dashboard";
+import type { AdminStats, AdminUserSummary, CurrentUser, DashboardCounters, InviteCode, RefreshInfo, RegistrationSettings, SystemException, TrafficStats, UserRole } from "@/types/dashboard";
+
+type NullableAdminUserSummary = Omit<AdminUserSummary, "dashboard" | "deviceIds" | "lastRefresh" | "stats"> & {
+  dashboard?: DashboardCounters | null;
+  deviceIds?: string[] | null;
+  lastRefresh?: RefreshInfo | null;
+  stats?: TrafficStats | null;
+};
+
+type NullableAdminStats = {
+  users?: NullableAdminUserSummary[] | null;
+  hourly?: AdminStats["hourly"] | null;
+  daily?: AdminStats["daily"] | null;
+  exceptions?: SystemException[] | null;
+};
+
+const emptyStats: TrafficStats = {
+  totalRequests: 0,
+  refreshRequests: 0,
+  remoteFetches: 0,
+  cachedRefreshes: 0,
+  failedRequests: 0,
+  authFailures: 0
+};
+
+const emptyDashboard: DashboardCounters = {
+  pileCount: 0,
+  portCount: 0,
+  inUsePortCount: 0,
+  idlePortCount: 0,
+  offlinePorts: 0
+};
+
+const emptyRefresh: RefreshInfo = {
+  minIntervalSeconds: 30,
+  attemptedDevices: 0,
+  successfulDevices: 0,
+  failedDevices: 0,
+  skippedDevices: 0,
+  cached: false,
+  partial: false
+};
+
+function arrayOrEmpty<T>(value?: T[] | null) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeSummary(summary: NullableAdminUserSummary): AdminUserSummary {
+  return {
+    ...summary,
+    stats: summary.stats ?? emptyStats,
+    dashboard: summary.dashboard ?? emptyDashboard,
+    deviceIds: arrayOrEmpty(summary.deviceIds),
+    lastRefresh: summary.lastRefresh ?? emptyRefresh
+  };
+}
 
 export const useAdminStore = defineStore("admin", () => {
   const users = ref<AdminUserSummary[]>([]);
@@ -20,7 +75,7 @@ export const useAdminStore = defineStore("admin", () => {
     result.cachedRefreshes += summary.stats.cachedRefreshes;
     result.failedRequests += summary.stats.failedRequests;
     result.authFailures += summary.stats.authFailures;
-    result.devices += summary.deviceIds.length;
+    result.devices += arrayOrEmpty(summary.deviceIds).length;
     return result;
   }, {
     users: 0,
@@ -39,17 +94,17 @@ export const useAdminStore = defineStore("admin", () => {
     try {
       const res = await fetch("/api/admin/stats", { credentials: "include" });
       if (!res.ok) throw new Error((await res.json()).error ?? "加载用户失败");
-      const data = await res.json() as AdminStats;
-      users.value = data.users;
-      exceptions.value = data.exceptions;
-      hourly.value = data.hourly;
-      daily.value = data.daily;
+      const data = await res.json() as NullableAdminStats;
+      users.value = arrayOrEmpty(data.users).map(normalizeSummary);
+      exceptions.value = arrayOrEmpty(data.exceptions);
+      hourly.value = arrayOrEmpty(data.hourly);
+      daily.value = arrayOrEmpty(data.daily);
       const [settingsRes, invitesRes] = await Promise.all([
         fetch("/api/admin/settings", { credentials: "include" }),
         fetch("/api/admin/invites", { credentials: "include" })
       ]);
       if (settingsRes.ok) settings.value = await settingsRes.json();
-      if (invitesRes.ok) invites.value = await invitesRes.json();
+      if (invitesRes.ok) invites.value = arrayOrEmpty(await invitesRes.json() as InviteCode[] | null);
     } finally {
       loading.value = false;
     }
