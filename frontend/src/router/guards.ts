@@ -34,3 +34,7 @@ export async function resolveProtectedRouteAfterAuth(options: AuthResolutionOpti
   }
   return resolveProtectedRoute(role, options.requiredRole);
 }
+
+export function toNavigationGuardResult(redirect: string | null) {
+  return redirect ? { path: redirect, replace: true } : true;
+}

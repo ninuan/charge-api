@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveHomeRoute, resolveProtectedRoute, resolveProtectedRouteAfterAuth } from "./guards";
+import { resolveHomeRoute, resolveProtectedRoute, resolveProtectedRouteAfterAuth, toNavigationGuardResult } from "./guards";
 
 describe("route guards", () => {
   it("sends anonymous users to login", () => {
@@ -28,5 +28,10 @@ describe("route guards", () => {
     });
 
     expect(redirect).toBe("/login");
+  });
+
+  it("replaces history when a protected route redirects to login", () => {
+    expect(toNavigationGuardResult("/login")).toEqual({ path: "/login", replace: true });
+    expect(toNavigationGuardResult(null)).toBe(true);
   });
 });

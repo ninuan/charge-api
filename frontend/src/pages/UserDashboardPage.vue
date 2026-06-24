@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { createDiscreteApi } from "naive-ui";
 import { Activity, BatteryCharging, CircleDot, Clock3, PlugZap, RotateCcw, Search, TriangleAlert } from "@lucide/vue";
 import { Input as UiInput } from "@/components/ui/input";
@@ -11,10 +12,13 @@ import MetricCard from "@/components/MetricCard.vue";
 import PileCard from "@/components/PileCard.vue";
 import { Button as UiButton } from "@/components/ui/button";
 import { useDashboardStream } from "@/composables/useDashboardStream";
+import { useAuthStore } from "@/stores/auth";
 import { useDashboardStore } from "@/stores/dashboard";
 import type { PortStatus } from "@/types/dashboard";
 
 const store = useDashboardStore();
+const auth = useAuthStore();
+const router = useRouter();
 const { message } = createDiscreteApi(["message"]);
 const refreshing = ref(false);
 const search = ref("");
@@ -42,6 +46,15 @@ const visiblePiles = computed(() => store.piles.flatMap((pile) => {
 const visiblePortCount = computed(() => visiblePiles.value.reduce((total, entry) => total + entry.portIds.length, 0));
 const hasActiveFilter = computed(() => Boolean(search.value.trim()) || filter.value !== "all");
 
+async function handlePageError(error: unknown) {
+  if ((error as Error).message.includes("登录已失效")) {
+    auth.clearSession();
+    await router.replace("/login");
+    return;
+  }
+  message.error((error as Error).message);
+}
+
 function formatTime(value?: string) {
   if (!value) return "--";
   return new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -58,7 +71,7 @@ async function refresh() {
     await store.refreshFromCapture();
     message.success(store.refresh.message || "设备状态已刷新");
   } catch (error) {
-    message.error((error as Error).message);
+    await handlePageError(error);
   } finally {
     refreshing.value = false;
   }
@@ -69,7 +82,7 @@ async function removePile(id: string) {
     await store.deletePile(id);
     message.success("充电桩已移除");
   } catch (error) {
-    message.error((error as Error).message);
+    await handlePageError(error);
   }
 }
 
@@ -78,7 +91,7 @@ async function updatePile(id: string, payload: { name: string; address: string; 
     await store.updatePile(id, payload);
     message.success("设备资料已更新");
   } catch (error) {
-    message.error((error as Error).message);
+    await handlePageError(error);
   }
 }
 
@@ -87,7 +100,7 @@ onMounted(async () => {
     await store.fetchSnapshot();
     stream.connect();
   } catch (error) {
-    message.error((error as Error).message);
+    await handlePageError(error);
   }
 });
 </script>

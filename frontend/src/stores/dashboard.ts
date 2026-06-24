@@ -23,6 +23,14 @@ const emptySnapshot: DashboardSnapshot = {
   }
 };
 
+async function throwResponseError(res: Response, fallback: string): Promise<never> {
+  if (res.status === 401) {
+    throw new Error("登录已失效，请重新登录");
+  }
+  const err = await res.json().catch(() => ({ error: fallback }));
+  throw new Error(err.error ?? fallback);
+}
+
 export const useDashboardStore = defineStore("dashboard", () => {
   const snapshot = ref<DashboardSnapshot>(emptySnapshot);
   const loading = ref(false);
@@ -47,7 +55,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     try {
       const res = await fetch("/api/piles", { credentials: "include" });
       if (!res.ok) {
-        throw new Error(`Load failed: ${res.status}`);
+        await throwResponseError(res, "Load failed");
       }
       snapshot.value = (await res.json()) as DashboardSnapshot;
     } finally {
@@ -63,8 +71,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error ?? "add pile failed");
+      await throwResponseError(res, "add pile failed");
     }
     const pile = (await res.json()) as Pile;
     await fetchSnapshot();
@@ -77,8 +84,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       credentials: "include"
     });
     if (!res.ok && res.status !== 204) {
-      const err = await res.json();
-      throw new Error(err.error ?? "delete pile failed");
+      await throwResponseError(res, "delete pile failed");
     }
     await fetchSnapshot();
   }
@@ -88,7 +94,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error((await res.json()).error ?? "更新充电桩失败");
+    if (!res.ok) await throwResponseError(res, "更新充电桩失败");
     await fetchSnapshot();
   }
 
@@ -98,8 +104,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       credentials: "include"
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error ?? "refresh failed");
+      await throwResponseError(res, "refresh failed");
     }
     snapshot.value = (await res.json()) as DashboardSnapshot;
   }
@@ -112,8 +117,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       body: JSON.stringify({ cookie })
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error ?? "cookie update failed");
+      await throwResponseError(res, "cookie update failed");
     }
     snapshot.value = (await res.json()) as DashboardSnapshot;
   }

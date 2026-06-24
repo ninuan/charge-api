@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { resolveProtectedRouteAfterAuth } from "./guards";
+import { resolveProtectedRouteAfterAuth, toNavigationGuardResult } from "./guards";
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -44,7 +44,7 @@ router.beforeEach(async (to) => {
     requiredRole: (to.meta.role as "admin" | "user" | "guest" | undefined) ?? "guest",
     fetchMe: auth.fetchMe
   });
-  return redirect ?? true;
+  return toNavigationGuardResult(redirect);
 });
 
 export default router;

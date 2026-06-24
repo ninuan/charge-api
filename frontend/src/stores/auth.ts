@@ -10,12 +10,17 @@ export const useAuthStore = defineStore("auth", () => {
   const isLoggedIn = computed(() => currentUser.value !== null);
   const isAdmin = computed(() => currentUser.value?.role === "admin");
 
+  function clearSession() {
+    currentUser.value = null;
+    initialized.value = true;
+  }
+
   async function fetchMe() {
     loading.value = true;
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.status === 401) {
-        currentUser.value = null;
+        clearSession();
         return null;
       }
       if (!res.ok) {
@@ -95,6 +100,7 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     register,
     logout,
-    changePassword
+    changePassword,
+    clearSession
   };
 });
