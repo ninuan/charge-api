@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	stateVersion       = 2
+	stateVersion       = 3
 	defaultDeviceLimit = 10
 	maxDevicesPerUser  = defaultDeviceLimit
 )
@@ -224,6 +224,23 @@ func (m *Manager) User(id string) (model.CurrentUser, bool) {
 		return model.CurrentUser{}, false
 	}
 	return publicUser(user), true
+}
+
+func (m *Manager) AcknowledgeUsageGuide(userID string) (model.CurrentUser, error) {
+	m.mu.Lock()
+	user, ok := m.users[userID]
+	if !ok || !user.Enabled {
+		m.mu.Unlock()
+		return model.CurrentUser{}, fmt.Errorf("user not found or disabled")
+	}
+	if user.UsageGuideAckAt == nil {
+		now := time.Now()
+		user.UsageGuideAckAt = &now
+		user.UpdatedAt = now
+		m.users[userID] = user
+	}
+	m.mu.Unlock()
+	return publicUser(user), m.Save()
 }
 
 func (m *Manager) ListUsers() []model.AdminUserSummary {
@@ -454,11 +471,30 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 	if err != nil {
 		return model.Pile{}, err
 	}
+	req.ID = strings.TrimSpace(req.ID)
+	req.Number = strings.TrimSpace(req.Number)
+	req.Name = strings.TrimSpace(req.Name)
+	req.Address = strings.TrimSpace(req.Address)
 	runtime.recordRequest()
 	m.recordMetric(userID, "request")
 	user, _ := m.User(userID)
 	if !user.RefreshEnabled {
 		return model.Pile{}, fmt.Errorf("管理员已暂停此账户的远端刷新，暂时无法验证新设备")
+	}
+	if req.ID == "" {
+		if req.Number == "" {
+			return model.Pile{}, fmt.Errorf("请输入桩号或设备长ID")
+		}
+		if user.DeviceLimit > 0 && len(runtime.client.DeviceIDs()) >= user.DeviceLimit {
+			return model.Pile{}, fmt.Errorf("当前账户最多添加 %d 台充电桩", user.DeviceLimit)
+		}
+		resolvedID, err := runtime.client.ResolveDeviceIDByNumber(req.Number)
+		if err != nil {
+			runtime.recordFailure(false)
+			_ = m.Save()
+			return model.Pile{}, err
+		}
+		req.ID = resolvedID
 	}
 	if err := runtime.client.AddDeviceWithLimit(req.ID, user.DeviceLimit); err != nil {
 		runtime.recordFailure(false)
@@ -840,13 +876,14 @@ func validateNewPassword(password string) error {
 
 func publicUser(user model.User) model.CurrentUser {
 	return model.CurrentUser{
-		ID:             user.ID,
-		Username:       user.Username,
-		Role:           user.Role,
-		Enabled:        user.Enabled,
-		CreatedAt:      user.CreatedAt,
-		DeviceLimit:    user.DeviceLimit,
-		RefreshEnabled: user.RefreshEnabled,
+		ID:              user.ID,
+		Username:        user.Username,
+		Role:            user.Role,
+		Enabled:         user.Enabled,
+		CreatedAt:       user.CreatedAt,
+		DeviceLimit:     user.DeviceLimit,
+		RefreshEnabled:  user.RefreshEnabled,
+		UsageGuideAckAt: user.UsageGuideAckAt,
 	}
 }
 

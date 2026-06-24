@@ -71,6 +71,54 @@ func TestAdminUpdateRevokesTargetUserSessions(t *testing.T) {
 	}
 }
 
+func TestUserCanAcknowledgeUsageGuide(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	user, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "alice",
+		Password: "password123",
+		Role:     model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	session, err := sessions.Create(user.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	ackRequest := httptest.NewRequest(http.MethodPost, "/api/user/usage-guide/ack", nil)
+	ackRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	ackRecorder := httptest.NewRecorder()
+	server.handleUsageGuideAck(ackRecorder, ackRequest)
+
+	if ackRecorder.Code != http.StatusOK {
+		t.Fatalf("ack returned %d: %s", ackRecorder.Code, ackRecorder.Body.String())
+	}
+	var acknowledged model.CurrentUser
+	if err := json.NewDecoder(ackRecorder.Body).Decode(&acknowledged); err != nil {
+		t.Fatalf("decode ack response: %v", err)
+	}
+	if acknowledged.UsageGuideAckAt == nil {
+		t.Fatal("ack response did not include usageGuideAckAt")
+	}
+
+	meRequest := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	meRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	meRecorder := httptest.NewRecorder()
+	server.handleMe(meRecorder, meRequest)
+
+	if meRecorder.Code != http.StatusOK {
+		t.Fatalf("me returned %d: %s", meRecorder.Code, meRecorder.Body.String())
+	}
+	var current model.CurrentUser
+	if err := json.NewDecoder(meRecorder.Body).Decode(&current); err != nil {
+		t.Fatalf("decode me response: %v", err)
+	}
+	if current.UsageGuideAckAt == nil || !current.UsageGuideAckAt.Equal(*acknowledged.UsageGuideAckAt) {
+		t.Fatalf("usage guide ack did not persist through me: ack=%v me=%v", acknowledged.UsageGuideAckAt, current.UsageGuideAckAt)
+	}
+}
+
 func TestDecodeJSONRejectsOversizedAndUnknownFields(t *testing.T) {
 	t.Run("oversized", func(t *testing.T) {
 		request := httptest.NewRequest(

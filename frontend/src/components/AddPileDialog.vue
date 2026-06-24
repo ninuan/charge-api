@@ -32,16 +32,26 @@ const form = reactive({
 });
 
 async function submit() {
-  if (!/^[0-9]{6,64}$/.test(form.id.trim())) {
+  const id = form.id.trim();
+  const number = form.number.trim();
+  if (!id && !number) {
+    message.error("请输入桩号");
+    return;
+  }
+  if (number && !/^[0-9]{6,64}$/.test(number)) {
+    message.error("桩号需要为 6–64 位数字");
+    return;
+  }
+  if (id && !/^[0-9]{6,64}$/.test(id)) {
     message.error("设备长 ID 需要为 6–64 位数字");
     return;
   }
   submitting.value = true;
   try {
     await store.addPile({
-      id: form.id.trim(),
-      name: form.name.trim() || `充电桩 ${form.id.trim().slice(-6)}`,
-      number: form.number.trim(),
+      id,
+      name: form.name.trim() || `充电桩 ${number || id.slice(-6)}`,
+      number,
       openNum: Number(form.openNum),
       status: form.status.trim() || "在线",
       address: form.address.trim()
@@ -69,19 +79,19 @@ async function submit() {
       </DialogHeader>
       <form class="space-y-5" @submit.prevent="submit">
         <label class="form-field">
-          <span>设备长 ID <b>*</b></span>
-          <UiInput v-model="form.id" inputmode="numeric" autocomplete="off" placeholder="例如 2601201412385560001" />
-          <small>从充电桩页面或请求参数中获得的纯数字设备 ID。</small>
+          <span>桩号 <b>*</b></span>
+          <UiInput v-model="form.number" inputmode="numeric" autocomplete="off" placeholder="例如 61034278" />
+          <small>输入二维码链接里的 n 参数，例如 /i/cnum?n=61034278。</small>
         </label>
         <label class="form-field">
           <span>显示名称</span>
           <UiInput v-model="form.name" placeholder="例如：松园 3 号楼北侧" />
         </label>
         <button class="advanced-toggle" type="button" @click="advanced = !advanced">
-          {{ advanced ? "收起高级字段" : "填写桩号、地址等高级字段" }}
+          {{ advanced ? "收起高级字段" : "填写设备长 ID、地址等高级字段" }}
         </button>
         <div v-if="advanced" class="grid gap-4 sm:grid-cols-2">
-          <label class="form-field"><span>桩号</span><UiInput v-model="form.number" placeholder="可选" /></label>
+          <label class="form-field"><span>设备长 ID</span><UiInput v-model="form.id" inputmode="numeric" autocomplete="off" placeholder="解析失败时可手动填写" /></label>
           <label class="form-field">
             <span>充电口数量</span>
             <input v-model.number="form.openNum" class="native-input" min="1" max="20" type="number">

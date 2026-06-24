@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 type Store struct {
 	db     *sql.DB
@@ -113,6 +113,9 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := s.ensureColumn("users", "refresh_enabled", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("users", "usage_guide_ack_at", "TEXT"); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(
@@ -270,7 +273,7 @@ func (s *Store) DeleteOtherSessions(userID string, currentHash []byte) error {
 func (s *Store) Load() (State, bool, error) {
 	rows, err := s.db.Query(`
 		SELECT id, username, password_hash, role, enabled, created_at, updated_at,
-		       device_limit, refresh_enabled
+		       device_limit, refresh_enabled, usage_guide_ack_at
 		FROM users ORDER BY username
 	`)
 	if err != nil {
@@ -288,6 +291,7 @@ func (s *Store) Load() (State, bool, error) {
 		var enabled, refreshEnabled int
 		var createdAt string
 		var updatedAt string
+		var usageGuideAckAt sql.NullString
 		if err := rows.Scan(
 			&user.ID,
 			&user.Username,
@@ -298,6 +302,7 @@ func (s *Store) Load() (State, bool, error) {
 			&updatedAt,
 			&user.DeviceLimit,
 			&refreshEnabled,
+			&usageGuideAckAt,
 		); err != nil {
 			return State{}, false, fmt.Errorf("scan user: %w", err)
 		}
@@ -311,6 +316,13 @@ func (s *Store) Load() (State, bool, error) {
 		user.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
 		if err != nil {
 			return State{}, false, fmt.Errorf("parse user updated_at: %w", err)
+		}
+		if usageGuideAckAt.Valid {
+			ackAt, err := time.Parse(time.RFC3339Nano, usageGuideAckAt.String)
+			if err != nil {
+				return State{}, false, fmt.Errorf("parse user usage_guide_ack_at: %w", err)
+			}
+			user.UsageGuideAckAt = &ackAt
 		}
 		state.Users = append(state.Users, user)
 	}
@@ -412,6 +424,13 @@ func (s *Store) metadata(key string) (string, bool, error) {
 	return value, err == nil, err
 }
 
+func formatOptionalTime(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.Format(time.RFC3339Nano)
+}
+
 func (s *Store) Save(state State) error {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -428,12 +447,13 @@ func (s *Store) Save(state State) error {
 		if _, err := tx.Exec(`
 			INSERT INTO users(
 				id, username, password_hash, role, enabled, created_at, updated_at,
-				device_limit, refresh_enabled
-			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+				device_limit, refresh_enabled, usage_guide_ack_at
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				username=excluded.username, password_hash=excluded.password_hash,
 				role=excluded.role, enabled=excluded.enabled, updated_at=excluded.updated_at,
-				device_limit=excluded.device_limit, refresh_enabled=excluded.refresh_enabled
+				device_limit=excluded.device_limit, refresh_enabled=excluded.refresh_enabled,
+				usage_guide_ack_at=excluded.usage_guide_ack_at
 		`,
 			user.ID,
 			user.Username,
@@ -444,6 +464,7 @@ func (s *Store) Save(state State) error {
 			user.UpdatedAt.Format(time.RFC3339Nano),
 			user.DeviceLimit,
 			user.RefreshEnabled,
+			formatOptionalTime(user.UsageGuideAckAt),
 		); err != nil {
 			return fmt.Errorf("insert user %s: %w", user.ID, err)
 		}

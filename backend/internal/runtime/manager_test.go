@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -102,6 +106,82 @@ func TestAddPileEnforcesPerUserDeviceLimit(t *testing.T) {
 	_, err := manager.AddPile("user-1", model.PileUpsertRequest{ID: "device-over-limit"})
 	if err == nil {
 		t.Fatal("expected device limit error")
+	}
+}
+
+func TestAddPileResolvesDeviceIDFromNumber(t *testing.T) {
+	const (
+		number = "61034278"
+		longID = "2601201412385560001"
+	)
+	var postedID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/i/cnum":
+			if got := r.URL.Query().Get("n"); got != number {
+				t.Fatalf("cnum number = %q, want %q", got, number)
+			}
+			w.Header().Set("Location", "/i/device/opening?id="+longID+"&i=1")
+			w.WriteHeader(http.StatusFound)
+		case "/action/i/api/devicewithnumbers":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			values, err := url.ParseQuery(string(body))
+			if err != nil {
+				t.Fatalf("parse form body: %v", err)
+			}
+			postedID = values.Get("id")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"id":%q,"number":%q,"name":"远端名称","status":"在线","opennum":10}`, longID, number)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	requests := []parser.CaptureRequest{{
+		Name:   "template",
+		URL:    server.URL + "/action/i/api/devicewithnumbers",
+		Method: http.MethodPost,
+		Body:   "id=YOUR_DEVICE_LONG_ID",
+		Headers: map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
+	}}
+	manager := &Manager{
+		repository: testRepository(t),
+		requests:   requests,
+		users: map[string]model.User{
+			"user-1": {
+				ID:             "user-1",
+				Username:       "alice",
+				Role:           model.RoleUser,
+				Enabled:        true,
+				DeviceLimit:    10,
+				RefreshEnabled: true,
+			},
+		},
+		runtimes: map[string]*UserRuntime{
+			"user-1": newUserRuntime(requests, persistence.UserState{}, 30*time.Second),
+		},
+		settings: model.RegistrationSettings{DefaultDeviceLimit: 10, DefaultRefreshEnabled: true},
+		invites:  map[string]model.InviteCode{},
+	}
+
+	pile, err := manager.AddPile("user-1", model.PileUpsertRequest{
+		Number: number,
+		Name:   "松园 3 号楼",
+	})
+	if err != nil {
+		t.Fatalf("AddPile: %v", err)
+	}
+	if pile.ID != longID || pile.Number != number {
+		t.Fatalf("unexpected pile identity: %+v", pile)
+	}
+	if postedID != longID {
+		t.Fatalf("status request id = %q, want %q", postedID, longID)
 	}
 }
 

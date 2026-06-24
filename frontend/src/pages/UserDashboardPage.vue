@@ -10,6 +10,7 @@ import ConnectionBadge from "@/components/ConnectionBadge.vue";
 import CookieDialog from "@/components/CookieDialog.vue";
 import MetricCard from "@/components/MetricCard.vue";
 import PileCard from "@/components/PileCard.vue";
+import UsageGuideDialog from "@/components/UsageGuideDialog.vue";
 import { Button as UiButton } from "@/components/ui/button";
 import { useDashboardStream } from "@/composables/useDashboardStream";
 import { useAuthStore } from "@/stores/auth";
@@ -116,6 +117,7 @@ onMounted(async () => {
     <template #heading-actions>
       <div class="flex flex-wrap items-center gap-2">
         <ConnectionBadge :state="stream.state.value" />
+        <UsageGuideDialog />
         <CookieDialog />
         <AddPileDialog />
       </div>

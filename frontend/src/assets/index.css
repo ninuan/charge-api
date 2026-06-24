@@ -449,6 +449,132 @@
     @apply border-t border-border bg-muted/35 px-5 py-4 text-xs leading-5 text-muted-foreground sm:px-6;
   }
 
+  .usage-guide-dialog {
+    box-shadow: 0 30px 100px hsl(155 26% 12% / 0.22);
+    background:
+      radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.08), transparent 24rem),
+      radial-gradient(circle at 100% 18%, hsl(var(--accent) / 0.45), transparent 18rem),
+      hsl(var(--popover));
+  }
+
+  .usage-guide-header {
+    @apply flex-col items-start gap-4 border-b border-border/80 bg-card/70 p-5 sm:flex-row sm:p-6 lg:p-7;
+  }
+
+  .usage-guide-icon {
+    @apply grid size-12 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-[0_10px_26px_hsl(var(--primary)/.18)];
+  }
+
+  .usage-guide-icon svg {
+    @apply size-6;
+  }
+
+  .usage-guide-scroll {
+    @apply min-h-0 overflow-y-auto overflow-x-hidden bg-background/45 p-4 sm:p-5 lg:p-6;
+    overscroll-behavior: contain;
+  }
+
+  .usage-guide-layout {
+    @apply grid min-w-0 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-5;
+  }
+
+  .usage-guide-sidebar {
+    @apply hidden self-start rounded-2xl border border-border/80 bg-card/75 p-3 shadow-[0_12px_34px_hsl(155_25%_15%/.045)] backdrop-blur-sm lg:sticky lg:top-0 lg:block;
+  }
+
+  .usage-guide-sidebar-title {
+    @apply px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-primary;
+  }
+
+  .usage-guide-step-link {
+    @apply grid grid-cols-[2rem_minmax(0,1fr)] gap-x-2 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-secondary/45;
+  }
+
+  .usage-guide-step-link span {
+    @apply row-span-2 grid size-8 place-items-center rounded-lg bg-secondary text-xs font-bold text-secondary-foreground;
+  }
+
+  .usage-guide-step-link strong {
+    @apply truncate text-sm font-semibold text-foreground;
+  }
+
+  .usage-guide-step-link small {
+    @apply truncate text-xs leading-5 text-muted-foreground;
+  }
+
+  .usage-guide-main {
+    @apply grid min-w-0 gap-4;
+  }
+
+  .usage-guide-card {
+    @apply scroll-mt-5 rounded-2xl border border-border/80 bg-card/90 p-4 shadow-[0_12px_34px_hsl(155_25%_15%/.045)] backdrop-blur-sm sm:p-5;
+  }
+
+  .usage-guide-card-heading {
+    @apply mb-4 flex items-start gap-3;
+  }
+
+  .usage-guide-step-index {
+    @apply grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-sm font-bold text-primary;
+  }
+
+  .usage-guide-card h3 {
+    @apply text-base font-bold tracking-[-0.01em];
+  }
+
+  .usage-guide-card-heading p {
+    @apply mt-1 text-xs leading-5 text-muted-foreground;
+  }
+
+  .usage-guide-card p,
+  .usage-guide-card li {
+    @apply mt-2 text-sm leading-6 text-muted-foreground;
+  }
+
+  .usage-guide-card ol {
+    @apply mt-3 list-decimal space-y-2 pl-5;
+  }
+
+  .usage-guide-card a {
+    @apply inline-flex items-center gap-1 font-semibold text-primary underline-offset-4 hover:underline;
+  }
+
+  .usage-guide-card code {
+    @apply rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px] text-foreground;
+  }
+
+  .usage-guide-note {
+    @apply rounded-xl border border-dashed border-border bg-muted/45 px-3 py-2;
+  }
+
+  .usage-guide-card--final {
+    @apply border-primary/25 bg-primary/5;
+  }
+
+  .usage-guide-final-copy {
+    @apply flex items-center justify-between gap-4;
+  }
+
+  .usage-guide-final-copy > svg {
+    @apply size-8 shrink-0 text-primary;
+  }
+
+  .usage-guide-footer {
+    @apply m-0 rounded-none border-t border-border/80 bg-card/95 px-5 pt-4 shadow-[0_-18px_42px_hsl(155_20%_18%/.06)] backdrop-blur-sm sm:px-6 sm:pt-5;
+  }
+
+  .usage-guide-footer-inner {
+    @apply mx-auto flex w-full max-w-[calc(1180px-3rem)] flex-col items-stretch gap-3 rounded-2xl border border-border/70 bg-background/70 p-3 shadow-[0_12px_34px_hsl(155_25%_15%/.055)] sm:flex-row sm:items-center sm:justify-between sm:p-4;
+  }
+
+  .usage-guide-progress {
+    @apply flex min-h-10 items-center gap-2 rounded-xl bg-muted/60 px-3 text-xs font-semibold text-muted-foreground;
+  }
+
+  .usage-guide-progress svg {
+    @apply size-4 shrink-0 text-primary;
+  }
+
   .native-input,
   .native-textarea {
     @apply w-full rounded-xl border border-input bg-background px-3 text-base text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm;

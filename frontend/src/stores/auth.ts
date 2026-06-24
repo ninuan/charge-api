@@ -90,6 +90,17 @@ export const useAuthStore = defineStore("auth", () => {
     if (!res.ok) throw new Error((await res.json()).error ?? "修改密码失败");
   }
 
+  async function acknowledgeUsageGuide() {
+    const res = await fetch("/api/user/usage-guide/ack", {
+      method: "POST",
+      credentials: "include"
+    });
+    if (!res.ok) throw new Error((await res.json()).error ?? "确认使用说明失败");
+    currentUser.value = (await res.json()) as CurrentUser;
+    initialized.value = true;
+    return currentUser.value;
+  }
+
   return {
     currentUser,
     loading,
@@ -101,6 +112,7 @@ export const useAuthStore = defineStore("auth", () => {
     register,
     logout,
     changePassword,
+    acknowledgeUsageGuide,
     clearSession
   };
 });

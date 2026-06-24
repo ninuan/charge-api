@@ -68,6 +68,7 @@ export interface CurrentUser {
   createdAt: string;
   deviceLimit: number;
   refreshEnabled: boolean;
+  usageGuideAckAt?: string;
 }
 
 export interface TrafficStats {

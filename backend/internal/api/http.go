@@ -27,6 +27,7 @@ const (
 )
 
 var deviceIDPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
+var pileNumberPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 
 type Server struct {
 	manager   *appruntime.Manager
@@ -61,6 +62,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/password", s.handlePassword)
 	mux.HandleFunc("/api/auth/sessions", s.handleSessions)
 	mux.HandleFunc("/api/auth/sessions/others", s.handleOtherSessions)
+	mux.HandleFunc("/api/user/usage-guide/ack", s.handleUsageGuideAck)
 	mux.HandleFunc("/api/admin/users", s.handleAdminUsers)
 	mux.HandleFunc("/api/admin/users/", s.handleAdminUserActions)
 	mux.HandleFunc("/api/admin/stats", s.handleAdminStats)
@@ -297,6 +299,23 @@ func (s *Server) handleOtherSessions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleUsageGuideAck(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	current, err := s.manager.AcknowledgeUsageGuide(user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, current)
+}
+
 func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
@@ -317,8 +336,17 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.ID = strings.TrimSpace(req.ID)
-		if !deviceIDPattern.MatchString(req.ID) {
+		req.Number = strings.TrimSpace(req.Number)
+		if req.ID == "" && req.Number == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请输入桩号或设备长ID"})
+			return
+		}
+		if req.ID != "" && !deviceIDPattern.MatchString(req.ID) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "设备ID必须是 6-64 位数字"})
+			return
+		}
+		if req.Number != "" && !pileNumberPattern.MatchString(req.Number) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "桩号必须是 6-64 位数字"})
 			return
 		}
 		if len(req.Name) > 128 || len(req.Number) > 64 || len(req.Status) > 32 || len(req.Address) > 256 {

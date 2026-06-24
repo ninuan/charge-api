@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,15 @@ const (
 	defaultMaxConcurrency = 3
 	initialBackoff        = 30 * time.Second
 	maxBackoff            = 15 * time.Minute
+)
+
+var (
+	numericIDPattern   = regexp.MustCompile(`^[0-9]{6,64}$`)
+	cnumBodyIDPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bdeviceid\s*["']?\s*[:=]\s*["']?([0-9]{6,64})`),
+		regexp.MustCompile(`(?i)[?&]id=([0-9]{6,64})`),
+		regexp.MustCompile(`(?i)\bid\s*["']?\s*[:=]\s*["']?([0-9]{6,64})`),
+	}
 )
 
 type FetchResult struct {
@@ -196,6 +206,53 @@ func (c *Client) AddDevice(id string) error {
 
 func (c *Client) AddDeviceWithLimit(id string, limit int) error {
 	return c.addDevice(id, limit)
+}
+
+func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
+	number = strings.TrimSpace(number)
+	if !numericIDPattern.MatchString(number) {
+		return "", fmt.Errorf("桩号必须是 6-64 位数字")
+	}
+
+	c.mu.RLock()
+	templateURL := c.template.URL
+	headers := cloneHeaders(c.template.Headers)
+	c.mu.RUnlock()
+
+	resolveURL, err := buildCnumURL(templateURL, number)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodGet, resolveURL, nil)
+	if err != nil {
+		return "", err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	client := *c.httpClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return "", fmt.Errorf("桩号解析接口返回 %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	if id := extractCnumDeviceID(resp, body); id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("桩号 %s 没有解析到设备长ID", number)
 }
 
 func (c *Client) addDevice(id string, limit int) error {
@@ -408,6 +465,74 @@ func requestDeviceID(request parser.CaptureRequest) string {
 		return ""
 	}
 	return values.Get("id")
+}
+
+func buildCnumURL(templateURL string, number string) (string, error) {
+	parsed, err := url.Parse(templateURL)
+	if err != nil {
+		return "", fmt.Errorf("parse template url: %w", err)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("template url missing host")
+	}
+	scheme := parsed.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	if parsed.Host == "ele.mocele.com" {
+		scheme = "http"
+	}
+	cnumURL := url.URL{
+		Scheme: scheme,
+		Host:   parsed.Host,
+		Path:   "/i/cnum",
+	}
+	query := cnumURL.Query()
+	query.Set("n", number)
+	cnumURL.RawQuery = query.Encode()
+	return cnumURL.String(), nil
+}
+
+func extractCnumDeviceID(resp *http.Response, body []byte) string {
+	for _, cookie := range resp.Cookies() {
+		if strings.EqualFold(cookie.Name, "deviceid") && numericIDPattern.MatchString(cookie.Value) {
+			return cookie.Value
+		}
+	}
+	if id := deviceIDFromURL(resp.Header.Get("Location"), resp.Request.URL); id != "" {
+		return id
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		if id := deviceIDFromURL(resp.Request.URL.String(), nil); id != "" {
+			return id
+		}
+	}
+	text := string(body)
+	for _, pattern := range cnumBodyIDPatterns {
+		matches := pattern.FindStringSubmatch(text)
+		if len(matches) == 2 && numericIDPattern.MatchString(matches[1]) {
+			return matches[1]
+		}
+	}
+	return ""
+}
+
+func deviceIDFromURL(raw string, base *url.URL) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if base != nil {
+		parsed = base.ResolveReference(parsed)
+	}
+	id := parsed.Query().Get("id")
+	if numericIDPattern.MatchString(id) {
+		return id
+	}
+	return ""
 }
 
 func withFormValue(raw string, key string, value string) string {

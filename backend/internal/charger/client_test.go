@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -109,6 +110,43 @@ func TestConcurrentDeviceAddsRespectLimit(t *testing.T) {
 
 	if got := len(client.DeviceIDs()); got != limit {
 		t.Fatalf("device count = %d, want %d", got, limit)
+	}
+}
+
+func TestResolveDeviceIDByNumberUsesCnumRedirect(t *testing.T) {
+	const (
+		number = "61034278"
+		longID = "2601201412385560001"
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/i/cnum" {
+			t.Fatalf("unexpected resolve path: %s", r.URL.String())
+		}
+		if got := r.URL.Query().Get("n"); got != number {
+			t.Fatalf("cnum number = %q, want %q", got, number)
+		}
+		http.SetCookie(w, &http.Cookie{Name: "deviceid", Value: longID})
+		w.Header().Set("Location", "/i/device/opening?id="+longID+"&i=1")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	client := NewClientTemplateOnly([]parser.CaptureRequest{{
+		Name:   "template",
+		URL:    server.URL + "/action/i/api/devicewithnumbers",
+		Method: http.MethodPost,
+		Body:   "id=YOUR_DEVICE_LONG_ID",
+		Headers: map[string]string{
+			"User-Agent": "charge-test",
+		},
+	}})
+
+	resolved, err := client.ResolveDeviceIDByNumber(number)
+	if err != nil {
+		t.Fatalf("ResolveDeviceIDByNumber: %v", err)
+	}
+	if resolved != longID {
+		t.Fatalf("resolved id = %q, want %q", resolved, longID)
 	}
 }
 

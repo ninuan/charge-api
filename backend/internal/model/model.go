@@ -85,25 +85,27 @@ const (
 )
 
 type User struct {
-	ID             string    `json:"id"`
-	Username       string    `json:"username"`
-	PasswordHash   string    `json:"passwordHash,omitempty"`
-	Role           UserRole  `json:"role"`
-	Enabled        bool      `json:"enabled"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-	DeviceLimit    int       `json:"deviceLimit"`
-	RefreshEnabled bool      `json:"refreshEnabled"`
+	ID              string     `json:"id"`
+	Username        string     `json:"username"`
+	PasswordHash    string     `json:"passwordHash,omitempty"`
+	Role            UserRole   `json:"role"`
+	Enabled         bool       `json:"enabled"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	DeviceLimit     int        `json:"deviceLimit"`
+	RefreshEnabled  bool       `json:"refreshEnabled"`
+	UsageGuideAckAt *time.Time `json:"usageGuideAckAt,omitempty"`
 }
 
 type CurrentUser struct {
-	ID             string    `json:"id"`
-	Username       string    `json:"username"`
-	Role           UserRole  `json:"role"`
-	Enabled        bool      `json:"enabled"`
-	CreatedAt      time.Time `json:"createdAt"`
-	DeviceLimit    int       `json:"deviceLimit"`
-	RefreshEnabled bool      `json:"refreshEnabled"`
+	ID              string     `json:"id"`
+	Username        string     `json:"username"`
+	Role            UserRole   `json:"role"`
+	Enabled         bool       `json:"enabled"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	DeviceLimit     int        `json:"deviceLimit"`
+	RefreshEnabled  bool       `json:"refreshEnabled"`
+	UsageGuideAckAt *time.Time `json:"usageGuideAckAt,omitempty"`
 }
 
 type LoginRequest struct {
