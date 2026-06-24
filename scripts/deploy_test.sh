@@ -12,7 +12,7 @@ if [[ "$help_output" != *"DEPLOY_HOST"* ]] || [[ "$help_output" != *"SKIP_CHECK"
 fi
 
 set +e
-missing_host_output="$("$DEPLOY_SCRIPT" --dry-run 2>&1)"
+missing_host_output="$(env -u DEPLOY_HOST "$DEPLOY_SCRIPT" --dry-run 2>&1)"
 missing_host_status=$?
 set -e
 
