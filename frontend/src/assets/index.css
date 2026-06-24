@@ -153,7 +153,7 @@
     @apply size-12 bg-emerald-400;
   }
 
-  .shell-action {
+  .shell-action.shell-action {
     @apply h-11 min-w-36 rounded-lg px-3.5 text-sm font-medium;
   }
 
@@ -264,7 +264,7 @@
   .connection-badge--connecting svg { @apply text-amber-700; }
   .connection-badge--offline svg { @apply text-destructive; }
 
-  .dashboard-action {
+  .dashboard-action.dashboard-action {
     @apply h-11 min-w-36 rounded-lg px-3.5 text-sm font-medium;
   }
 
