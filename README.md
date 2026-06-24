@@ -28,8 +28,8 @@
 | Layer | Stack |
 | --- | --- |
 | Backend | Go, net/http |
-| Frontend | Vue 3, TypeScript, Vite, Pinia, Naive UI |
-| Cache | Local JSON file |
+| Frontend | Vue 3, TypeScript, Vite, Pinia, shadcn-style components |
+| Storage | SQLite |
 | Data Source | Remote charger API request template |
 
 ## 工作流程
@@ -117,12 +117,74 @@ make check
 
 它会依次执行：
 
+- 部署脚本检查
 - Go 单元测试
 - Go 后端构建
-- Vue TypeScript 检查
-- 前端生产构建
+- 前端测试
+- Vue TypeScript 检查和生产构建
 
 后端已经内置默认充电桩请求模板，不需要额外准备抓包目录。
+
+## 部署同步
+
+服务器初次配置完成后，推荐通过 GitHub 同步代码、远端构建并重启服务：
+
+```bash
+make deploy-git DEPLOY_HOST=root@8.148.25.204
+```
+
+`deploy-git` 会先确认本地没有未提交改动，然后执行：
+
+```bash
+git push origin main
+ssh root@8.148.25.204
+cd /opt/charge-api
+git pull --ff-only origin main
+```
+
+之后在服务器构建前端、构建后端、重启 systemd 服务并检查 `/healthz`。
+
+默认远端目录是 `/opt/charge-api`，默认分支是当前本地分支，默认 systemd 服务名是 `charge-api`。如果你的服务器配置不同，可以这样覆盖：
+
+```bash
+make deploy-git \
+  DEPLOY_HOST=root@8.148.25.204 \
+  DEPLOY_PATH=/opt/charge-api \
+  DEPLOY_BRANCH=main \
+  SERVICE_NAME=charge-api
+```
+
+如果只是改了文案或已经本地验证过，可以临时跳过本地检查：
+
+```bash
+SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@8.148.25.204
+```
+
+第一次使用前可以先预演，不会推送 GitHub，也不会连接服务器：
+
+```bash
+SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@8.148.25.204 DEPLOY_ARGS=--dry-run
+```
+
+服务器端会执行：
+
+```bash
+git pull --ff-only origin main
+cd frontend && npm ci && npm run build
+cd ../backend && go build -o charge-server ./cmd/server
+sudo systemctl restart charge-api
+curl http://127.0.0.1:8080/healthz
+```
+
+服务器上的 `/var/lib/charge-api/charge_state.db` 和 `/etc/charge-api.env` 不在 Git 仓库里，会继续由服务器自己维护。
+
+如果 GitHub 临时不可用，也可以使用备用的本地直传方式：
+
+```bash
+make deploy DEPLOY_HOST=root@8.148.25.204
+```
+
+备用脚本通过 `rsync` 同步本地文件，会排除本地数据库、Cookie 密钥、`.local/`、`.env`、`node_modules/`、`frontend/dist/` 等运行文件。
 
 ## API
 

@@ -1,4 +1,4 @@
-.PHONY: setup dev check reset-local
+.PHONY: setup dev check deploy deploy-git reset-local
 
 setup:
 	cd backend && go mod download
@@ -9,6 +9,26 @@ dev:
 
 check:
 	bash scripts/check.sh
+
+deploy:
+	@DEPLOY_HOST="$(DEPLOY_HOST)" \
+	DEPLOY_PATH="$(DEPLOY_PATH)" \
+	SERVICE_NAME="$(SERVICE_NAME)" \
+	HEALTH_URL="$(HEALTH_URL)" \
+	SSH_OPTS="$(SSH_OPTS)" \
+	SKIP_CHECK="$(SKIP_CHECK)" \
+	bash scripts/deploy.sh $(DEPLOY_ARGS)
+
+deploy-git:
+	@DEPLOY_HOST="$(DEPLOY_HOST)" \
+	DEPLOY_PATH="$(DEPLOY_PATH)" \
+	DEPLOY_REMOTE="$(DEPLOY_REMOTE)" \
+	DEPLOY_BRANCH="$(DEPLOY_BRANCH)" \
+	SERVICE_NAME="$(SERVICE_NAME)" \
+	HEALTH_URL="$(HEALTH_URL)" \
+	SSH_OPTS="$(SSH_OPTS)" \
+	SKIP_CHECK="$(SKIP_CHECK)" \
+	bash scripts/deploy_git.sh $(DEPLOY_ARGS)
 
 reset-local:
 	@printf "这会删除 .local/ 下的本地测试用户、Cookie 和设备状态，继续吗？[y/N] "; \
