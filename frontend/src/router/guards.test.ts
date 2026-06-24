@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveHomeRoute, resolveProtectedRoute } from "./guards";
+import { resolveHomeRoute, resolveProtectedRoute, resolveProtectedRouteAfterAuth } from "./guards";
 
 describe("route guards", () => {
   it("sends anonymous users to login", () => {
@@ -15,5 +15,18 @@ describe("route guards", () => {
     expect(resolveHomeRoute("admin")).toBe("/admin");
     expect(resolveHomeRoute("user")).toBe("/dashboard");
     expect(resolveHomeRoute(null)).toBe("/login");
+  });
+
+  it("falls back to the login route when auth initialization fails", async () => {
+    const redirect = await resolveProtectedRouteAfterAuth({
+      initialized: false,
+      role: null,
+      requiredRole: "user",
+      fetchMe: async () => {
+        throw new Error("network failed");
+      }
+    });
+
+    expect(redirect).toBe("/login");
   });
 });

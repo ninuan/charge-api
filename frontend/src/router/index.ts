@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { resolveProtectedRoute } from "./guards";
+import { resolveProtectedRouteAfterAuth } from "./guards";
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -38,13 +38,12 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
-  if (!auth.initialized) {
-    await auth.fetchMe();
-  }
-  const redirect = resolveProtectedRoute(
-    auth.currentUser?.role ?? null,
-    (to.meta.role as "admin" | "user" | "guest" | undefined) ?? "guest"
-  );
+  const redirect = await resolveProtectedRouteAfterAuth({
+    initialized: auth.initialized,
+    role: auth.currentUser?.role ?? null,
+    requiredRole: (to.meta.role as "admin" | "user" | "guest" | undefined) ?? "guest",
+    fetchMe: auth.fetchMe
+  });
   return redirect ?? true;
 });
 
