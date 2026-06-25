@@ -31,3 +31,8 @@ if [[ "$dry_run_output" != *"rsync"* ]] || [[ "$dry_run_output" != *"root@exampl
   echo "dry-run should print the rsync command"
   exit 1
 fi
+
+if [[ "$dry_run_output" != *"bash scripts/check_frontend_sources.sh"* ]]; then
+  echo "dry-run should print the remote frontend source check"
+  exit 1
+fi

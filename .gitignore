@@ -1,7 +1,6 @@
 backend/server
 frontend/node_modules
 frontend/dist
-frontend/src/**/*.js
 frontend/**/*.tsbuildinfo
 20260601_202646/
 charge_state.json

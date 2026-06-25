@@ -36,3 +36,8 @@ if [[ "$dry_run_output" != *"git pull --ff-only origin main"* ]]; then
   echo "dry-run should print the remote git pull command"
   exit 1
 fi
+
+if [[ "$dry_run_output" != *"bash scripts/check_frontend_sources.sh"* ]]; then
+  echo "dry-run should print the remote frontend source check"
+  exit 1
+fi

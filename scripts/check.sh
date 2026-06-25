@@ -11,29 +11,33 @@ if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
   exit 1
 fi
 
-echo "1/5 部署脚本检查"
+echo "1/6 部署脚本检查"
 bash "$ROOT_DIR/scripts/deploy_test.sh"
 bash "$ROOT_DIR/scripts/deploy_git_test.sh"
+bash "$ROOT_DIR/scripts/check_frontend_sources_test.sh"
 
-echo "2/5 Go 测试"
+echo "2/6 前端源码检查"
+bash "$ROOT_DIR/scripts/check_frontend_sources.sh"
+
+echo "3/6 Go 测试"
 (
   cd "$ROOT_DIR/backend"
   GOCACHE="$GO_CACHE" go test ./...
 )
 
-echo "3/5 Go 构建"
+echo "4/6 Go 构建"
 (
   cd "$ROOT_DIR/backend"
   GOCACHE="$GO_CACHE" go build -o "$BUILD_OUTPUT" ./cmd/server
 )
 
-echo "4/5 前端测试"
+echo "5/6 前端测试"
 (
   cd "$ROOT_DIR/frontend"
   npm test
 )
 
-echo "5/5 前端类型检查与生产构建"
+echo "6/6 前端类型检查与生产构建"
 (
   cd "$ROOT_DIR/frontend"
   npm run build

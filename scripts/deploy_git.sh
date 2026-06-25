@@ -133,6 +133,7 @@ read -r -d '' remote_script <<REMOTE || true
 set -Eeuo pipefail
 cd $remote_path_quoted
 git pull --ff-only $remote_quoted $branch_quoted
+bash scripts/check_frontend_sources.sh
 cd frontend
 npm ci
 npm run build
