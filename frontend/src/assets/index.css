@@ -547,6 +547,20 @@
     @apply rounded-xl border border-dashed border-border bg-muted/45 px-3 py-2;
   }
 
+  .usage-guide-figure {
+    @apply mt-5 overflow-hidden rounded-2xl border border-border/80 bg-background/70 shadow-[0_14px_34px_hsl(155_20%_14%/.06)];
+  }
+
+  .usage-guide-figure img {
+    @apply block max-h-[26rem] w-full object-contain;
+    background:
+      linear-gradient(135deg, hsl(var(--muted) / 0.42), hsl(var(--card) / 0.88));
+  }
+
+  .usage-guide-figure figcaption {
+    @apply border-t border-border/70 bg-card/75 px-4 py-3 text-xs leading-5 text-muted-foreground;
+  }
+
   .usage-guide-card--final {
     @apply border-primary/25 bg-primary/5;
   }

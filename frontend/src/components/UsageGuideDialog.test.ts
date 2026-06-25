@@ -100,6 +100,24 @@ describe("UsageGuideDialog", () => {
     expect(wrapper.findAll('[data-testid="usage-guide-step-link"]')).toHaveLength(7);
   });
 
+  it("shows screenshots only for the steps that need visual guidance", async () => {
+    const auth = useAuthStore();
+    auth.currentUser = { ...userWithoutAck, usageGuideAckAt: "2026-06-24T12:00:00Z" };
+
+    const wrapper = mountGuide();
+    await wrapper.get('[data-testid="usage-guide-trigger"]').trigger("click");
+
+    const images = wrapper.findAll('[data-testid="usage-guide-image"]');
+    expect(images).toHaveLength(6);
+    expect(images[0].attributes("alt")).toContain("Reqable 官网");
+    expect(images[1].attributes("alt")).toContain("开启代理");
+    expect(images[2].attributes("alt")).toContain("充电桩二维码");
+    expect(images[4].attributes("alt")).toContain("复制按钮");
+    expect(wrapper.text()).toContain("选择自己设备对应的 Reqable 版本");
+    expect(wrapper.text()).toContain("切到 Cookies 面板，复制完整 Cookie");
+    expect(wrapper.find("#usage-guide-step-6 [data-testid='usage-guide-image']").exists()).toBe(false);
+  });
+
   it("keeps the footer visible while only the guide body scrolls", async () => {
     const auth = useAuthStore();
     auth.currentUser = { ...userWithoutAck, usageGuideAckAt: "2026-06-24T12:00:00Z" };

@@ -13,6 +13,12 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import { useAuthStore } from "@/stores/auth";
+import installReqableImage from "@/assets/usage_guide/image-20260624185059728.webp";
+import qrcodeImage from "@/assets/usage_guide/image-20260624190314141.webp";
+import enableProxyImage from "@/assets/usage_guide/image-20260624190718228.webp";
+import capturedRequestsImage from "@/assets/usage_guide/image-20260624191018135.webp";
+import requestListImage from "@/assets/usage_guide/image-20260624191018220.webp";
+import copyCookieImage from "@/assets/usage_guide/image-20260624191252221.webp";
 
 const auth = useAuthStore();
 const { message } = createDiscreteApi(["message"]);
@@ -23,28 +29,63 @@ const saving = ref(false);
 const promptedUserID = ref("");
 const canClose = computed(() => !requiredMode.value || hasReachedEnd.value);
 const guideSteps = [
-  { title: "安装 Reqable", detail: "准备好抓包工具", type: "install" },
+  {
+    title: "安装 Reqable",
+    detail: "准备好抓包工具",
+    type: "install",
+    image: installReqableImage,
+    imageAlt: "Reqable 官网和客户端界面截图",
+    imageCaption: "选择自己设备对应的 Reqable 版本，安装后打开客户端。"
+  },
   {
     title: "准备二维码和微信",
     detail: "把充电桩二维码发到微信",
     type: "list",
+    image: enableProxyImage,
+    imageAlt: "Reqable 开启代理和调试按钮截图",
+    imageCaption: "准备好二维码后，下一步需要让 Reqable 保持代理和调试开启。",
     items: ["准备任意一张充电桩二维码照片。", "把二维码照片发送到微信文件传输助手。", "在当前设备上保持微信可用，后面需要识别二维码并登录充电页面。"]
   },
   {
     title: "打开 Reqable 抓包",
     detail: "开启代理和调试",
     type: "list",
+    image: qrcodeImage,
+    imageAlt: "充电桩二维码示例截图",
+    imageCaption: "Reqable 开启后，在微信里识别充电桩二维码并进入充电页面。",
     items: ["打开系统代理。", "打开调试。", "保持 Reqable 运行，不要提前关闭。"]
   },
   {
     title: "在微信里打开充电页面",
     detail: "完成手机号验证码登录",
     type: "list",
+    image: capturedRequestsImage,
+    imageAlt: "Reqable 捕获微信充电页面请求列表截图",
+    imageCaption: "微信完成登录后，Reqable 里会出现 ele.mocele.com 相关请求。",
     items: ["打开微信文件传输助手里的二维码图片。", "右键或长按识别图中二维码。", "按页面要求完成手机号和验证码登录，进入正常充电界面。"]
   },
-  { title: "回到 Reqable 复制 Cookie", detail: "找到 cnum 请求并复制 Cookies", type: "cookie" },
-  { title: "粘贴到系统里", detail: "更新 Cookie 并验证", type: "paste" },
-  { title: "收尾", detail: "关闭代理和调试", type: "final" }
+  {
+    title: "回到 Reqable 复制 Cookie",
+    detail: "找到 cnum 请求并复制 Cookies",
+    type: "cookie",
+    image: copyCookieImage,
+    imageAlt: "Reqable Cookies 复制按钮截图",
+    imageCaption: "选中 cnum 请求，切到 Cookies 面板，复制完整 Cookie。"
+  },
+  {
+    title: "粘贴到系统里",
+    detail: "更新 Cookie 并验证",
+    type: "paste",
+    imageCaption: "回到系统点击“更新 Cookie”，粘贴刚才复制的完整 Cookie 并保存验证。"
+  },
+  {
+    title: "收尾",
+    detail: "关闭代理和调试",
+    type: "final",
+    image: requestListImage,
+    imageAlt: "Reqable 调试请求列表截图",
+    imageCaption: "Cookie 保存成功后，关闭代理和调试，避免后续网络一直走抓包代理。"
+  }
 ];
 
 function resetReadingState() {
@@ -188,6 +229,17 @@ watch(
                 <p>保存成功后，关闭系统代理，停止调试，再关闭 Reqable。之后添加充电桩并点击刷新即可查看状态。</p>
                 <CheckCircle2 aria-hidden="true" />
               </div>
+
+              <figure v-if="step.image" class="usage-guide-figure">
+                <img
+                  data-testid="usage-guide-image"
+                  :src="step.image"
+                  :alt="step.imageAlt"
+                  loading="lazy"
+                  decoding="async"
+                >
+                <figcaption>{{ step.imageCaption }}</figcaption>
+              </figure>
             </section>
           </div>
         </div>
