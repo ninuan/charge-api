@@ -1,4 +1,4 @@
-# Charge API Dashboard
+# Charge Console
 
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
@@ -6,22 +6,25 @@
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
 ![License](https://img.shields.io/badge/Usage-Personal%20Monitoring-lightgrey)
 
-一个用于查看充电桩端口占用情况的多用户看板。后端使用 Go 请求充电桩接口，前端使用 Vue + TypeScript 展示多个充电桩、多个充电口的实时状态、已用时间和剩余时间。
+一个用于查看充电桩使用情况的轻量看板。它把常看的充电桩和充电口集中到一个页面里，方便快速判断哪里空闲、哪里正在使用、哪里离线，不用每次都找到服务号、扫码、再进入对应页面查看。
+
+这个项目适合个人或小范围内部使用。每个用户维护自己的充电桩列表和访问凭据，系统只在用户主动刷新时请求远端接口，并会在短时间重复刷新时优先返回缓存，尽量减少不必要的远端访问。
 
 ## 功能亮点
 
-- 多桩管理：支持动态添加、删除充电桩。
-- 用户隔离：每个用户使用自己的 Cookie、设备列表和本地缓存。
+- 免重复扫码：把常用充电桩固定在看板里，日常查看不必反复从服务号扫码进入。
+- 端口状态一眼可见：展示每个充电口的空闲、使用中、离线状态。
+- 使用时间参考：显示使用中端口的已用时间和剩余时间，方便判断是否值得等待。
+- 多桩管理：支持添加、删除多个充电桩，并按名称、地址或端口状态筛选。
+- 用户隔离：每个用户使用自己的设备列表、Cookie 和本地缓存。
+- 主动刷新：由用户点击按钮后请求远端接口，不做自动高频轮询。
+- 刷新保护：短时间重复刷新会优先返回本地缓存，降低远端请求频率。
+- 状态持久化：重启后恢复已添加设备、最新快照、刷新时间和 Cookie。
+- 手动更新凭据：Cookie 失效时可在页面粘贴新的 Cookie 并立即验证；系统不会自动获取或续期 Cookie。
 - 自助注册：普通用户可以自行注册并维护自己的充电桩。
 - 管理后台：管理员只查看流量监控大屏，并可以添加、禁用、删除用户。
 - 流量统计：按用户统计访问次数、刷新次数、远端请求次数和失败次数。
 - 登录防护：Argon2id 密码哈希、Cloudflare Turnstile、人机验证失败锁定和 IP 限流。
-- 端口看板：展示每个充电口的空闲、使用中、离线状态。
-- 时间信息：显示使用中端口的已用时间和剩余时间。
-- 主动刷新：由用户点击按钮后请求远端接口，不做自动高频轮询。
-- 刷新保护：短时间重复刷新会优先返回本地缓存。
-- 状态持久化：重启后恢复已添加设备、最新快照、刷新时间和 Cookie。
-- Cookie 更新：登录态失效后可在页面粘贴新 Cookie 并立即验证。
 
 ## 技术栈
 
@@ -36,12 +39,13 @@
 
 ```mermaid
 flowchart LR
-  A["User Dashboard"] -->|"Session Cookie"| B["Go Backend"]
-  B --> C["Per-user Cache"]
-  B -->|"User Cookie + Device IDs"| D["Charger API"]
-  D --> B
-  E["Admin Panel"] -->|"User & Traffic Stats"| B
-  B -->|"Snapshot"| A
+  A["打开看板"] --> B["查看已保存充电桩"]
+  B -->|"主动刷新"| C["Go Backend"]
+  C --> D["用户本地缓存"]
+  C -->|"Cookie + 设备 ID"| E["充电桩接口"]
+  E --> C
+  C -->|"状态快照"| A
+  F["管理后台"] -->|"用户与流量统计"| C
 ```
 
 ## 项目结构
@@ -217,8 +221,6 @@ charge_state.db
 
 用户、设备列表、看板快照和流量统计会按用户独立保存。Cookie 使用 AES-256-GCM 加密后写入数据库，密钥通过 `CHARGE_COOKIE_KEY` 提供。
 
-从旧版本升级时，数据库为空的情况下会自动导入 `charge_state.json`。迁移成功后，原 JSON 会被删除，并生成不含 Cookie 的 `charge_state.json.migrated` 记录。
-
 生成服务器加密密钥：
 
 ```bash
@@ -233,14 +235,13 @@ CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
 
 ## 登录安全
 
-- 新密码使用 Argon2id 保存。
-- 旧版 SHA-256 密码在下一次成功登录时自动升级，无需用户重置。
+- 密码使用 Argon2id 哈希保存。
 - 登录和注册必须通过 Cloudflare Turnstile 服务端验证。
 - 同一 IP 5 分钟最多提交 20 次登录或注册请求。
 - 同一账号或 IP 连续失败 5 次后锁定 15 分钟。
 - 验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
 - Session 默认有效期为 7 天，每个用户最多保留 5 个登录会话。
-- Session 持久化到 SQLite，数据库只保存 Token 的 SHA-256 摘要；服务重启后登录状态仍然有效。
+- Session 持久化到 SQLite，服务重启后登录状态仍然有效。
 - 修改密码、角色、禁用或删除用户时，该用户的全部 Session 会立即失效。
 - 管理员只能访问用户管理与流量统计接口，不能访问普通用户的充电桩接口。
 - `/api/` 默认按 IP 限制为每分钟 300 次请求，超限返回 `429`。
