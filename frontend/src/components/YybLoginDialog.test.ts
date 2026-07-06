@@ -68,4 +68,20 @@ describe("YybLoginDialog", () => {
 
     expect(wrapper.text()).toContain("扫码已确认，可以点击确认绑定");
   });
+
+  it("keeps the QR login dialog scrollable and closable on mobile", () => {
+    const wrapper = mount(YybLoginDialog, {
+      global: {
+        stubs: dialogStubs
+      }
+    });
+
+    const content = wrapper.find('[data-testid="yyb-login-dialog"]');
+    expect(content.exists()).toBe(true);
+    expect(content.classes()).toContain("max-h-[calc(100dvh-2rem)]");
+    expect(content.classes()).toContain("overflow-y-auto");
+    expect(content.classes()).toContain("sm:max-w-2xl");
+    expect(wrapper.get('[data-testid="yyb-login-close"]').text()).toContain("关闭");
+  });
+
 });

@@ -108,7 +108,7 @@ watch(open, (value) => {
     <DialogTrigger as-child>
       <UiButton class="dashboard-action" variant="outline"><QrCode />扫码登录</UiButton>
     </DialogTrigger>
-    <DialogContent class="sm:max-w-2xl">
+    <DialogContent data-testid="yyb-login-dialog" class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2"><ShieldCheck class="size-5 text-primary" />扫码登录远端账号</DialogTitle>
         <DialogDescription>
@@ -171,8 +171,8 @@ watch(open, (value) => {
         </section>
       </div>
 
-      <DialogFooter>
-        <UiButton variant="ghost" @click="open = false">关闭</UiButton>
+      <DialogFooter class="sticky bottom-0 -mx-6 -mb-6 mt-2 border-t border-border bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:static sm:m-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+        <UiButton data-testid="yyb-login-close" variant="ghost" @click="open = false">关闭</UiButton>
       </DialogFooter>
     </DialogContent>
   </Dialog>
