@@ -81,7 +81,7 @@ async function submit() {
         <label class="form-field">
           <span>桩号 <b>*</b></span>
           <UiInput v-model="form.number" inputmode="numeric" autocomplete="off" placeholder="例如 61034278" />
-          <small>输入二维码链接里的 n 参数，例如 /i/cnum?n=61034278；不需要在扫码后立刻填写。</small>
+          <small>输入充电桩上二维码上方的如61034278的桩号，或者小程序里面的显示的桩号都可以</small>
         </label>
         <label class="form-field">
           <span>显示名称</span>
