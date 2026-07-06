@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/yyb"
 )
 
 const (
@@ -30,11 +32,25 @@ var deviceIDPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 var pileNumberPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 
 type Server struct {
-	manager   *appruntime.Manager
-	sessions  *auth.SessionManager
-	turnstile *auth.TurnstileVerifier
-	authGuard *auth.AuthGuard
-	captcha   *auth.CaptchaStore
+	manager      *appruntime.Manager
+	sessions     *auth.SessionManager
+	turnstile    *auth.TurnstileVerifier
+	authGuard    *auth.AuthGuard
+	captcha      *auth.CaptchaStore
+	yybClient    yybSessionClient
+	moceleClient appruntime.MoceleCookieClient
+}
+
+type yybSessionClient interface {
+	appruntime.YYBCodeClient
+	CreateQR(ctx context.Context) (yyb.QRSession, error)
+	PollQR(ctx context.Context, sessionID string) (yyb.QRPollResult, error)
+	ConfirmQR(ctx context.Context, sessionID string) (yyb.YYBAccount, error)
+}
+
+func (s *Server) SetYYBIntegration(yybClient yybSessionClient, moceleClient appruntime.MoceleCookieClient) {
+	s.yybClient = yybClient
+	s.moceleClient = moceleClient
 }
 
 func NewServer(
@@ -73,6 +89,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/piles/", s.handlePileActions)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)
 	mux.HandleFunc("/api/session/cookie", s.handleCookieUpdate)
+	mux.HandleFunc("/api/session/yyb-binding", s.handleYYBBinding)
+	mux.HandleFunc("/api/session/yyb-qr", s.handleYYBQR)
+	mux.HandleFunc("/api/session/yyb-qr/", s.handleYYBQR)
+	mux.HandleFunc("/api/session/mocele-cookie", s.handleMoceleCookie)
 	mux.HandleFunc("/api/stream", s.handleStream)
 	mux.HandleFunc("/healthz", s.handleHealth)
 }
@@ -357,7 +377,13 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "充电口数量必须在 1-20 之间"})
 			return
 		}
-		pile, err := s.manager.AddPile(user.ID, req)
+		var pile model.Pile
+		var err error
+		if s.yybClient != nil && s.moceleClient != nil {
+			pile, err = s.manager.AddPileWithYYB(user.ID, req, s.yybClient, s.moceleClient)
+		} else {
+			pile, err = s.manager.AddPile(user.ID, req)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -461,6 +487,231 @@ func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) requireYYBIntegration(w http.ResponseWriter) bool {
+	if s.yybClient == nil || s.moceleClient == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "yyb integration is not configured"})
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.requireYYBIntegration(w) {
+		return
+	}
+	if r.URL.Path == "/api/session/yyb-qr" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		qr, err := s.yybClient.CreateQR(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"sessionId":   qr.SessionID,
+			"imageUrl":    qr.ImageURL,
+			"imageBase64": qr.ImageBase64,
+			"status":      qr.Status,
+		})
+		return
+	}
+
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/session/yyb-qr/"), "/")
+	if len(parts) != 2 || parts[0] == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "yyb qr session not found"})
+		return
+	}
+	sessionID, action := parts[0], parts[1]
+	switch action {
+	case "poll":
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		result, err := s.yybClient.PollQR(r.Context(), sessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"sessionId": result.SessionID,
+			"status":    result.Status,
+			"message":   result.Message,
+		})
+	case "confirm":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		account, err := s.yybClient.ConfirmQR(r.Context(), sessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := s.manager.SaveYYBBinding(user.ID, account); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存绑定状态失败"})
+			return
+		}
+		payload, err := s.yybBindingStatusPayload(user.ID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取绑定状态失败"})
+			return
+		}
+		payload["cookieSynced"] = false
+		payload["message"] = "扫码登录已完成。添加充电桩后，系统会自动更新登录凭据"
+		if deviceID, ok, err := s.manager.FirstDeviceID(user.ID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取设备列表失败"})
+			return
+		} else if ok {
+			if _, err := s.manager.SyncCookieFromYYB(user.ID, deviceID, s.yybClient, s.moceleClient); err == nil {
+				payload["cookieSynced"] = true
+				payload["message"] = "扫码登录已完成，登录凭据已自动生效"
+			} else {
+				payload["message"] = "扫码登录已完成，但凭据暂未生效；请稍后刷新或重新添加充电桩"
+			}
+		}
+		writeJSON(w, http.StatusOK, payload)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "yyb qr session not found"})
+	}
+}
+
+func (s *Server) handleMoceleCookie(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.requireYYBIntegration(w) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		DeviceID string `json:"deviceId"`
+	}
+	if !decodeJSON(w, r, pileBodyLimit, &req) {
+		return
+	}
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	if !deviceIDPattern.MatchString(req.DeviceID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "deviceId is invalid"})
+		return
+	}
+	snapshot, err := s.manager.SyncCookieFromYYB(user.ID, req.DeviceID, s.yybClient, s.moceleClient)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) handleYYBBinding(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.writeYYBBindingStatus(w, user.ID)
+	case http.MethodPost:
+		var req struct {
+			OpenID        string     `json:"openid"`
+			Ref           string     `json:"ref"`
+			Nickname      string     `json:"nickname"`
+			Avatar        string     `json:"avatar"`
+			Status        string     `json:"status"`
+			BoundAt       *time.Time `json:"boundAt,omitempty"`
+			LastCheckedAt *time.Time `json:"lastCheckedAt,omitempty"`
+		}
+		if !decodeJSON(w, r, adminBodyLimit, &req) {
+			return
+		}
+		req.OpenID = strings.TrimSpace(req.OpenID)
+		if req.OpenID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "openid is required"})
+			return
+		}
+		req.Ref = strings.TrimSpace(req.Ref)
+		req.Nickname = strings.TrimSpace(req.Nickname)
+		req.Avatar = strings.TrimSpace(req.Avatar)
+		req.Status = strings.TrimSpace(req.Status)
+		if req.Status == "" {
+			req.Status = "bound"
+		}
+		boundAt := time.Now().UTC()
+		if req.BoundAt != nil {
+			boundAt = *req.BoundAt
+		}
+		binding := &model.YYBBinding{
+			OpenID:        req.OpenID,
+			Ref:           req.Ref,
+			Nickname:      req.Nickname,
+			Avatar:        req.Avatar,
+			Status:        req.Status,
+			BoundAt:       boundAt,
+			LastCheckedAt: req.LastCheckedAt,
+		}
+		if err := s.manager.SetYYBBinding(user.ID, binding); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存绑定状态失败"})
+			return
+		}
+		s.writeYYBBindingStatus(w, user.ID)
+	case http.MethodDelete:
+		if err := s.manager.ClearYYBBinding(user.ID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除绑定状态失败"})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) writeYYBBindingStatus(w http.ResponseWriter, userID string) {
+	payload, err := s.yybBindingStatusPayload(userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取绑定状态失败"})
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) yybBindingStatusPayload(userID string) (map[string]any, error) {
+	binding, err := s.manager.YYBBinding(userID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		return map[string]any{"bound": false}, nil
+	}
+	payload := map[string]any{
+		"bound":        true,
+		"openidSuffix": suffix(binding.OpenID, 4),
+		"nickname":     binding.Nickname,
+		"status":       binding.Status,
+		"boundAt":      binding.BoundAt,
+	}
+	if binding.LastCheckedAt != nil {
+		payload["lastCheckedAt"] = binding.LastCheckedAt
+	}
+	return payload, nil
+}
+
+func suffix(value string, n int) string {
+	if n <= 0 || len(value) <= n {
+		return value
+	}
+	return value[len(value)-n:]
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {

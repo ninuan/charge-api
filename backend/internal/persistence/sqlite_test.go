@@ -171,3 +171,82 @@ func TestDecodeCookieKey(t *testing.T) {
 		t.Fatal("expected invalid key error")
 	}
 }
+
+func TestSQLiteEncryptsYYBBindingAtRestAndLoadsIt(t *testing.T) {
+	path := t.TempDir() + "/state.db"
+	key := bytes.Repeat([]byte{0x31}, CookieKeySize)
+	store, err := OpenSQLite(path, key)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	state := State{
+		Version: 3,
+		Users: []model.User{{
+			ID:           "user-yyb",
+			Username:     "alice",
+			PasswordHash: "hash",
+			Role:         model.RoleUser,
+			Enabled:      true,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}},
+		UserStates: map[string]UserState{
+			"user-yyb": {
+				YYBBinding: &model.YYBBinding{
+					OpenID:        "yyb-openid-secret",
+					Ref:           "yyb-ref-secret",
+					Nickname:      "nickname-secret",
+					Avatar:        "https://avatar.example/secret.png",
+					Status:        "alive",
+					BoundAt:       now,
+					LastCheckedAt: &now,
+					LastError:     "refresh token expired",
+				},
+			},
+		},
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	databaseFiles, err := filepath.Glob(path + "*")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	for _, databaseFile := range databaseFiles {
+		databaseBytes, err := os.ReadFile(databaseFile)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", databaseFile, err)
+		}
+		for _, secret := range []string{"yyb-openid-secret", "yyb-ref-secret", "nickname-secret"} {
+			if bytes.Contains(databaseBytes, []byte(secret)) {
+				t.Fatalf("%s contains plaintext yyb binding value %q", databaseFile, secret)
+			}
+		}
+	}
+
+	reopened, err := OpenSQLite(path, key)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer reopened.Close()
+	loaded, ok, err := reopened.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !ok {
+		t.Fatalf("Load ok = false")
+	}
+	binding := loaded.UserStates["user-yyb"].YYBBinding
+	if binding == nil {
+		t.Fatalf("YYBBinding missing after reload")
+	}
+	if binding.OpenID != "yyb-openid-secret" || binding.Nickname != "nickname-secret" || binding.Ref != "yyb-ref-secret" || binding.LastError != "refresh token expired" {
+		t.Fatalf("YYBBinding did not round-trip: %#v", binding)
+	}
+}

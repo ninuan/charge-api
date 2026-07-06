@@ -1,0 +1,26 @@
+[Unit]
+Description=YYB Go Sidecar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yyb
+Group=yyb
+WorkingDirectory=/opt/yyb_go
+EnvironmentFile=/etc/yyb-go.env
+
+ExecStart=/opt/yyb_go/yyb-go -host 127.0.0.1 -port 8000 -resource-root /opt/yyb_go/resource -db yyb.db
+
+Restart=always
+RestartSec=3
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/yyb_go/resource
+
+[Install]
+WantedBy=multi-user.target

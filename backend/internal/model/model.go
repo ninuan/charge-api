@@ -77,6 +77,17 @@ type PileUpsertRequest struct {
 	Address string `json:"address"`
 }
 
+type YYBBinding struct {
+	OpenID        string     `json:"openid"`
+	Ref           string     `json:"ref"`
+	Nickname      string     `json:"nickname"`
+	Avatar        string     `json:"avatar"`
+	Status        string     `json:"status"`
+	BoundAt       time.Time  `json:"boundAt"`
+	LastCheckedAt *time.Time `json:"lastCheckedAt,omitempty"`
+	LastError     string     `json:"lastError,omitempty"`
+}
+
 type UserRole string
 
 const (
@@ -202,6 +213,7 @@ type TrafficStats struct {
 	LastRemoteFetchAt *time.Time `json:"lastRemoteFetchAt,omitempty"`
 	LastFailedAt      *time.Time `json:"lastFailedAt,omitempty"`
 	LastAuthFailureAt *time.Time `json:"lastAuthFailureAt,omitempty"`
+	LastRemoteOKAt    *time.Time `json:"lastRemoteOkAt,omitempty"`
 }
 
 type AdminUserSummary struct {

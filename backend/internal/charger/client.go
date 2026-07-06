@@ -14,6 +14,7 @@ import (
 
 	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/parser"
+	"charge-dashboard/internal/security"
 )
 
 var (
@@ -396,7 +397,7 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 		return model.Pile{}, fmt.Errorf("%w: remote API returned %s", ErrAuthExpired, resp.Status)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return model.Pile{}, fmt.Errorf("remote API returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return model.Pile{}, fmt.Errorf("remote API returned %s: %s", resp.Status, security.RedactText(strings.TrimSpace(string(body)), 512))
 	}
 
 	pile, err := parser.ParsePayload(captureRequest.URL, body)
@@ -596,6 +597,7 @@ func looksLikeAuthExpired(body []byte) bool {
 		"unauthorized",
 		"forbidden",
 		"login",
+		"alert",
 		"登录",
 		"未登录",
 		"授权",

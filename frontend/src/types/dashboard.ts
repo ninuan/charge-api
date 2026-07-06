@@ -82,6 +82,7 @@ export interface TrafficStats {
   lastRemoteFetchAt?: string;
   lastFailedAt?: string;
   lastAuthFailureAt?: string;
+  lastRemoteOkAt?: string;
 }
 
 export interface AdminUserSummary {

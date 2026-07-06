@@ -103,6 +103,42 @@ BACKEND_PORT=18080 FRONTEND_PORT=5174 make dev
 LOCAL_DATABASE_FILE=/private/tmp/charge-test.db make dev
 ```
 
+如需在本地同时连接 yyb_go sidecar，先启动 yyb_go：
+
+```bash
+yyb-go -host 127.0.0.1 -port 8000 -resource-root /opt/yyb_go/resource
+```
+
+然后把 sidecar 地址和共享密钥透传给 Charge。可以临时写在命令前：
+
+```bash
+YYB_BASE_URL=http://127.0.0.1:8000 YYB_API_SECRET=your-local-hmac-secret make dev
+```
+
+更推荐放进本地配置文件，避免每次重复输入：
+
+```bash
+mkdir -p .local
+cp examples/dev.env.example .local/dev.env
+```
+
+编辑 `.local/dev.env`：
+
+```text
+YYB_BASE_URL=http://127.0.0.1:8000
+YYB_API_SECRET=your-local-hmac-secret
+```
+
+之后直接运行：
+
+```bash
+make dev
+```
+
+`.local/dev.env` 已被 `.gitignore` 排除，不会提交到 GitHub。若同名环境变量已经在当前 shell 中设置，shell 里的值优先生效。
+
+`yyb_go` 只应监听 `127.0.0.1:8000`，不要公网暴露。
+
 管理员密码只在首次创建数据库时生效。已有数据库不会因为修改环境变量而重置密码。
 
 如果想清空本地测试用户、Cookie 和设备状态：
@@ -221,16 +257,202 @@ charge_state.db
 
 用户、设备列表、看板快照和流量统计会按用户独立保存。Cookie 使用 AES-256-GCM 加密后写入数据库，密钥通过 `CHARGE_COOKIE_KEY` 提供。
 
-生成服务器加密密钥：
+### 生产密钥
+
+当前线上服务已经通过 Cloudflare 访问，不需要重新配置备案或从零部署。服务器只需要在环境文件中长期保存运行密钥。
+
+需要准备三类密钥：
+
+| 环境变量 | 用途 | 生成命令 |
+| --- | --- | --- |
+| `CHARGE_COOKIE_KEY` | Charge SQLite 中用户 Cookie 与敏感状态的 AES-GCM 加密密钥 | `openssl rand -base64 32` |
+| `YYB_SECRET_KEY` | yyb_go SQLite 中 `login_buffer`、OAuth credentials、session blob 的 AES-GCM 加密密钥 | `openssl rand -base64 32` |
+| `YYB_API_SECRET` | Charge 调用 yyb_go sidecar 时使用的 HMAC 共享密钥 | `openssl rand -base64 48` |
+
+也可以在本地生成一组示例值：
 
 ```bash
-openssl rand -base64 32
+./scripts/gen_secrets.sh
 ```
 
-将输出保存到服务器环境变量中。该密钥必须保持不变，否则已有 Cookie 无法解密：
+将输出保存到服务器环境变量中。密钥必须保持不变，否则已有加密数据无法解密：
 
 ```text
 CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
+YYB_SECRET_KEY=base64-encoded-32-byte-key
+YYB_API_SECRET=base64-encoded-hmac-secret
+```
+
+服务器环境文件必须只允许服务用户读取，例如：
+
+```bash
+sudo chown root:charge /etc/charge-api.env
+sudo chmod 0600 /etc/charge-api.env
+```
+
+如果 yyb_go 使用独立环境文件，也应使用同样的 `0600` 权限。
+
+
+## 生产运维加固
+
+当前线上入口仍由 Cloudflare 访问 Charge；反向代理只暴露 Charge 的 `8080` 上游，`yyb_go` 只作为本机 sidecar 监听 `127.0.0.1:8000`，不对公网开放。
+
+### systemd 模板
+
+仓库提供两份可参考模板：
+
+```text
+deploy/systemd/charge.service
+deploy/systemd/yyb-go.service
+```
+
+复制到服务器前先按实际用户名、安装路径和环境文件路径确认一遍：
+
+```bash
+sudo cp deploy/systemd/charge.service /etc/systemd/system/charge-api.service
+sudo cp deploy/systemd/yyb-go.service /etc/systemd/system/yyb-go.service
+sudo systemctl daemon-reload
+```
+
+两份模板都包含以下隔离配置：
+
+```ini
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+```
+
+Charge 只允许写入 `/var/lib/charge-api`；yyb_go 只允许写入 `/opt/yyb_go/resource`。
+
+### 生产启动命令
+
+Charge 后端应只监听本机地址，由 Cloudflare/Nginx/Caddy 等入口反向代理到它：
+
+```bash
+/opt/charge-api/backend/charge-server -listen 127.0.0.1:8080 -database /var/lib/charge-api/charge_state.db -state /var/lib/charge-api/charge_state.json
+```
+
+yyb_go sidecar 必须只监听本机回环地址：
+
+```bash
+/opt/yyb_go/yyb-go -host 127.0.0.1 -port 8000 -resource-root /opt/yyb_go/resource -db yyb.db
+```
+
+Charge 环境文件需要包含：
+
+```text
+CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
+YYB_API_SECRET=base64-encoded-hmac-secret
+YYB_BASE_URL=http://127.0.0.1:8000
+```
+
+yyb_go 环境文件需要包含：
+
+```text
+YYB_SECRET_KEY=base64-encoded-32-byte-key
+YYB_API_SECRET=base64-encoded-hmac-secret
+```
+
+其中 `YYB_API_SECRET` 两边必须一致。
+
+### 监听和防火墙检查
+
+确认 `yyb_go` 只绑定到 `127.0.0.1:8000`：
+
+```bash
+ss -lntp | grep ':8000'
+```
+
+预期只能看到类似：
+
+```text
+LISTEN 0 4096 127.0.0.1:8000 0.0.0.0:* users:(("yyb-go",pid=1234,fd=7))
+```
+
+不应出现 `0.0.0.0:8000` 或公网 IP。防火墙也应拒绝入站 `8000/tcp`：
+
+```bash
+sudo ufw deny 8000/tcp
+sudo ufw status
+```
+
+### 权限检查
+
+环境文件和 SQLite 数据库应只允许服务用户读取：
+
+```bash
+stat -c '%a %n' /etc/charge-api.env /etc/yyb-go.env /var/lib/charge-api/charge_state.db /opt/yyb_go/resource/db/yyb.db
+```
+
+推荐结果：
+
+```text
+600 /etc/charge-api.env
+600 /etc/yyb-go.env
+600 /var/lib/charge-api/charge_state.db
+600 /opt/yyb_go/resource/db/yyb.db
+```
+
+如果权限过宽，可收紧为：
+
+```bash
+sudo chmod 0600 /etc/charge-api.env /etc/yyb-go.env
+sudo chmod 0600 /var/lib/charge-api/charge_state.db /opt/yyb_go/resource/db/yyb.db
+```
+
+### 备份策略
+
+两个 SQLite 文件都包含加密后的敏感状态，备份时仍应按敏感数据处理：
+
+```text
+/var/lib/charge-api/charge_state.db
+/opt/yyb_go/resource/db/yyb.db
+```
+
+备份要求：
+
+- 只做加密备份，或从日常明文备份中排除。
+- 同时离线保存 `CHARGE_COOKIE_KEY`、`YYB_SECRET_KEY`、`YYB_API_SECRET`。
+- 不要在服务运行时只复制 `.db` 主文件；如果启用 WAL，应先停服务或使用 SQLite 在线备份工具。
+- 恢复演练时必须使用原始密钥，否则数据库中的 Cookie 和 yyb_go 凭据无法解密。
+
+
+### 端到端安全检查
+
+部署完成后可以在服务器上运行安全检查脚本，确认 yyb_go 未暴露到公网、未签名请求被拒绝、数据库和日志没有出现已知明文敏感值：
+
+```bash
+./scripts/security_check.sh
+```
+
+首次运行前可以预演，不会连接服务、读取数据库或访问 journal：
+
+```bash
+./scripts/security_check.sh --dry-run
+```
+
+默认检查当前推荐路径：
+
+```text
+Charge:  http://127.0.0.1:8080
+Yyb_go:  http://127.0.0.1:8000
+Charge DB: /var/lib/charge-api/charge_state.db
+yyb_go DB: /opt/yyb_go/resource/db/yyb.db
+Units: charge-api yyb-go
+```
+
+如果服务器路径不同，可通过环境变量覆盖：
+
+```bash
+CHARGE_DB_FILE=/path/to/charge_state.db YYB_DB_FILE=/path/to/yyb.db LOG_UNITS="charge-api yyb-go" ./scripts/security_check.sh
+```
+
+如果后续新增了能触发 Charge 调用 yyb_go 的业务端点，可以把它加入同一检查：
+
+```bash
+CHARGE_SIGNED_FLOW_URL=http://127.0.0.1:8080/api/session/yyb-binding CHARGE_SESSION_COOKIE='charge_session=...' ./scripts/security_check.sh
 ```
 
 ## 登录安全
@@ -267,6 +489,8 @@ proxy_set_header X-Forwarded-Proto $scheme;
 ```text
 CHARGE_ADMIN_PASSWORD=your-admin-password
 CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
+YYB_SECRET_KEY=base64-encoded-32-byte-key
+YYB_API_SECRET=base64-encoded-hmac-secret
 TURNSTILE_REQUIRED=true
 TURNSTILE_SITE_KEY=your-site-key
 TURNSTILE_SECRET_KEY=your-secret-key

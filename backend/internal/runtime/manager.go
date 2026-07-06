@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/base64"
@@ -12,11 +13,24 @@ import (
 
 	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/charger"
+	"charge-dashboard/internal/mocele"
 	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/persistence"
 	"charge-dashboard/internal/store"
+	"charge-dashboard/internal/yyb"
 )
+
+const moceleAppID = "wx9cbffc15d3cb7739"
+
+type YYBCodeClient interface {
+	GetCode(ctx context.Context, ref string, appID string) (string, error)
+	RefreshAccount(ctx context.Context, ref string) error
+}
+
+type MoceleCookieClient interface {
+	ExchangeCode(ctx context.Context, deviceID string, code string) (mocele.CookieResult, error)
+}
 
 const (
 	stateVersion       = 3
@@ -45,6 +59,7 @@ type UserRuntime struct {
 	stats           model.TrafficStats
 	lastRemoteFetch time.Time
 	minInterval     time.Duration
+	yybBinding      *model.YYBBinding
 }
 
 func NewManager(
@@ -456,6 +471,130 @@ func (m *Manager) DeleteUser(id string) error {
 	return m.Save()
 }
 
+func (m *Manager) SaveYYBBinding(userID string, account yyb.YYBAccount) (*model.YYBBinding, error) {
+	now := time.Now().UTC()
+	binding := &model.YYBBinding{
+		OpenID:        strings.TrimSpace(account.OpenID),
+		Ref:           strings.TrimSpace(account.Ref),
+		Nickname:      strings.TrimSpace(account.Nickname),
+		Avatar:        strings.TrimSpace(account.Avatar),
+		Status:        "alive",
+		BoundAt:       now,
+		LastCheckedAt: nil,
+		LastError:     "",
+	}
+	if binding.Ref == "" {
+		return nil, fmt.Errorf("yyb account ref is required")
+	}
+	if binding.OpenID == "" {
+		return nil, fmt.Errorf("yyb account openid is required")
+	}
+	if err := m.SetYYBBinding(userID, binding); err != nil {
+		return nil, err
+	}
+	return cloneYYBBinding(binding), nil
+}
+
+func (m *Manager) ClearYYBBinding(userID string) error {
+	return m.SetYYBBinding(userID, nil)
+}
+
+func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
+	binding, err := m.YYBBinding(userID)
+	if err != nil {
+		return model.DashboardSnapshot{}, err
+	}
+	if binding == nil || binding.Ref == "" {
+		return model.DashboardSnapshot{}, fmt.Errorf("yyb binding is required")
+	}
+	ctx := context.Background()
+	code, err := yybClient.GetCode(ctx, binding.Ref, moceleAppID)
+	if err != nil {
+		if refreshErr := yybClient.RefreshAccount(ctx, binding.Ref); refreshErr != nil {
+			err = fmt.Errorf("get code failed: %v; refresh failed: %w", err, refreshErr)
+			m.markYYBBindingExpired(userID, binding, err)
+			return model.DashboardSnapshot{}, err
+		}
+		code, err = yybClient.GetCode(ctx, binding.Ref, moceleAppID)
+		if err != nil {
+			m.markYYBBindingExpired(userID, binding, err)
+			return model.DashboardSnapshot{}, err
+		}
+	}
+	cookieResult, err := moceleClient.ExchangeCode(ctx, deviceID, code)
+	if err != nil {
+		m.markYYBBindingError(userID, binding, err)
+		return model.DashboardSnapshot{}, err
+	}
+	now := time.Now().UTC()
+	binding.Status = "alive"
+	binding.LastError = ""
+	binding.LastCheckedAt = &now
+	if err := m.SetYYBBinding(userID, binding); err != nil {
+		return model.DashboardSnapshot{}, err
+	}
+	return m.UpdateCookie(userID, cookieResult.Cookie)
+}
+
+func (m *Manager) markYYBBindingExpired(userID string, binding *model.YYBBinding, cause error) {
+	binding.Status = "expired"
+	m.markYYBBindingError(userID, binding, cause)
+}
+
+func (m *Manager) markYYBBindingError(userID string, binding *model.YYBBinding, cause error) {
+	now := time.Now().UTC()
+	binding.LastCheckedAt = &now
+	if cause != nil {
+		binding.LastError = cause.Error()
+	}
+	_ = m.SetYYBBinding(userID, binding)
+}
+
+func (m *Manager) YYBBinding(userID string) (*model.YYBBinding, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return nil, err
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return cloneYYBBinding(runtime.yybBinding), nil
+}
+
+func (m *Manager) SetYYBBinding(userID string, binding *model.YYBBinding) error {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return err
+	}
+	runtime.mu.Lock()
+	runtime.yybBinding = cloneYYBBinding(binding)
+	runtime.mu.Unlock()
+	return m.Save()
+}
+
+func cloneYYBBinding(binding *model.YYBBinding) *model.YYBBinding {
+	if binding == nil {
+		return nil
+	}
+	clone := *binding
+	if binding.LastCheckedAt != nil {
+		value := *binding.LastCheckedAt
+		clone.LastCheckedAt = &value
+	}
+	return &clone
+}
+
+func (m *Manager) FirstDeviceID(userID string) (string, bool, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return "", false, err
+	}
+	ids := runtime.client.DeviceIDs()
+	if len(ids) == 0 {
+		return "", false, nil
+	}
+	return ids[0], true, nil
+}
+
 func (m *Manager) Snapshot(userID string) (model.DashboardSnapshot, error) {
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
@@ -523,6 +662,44 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 	runtime.recordFailure(false)
 	_ = m.Save()
 	return model.Pile{}, fmt.Errorf("device %s was not returned by remote API", req.ID)
+}
+
+func (m *Manager) AddPileWithYYB(userID string, req model.PileUpsertRequest, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.Pile, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return model.Pile{}, err
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	req.Number = strings.TrimSpace(req.Number)
+	if req.ID == "" && req.Number != "" {
+		resolvedID, err := runtime.client.ResolveDeviceIDByNumber(req.Number)
+		if err != nil {
+			return model.Pile{}, err
+		}
+		req.ID = resolvedID
+	}
+
+	pile, err := m.AddPile(userID, req)
+	if err == nil {
+		return pile, nil
+	}
+	if !charger.IsAuthExpired(err) {
+		return model.Pile{}, err
+	}
+	if req.ID == "" {
+		return model.Pile{}, err
+	}
+	binding, bindingErr := m.YYBBinding(userID)
+	if bindingErr != nil {
+		return model.Pile{}, bindingErr
+	}
+	if binding == nil || binding.Ref == "" {
+		return model.Pile{}, err
+	}
+	if _, syncErr := m.SyncCookieFromYYB(userID, req.ID, yybClient, moceleClient); syncErr != nil {
+		return model.Pile{}, fmt.Errorf("自动更新登录凭据失败: %w", syncErr)
+	}
+	return m.AddPile(userID, req)
 }
 
 func (m *Manager) DeletePile(userID string, id string) error {
@@ -713,6 +890,7 @@ func newUserRuntime(requests []parser.CaptureRequest, state persistence.UserStat
 		client:      client,
 		stats:       state.Stats,
 		minInterval: minInterval,
+		yybBinding:  cloneYYBBinding(state.YYBBinding),
 	}
 	if refresh.LastRemoteAt != nil {
 		runtime.lastRemoteFetch = *refresh.LastRemoteAt
@@ -824,6 +1002,12 @@ func (r *UserRuntime) recordFailure(authFailure bool) {
 	}
 }
 
+func (r *UserRuntime) recordRemoteOK(at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stats.LastRemoteOKAt = &at
+}
+
 func (r *UserRuntime) statsSnapshot() model.TrafficStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -835,11 +1019,12 @@ func (r *UserRuntime) state() persistence.UserState {
 	defer r.mu.Unlock()
 	snapshot := r.store.Snapshot()
 	return persistence.UserState{
-		Piles:     snapshot.Piles,
-		Refresh:   snapshot.Refresh,
-		DeviceIDs: r.client.DeviceIDs(),
-		Cookie:    r.client.Cookie(),
-		Stats:     r.stats,
+		Piles:      snapshot.Piles,
+		Refresh:    snapshot.Refresh,
+		DeviceIDs:  r.client.DeviceIDs(),
+		Cookie:     r.client.Cookie(),
+		Stats:      r.stats,
+		YYBBinding: cloneYYBBinding(r.yybBinding),
 	}
 }
 
@@ -1004,7 +1189,7 @@ func (m *Manager) AdminStats() model.AdminStats {
 		if !summary.HasCookie {
 			exceptions = append(exceptions, model.SystemException{ID: "cookie-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "cookie", Level: "warning", Message: "尚未配置 Cookie", Time: now})
 		}
-		if summary.Stats.AuthFailures > 0 {
+		if hasActiveAuthFailure(summary.Stats) {
 			at := now
 			if summary.Stats.LastAuthFailureAt != nil {
 				at = *summary.Stats.LastAuthFailureAt
@@ -1033,8 +1218,24 @@ func (m *Manager) AdminStats() model.AdminStats {
 	return model.AdminStats{Users: users, Hourly: hourly, Daily: daily, Exceptions: exceptions}
 }
 
+func hasActiveAuthFailure(stats model.TrafficStats) bool {
+	if stats.AuthFailures == 0 || stats.LastAuthFailureAt == nil {
+		return false
+	}
+	if stats.LastRemoteOKAt == nil {
+		return true
+	}
+	return stats.LastAuthFailureAt.After(*stats.LastRemoteOKAt)
+}
+
 func (m *Manager) recordMetric(userID, kind string) {
-	_ = m.repository.RecordMetric(userID, kind, time.Now())
+	now := time.Now()
+	if kind == "remote_ok" {
+		if runtime, err := m.runtimeFor(userID); err == nil {
+			runtime.recordRemoteOK(now)
+		}
+	}
+	_ = m.repository.RecordMetric(userID, kind, now)
 }
 
 func randomID(prefix string) string {

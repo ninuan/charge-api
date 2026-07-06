@@ -7,10 +7,10 @@ import { Input as UiInput } from "@/components/ui/input";
 import AppShell from "@/components/AppShell.vue";
 import AddPileDialog from "@/components/AddPileDialog.vue";
 import ConnectionBadge from "@/components/ConnectionBadge.vue";
-import CookieDialog from "@/components/CookieDialog.vue";
 import MetricCard from "@/components/MetricCard.vue";
 import PileCard from "@/components/PileCard.vue";
 import UsageGuideDialog from "@/components/UsageGuideDialog.vue";
+import YybLoginDialog from "@/components/YybLoginDialog.vue";
 import { Button as UiButton } from "@/components/ui/button";
 import { useDashboardStream } from "@/composables/useDashboardStream";
 import { useAuthStore } from "@/stores/auth";
@@ -118,7 +118,7 @@ onMounted(async () => {
       <div class="flex flex-wrap items-center gap-2">
         <ConnectionBadge :state="stream.state.value" />
         <UsageGuideDialog />
-        <CookieDialog />
+        <YybLoginDialog />
         <AddPileDialog />
       </div>
     </template>
@@ -184,11 +184,11 @@ onMounted(async () => {
       <div v-if="!store.loading && visiblePiles.length === 0" class="empty-state">
         <span><PlugZap /></span>
         <h2>{{ store.piles.length ? "没有匹配的充电口" : "还没有充电桩" }}</h2>
-        <p>{{ store.piles.length ? "调整搜索内容或状态条件，查看其他充电口。" : "先配置 Cookie，再添加设备。系统只会在你主动操作时请求远端数据。" }}</p>
+        <p>{{ store.piles.length ? "调整搜索内容或状态条件，查看其他充电口。" : "建议先完成扫码登录，再通过添加入口录入桩号；系统会在添加设备时自动维护登录凭据。" }}</p>
         <UiButton v-if="store.piles.length && hasActiveFilter" class="mt-5" variant="outline" @click="clearFilters">
           <RotateCcw />清除筛选条件
         </UiButton>
-        <div v-if="!store.piles.length" class="mt-5 flex flex-wrap justify-center gap-2"><CookieDialog /><AddPileDialog /></div>
+        <div v-if="!store.piles.length" class="mt-5 flex flex-wrap justify-center gap-2"><YybLoginDialog /><AddPileDialog /></div>
       </div>
     </section>
 

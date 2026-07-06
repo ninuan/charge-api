@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,10 +15,34 @@ import (
 
 	"charge-dashboard/internal/api"
 	"charge-dashboard/internal/auth"
+	"charge-dashboard/internal/mocele"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/persistence"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/yyb"
 )
+
+type envLookup func(string) string
+
+func yybClientFromEnv(lookup envLookup) (*yyb.Client, error) {
+	baseURL := strings.TrimSpace(lookup("YYB_BASE_URL"))
+	if baseURL == "" {
+		return nil, nil
+	}
+	secret := strings.TrimSpace(lookup("YYB_API_SECRET"))
+	if secret == "" {
+		return nil, fmt.Errorf("YYB_API_SECRET is required when YYB_BASE_URL is set")
+	}
+	return yyb.NewClient(yyb.Config{BaseURL: baseURL, APISecret: []byte(secret)})
+}
+
+func moceleClientFromEnv(lookup envLookup) *mocele.Client {
+	return mocele.NewClient(mocele.Config{
+		BaseURL:   strings.TrimSpace(lookup("MOCELE_BASE_URL")),
+		Org:       strings.TrimSpace(lookup("MOCELE_ORG")),
+		OpenIndex: strings.TrimSpace(lookup("MOCELE_OPENINDEX")),
+	})
+}
 
 func main() {
 	var (
@@ -77,6 +102,14 @@ func main() {
 		log.Printf("warning: Turnstile is disabled; configure TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY in production")
 	}
 
+	yybClient, err := yybClientFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatalf("configure yyb client: %v", err)
+	}
+	if yybClient != nil {
+		log.Printf("yyb sidecar integration enabled")
+	}
+
 	cookieKey, err := persistence.DecodeCookieKey(os.Getenv("CHARGE_COOKIE_KEY"))
 	if err != nil {
 		log.Fatalf("cookie encryption key: %v", err)
@@ -102,6 +135,9 @@ func main() {
 	sessions := auth.NewPersistentSessionManager(7*24*time.Hour, repository)
 	defer sessions.Close()
 	server := api.NewServer(manager, sessions, turnstile, auth.NewAuthGuard())
+	if yybClient != nil {
+		server.SetYYBIntegration(yybClient, moceleClientFromEnv(os.Getenv))
+	}
 	mux := http.NewServeMux()
 	server.Register(mux)
 	mux.Handle("/", http.FileServer(http.Dir("../frontend/dist")))

@@ -279,6 +279,48 @@
   .refresh-status--success { @apply border-emerald-700/20 bg-emerald-50 text-emerald-900; }
   .refresh-status--warning { @apply border-amber-700/20 bg-amber-50 text-amber-950; }
 
+  .yyb-login-grid {
+    @apply grid gap-4 md:grid-cols-[minmax(220px,.85fr)_minmax(0,1.15fr)];
+  }
+
+  .yyb-qr-panel,
+  .yyb-status-panel {
+    @apply rounded-2xl border border-border bg-background/60 p-4;
+  }
+
+  .yyb-status-panel {
+    @apply grid content-start gap-3;
+  }
+
+  .yyb-qr-frame,
+  .yyb-qr-placeholder {
+    @apply grid aspect-square w-full place-items-center rounded-2xl border border-border bg-card;
+  }
+
+  .yyb-qr-frame img {
+    @apply size-[82%] rounded-xl object-contain;
+  }
+
+  .yyb-qr-placeholder {
+    @apply gap-2 border-dashed text-center text-sm font-semibold text-muted-foreground;
+  }
+
+  .yyb-binding-card {
+    @apply flex min-h-20 items-start gap-3 rounded-2xl border border-border bg-card p-4;
+  }
+
+  .yyb-binding-card--active {
+    @apply border-primary/25 bg-primary/5;
+  }
+
+  .yyb-binding-card strong {
+    @apply text-sm font-bold;
+  }
+
+  .yyb-binding-card p {
+    @apply mt-1 text-xs leading-5 text-muted-foreground;
+  }
+
   .filter-panel {
     @apply grid gap-4 rounded-2xl border border-border/80 bg-card/90 p-4 shadow-[0_12px_34px_hsl(155_25%_15%/.045)] lg:grid-cols-[minmax(180px,.7fr)_minmax(420px,1.3fr)_auto] lg:items-center lg:p-5;
   }

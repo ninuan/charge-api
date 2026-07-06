@@ -75,13 +75,13 @@ async function submit() {
     <DialogContent class="max-w-xl">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2"><ServerCog class="size-5 text-primary" />添加充电桩</DialogTitle>
-        <DialogDescription>当前账户最多添加 {{ auth.currentUser?.deviceLimit ?? 10 }} 台设备。添加时会验证一次远端数据，成功后不会重复请求。</DialogDescription>
+        <DialogDescription>当前账户最多添加 {{ auth.currentUser?.deviceLimit ?? 10 }} 台设备。已完成扫码登录时，添加过程会自动更新访问凭据并验证远端数据。</DialogDescription>
       </DialogHeader>
       <form class="space-y-5" @submit.prevent="submit">
         <label class="form-field">
           <span>桩号 <b>*</b></span>
           <UiInput v-model="form.number" inputmode="numeric" autocomplete="off" placeholder="例如 61034278" />
-          <small>输入二维码链接里的 n 参数，例如 /i/cnum?n=61034278。</small>
+          <small>输入二维码链接里的 n 参数，例如 /i/cnum?n=61034278；不需要在扫码后立刻填写。</small>
         </label>
         <label class="form-field">
           <span>显示名称</span>

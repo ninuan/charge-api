@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/table";
 import { useAdminStore } from "@/stores/admin";
 import { useAuthStore } from "@/stores/auth";
+import { hasActiveAuthFailure, hasAdminRisk } from "@/utils/adminRisk";
 import type { AdminUserSummary, UserRole } from "@/types/dashboard";
 
 const admin = useAdminStore();
@@ -74,14 +75,14 @@ watch(() => admin.settings, (value) => {
 
 const filteredUsers = computed(() => admin.users.filter((summary) => {
   const matchesSearch = summary.user.username.toLowerCase().includes(search.value.trim().toLowerCase());
-  const risky = !summary.hasCookie || summary.stats.authFailures > 0 || summary.stats.failedRequests > 0;
+  const risky = hasAdminRisk(summary);
   if (filter.value === "risk") return matchesSearch && risky;
   if (filter.value === "disabled") return matchesSearch && !summary.user.enabled;
   return matchesSearch;
 }));
 
 const riskUsers = computed(() => admin.users
-  .filter((summary) => !summary.hasCookie || summary.stats.authFailures > 0)
+  .filter((summary) => !summary.hasCookie || hasActiveAuthFailure(summary.stats))
   .sort((a, b) => b.stats.authFailures - a.stats.authFailures)
   .slice(0, 5));
 const hourlyTrend = computed(() => admin.hourly.slice(-12));

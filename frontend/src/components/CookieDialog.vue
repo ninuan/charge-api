@@ -16,6 +16,13 @@ import { useDashboardStore } from "@/stores/dashboard";
 
 const store = useDashboardStore();
 const { message } = createDiscreteApi(["message"]);
+const props = withDefaults(defineProps<{
+  triggerLabel?: string;
+  triggerClass?: string;
+}>(), {
+  triggerLabel: "更新 Cookie",
+  triggerClass: "dashboard-action"
+});
 const open = ref(false);
 const cookie = ref("");
 const saving = ref(false);
@@ -42,7 +49,7 @@ async function save() {
 <template>
   <Dialog v-model:open="open">
     <DialogTrigger as-child>
-      <UiButton class="dashboard-action" variant="outline"><Cookie />更新 Cookie</UiButton>
+      <UiButton :class="props.triggerClass" variant="outline"><Cookie />{{ props.triggerLabel }}</UiButton>
     </DialogTrigger>
     <DialogContent class="max-w-2xl">
       <DialogHeader>

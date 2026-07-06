@@ -183,3 +183,39 @@ func newTestClient(concurrency int, counts map[string]*int32) *Client {
 	client.maxConcurrency = concurrency
 	return client
 }
+
+func TestFetchPileRedactsUpstreamErrorBody(t *testing.T) {
+	client := NewClient([]parser.CaptureRequest{{
+		Name:   "device-1",
+		Method: http.MethodPost,
+		URL:    "https://example.invalid/action/i/api/devicewithnumbers",
+		Body:   "id=device-1",
+		Headers: map[string]string{
+			"Cookie": "sid=secret-cookie; info=secret-info; verifycode=secret-code",
+		},
+	}})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Status:     "502 Bad Gateway",
+			Body:       io.NopCloser(strings.NewReader(`{"cookie":"secret-cookie","info":"secret-info","verifycode":"secret-code"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	result := client.FetchPiles(true)
+	if len(result.Failures) != 1 || result.Failures[0].Err == nil {
+		t.Fatalf("expected one failure, got %#v", result.Failures)
+	}
+	msg := result.Failures[0].Err.Error()
+	for _, secret := range []string{"secret-cookie", "secret-info", "secret-code"} {
+		if strings.Contains(msg, secret) {
+			t.Fatalf("error leaked %q: %s", secret, msg)
+		}
+	}
+	for _, marker := range []string{"<redacted:cookie:len=13>", "<redacted:info:len=11>", "<redacted:verifycode:len=11>"} {
+		if !strings.Contains(msg, marker) {
+			t.Fatalf("error missing marker %q: %s", marker, msg)
+		}
+	}
+}

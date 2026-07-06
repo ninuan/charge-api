@@ -14,7 +14,11 @@ fi
 echo "1/6 部署脚本检查"
 bash "$ROOT_DIR/scripts/deploy_test.sh"
 bash "$ROOT_DIR/scripts/deploy_git_test.sh"
+bash "$ROOT_DIR/scripts/dev_env_test.sh"
+bash "$ROOT_DIR/scripts/dev_vite_cache_test.sh"
 bash "$ROOT_DIR/scripts/check_frontend_sources_test.sh"
+bash "$ROOT_DIR/scripts/ops_hardening_test.sh"
+bash "$ROOT_DIR/scripts/security_check_test.sh"
 
 echo "2/6 前端源码检查"
 bash "$ROOT_DIR/scripts/check_frontend_sources.sh"

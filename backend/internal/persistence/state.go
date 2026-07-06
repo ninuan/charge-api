@@ -25,11 +25,12 @@ type State struct {
 }
 
 type UserState struct {
-	Piles     []model.Pile       `json:"piles"`
-	Refresh   model.RefreshInfo  `json:"refresh"`
-	DeviceIDs []string           `json:"deviceIds"`
-	Cookie    string             `json:"cookie,omitempty"`
-	Stats     model.TrafficStats `json:"stats"`
+	Piles      []model.Pile       `json:"piles"`
+	Refresh    model.RefreshInfo  `json:"refresh"`
+	DeviceIDs  []string           `json:"deviceIds"`
+	Cookie     string             `json:"cookie,omitempty"`
+	Stats      model.TrafficStats `json:"stats"`
+	YYBBinding *model.YYBBinding  `json:"yybBinding,omitempty"`
 }
 
 func LoadJSON(path string) (State, bool, error) {
@@ -52,6 +53,7 @@ func ArchiveMigratedJSON(path string, state State) error {
 	state.Cookie = ""
 	for userID, userState := range state.UserStates {
 		userState.Cookie = ""
+		userState.YYBBinding = nil
 		state.UserStates[userID] = userState
 	}
 	body, err := json.MarshalIndent(state, "", "  ")

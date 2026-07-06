@@ -12,7 +12,7 @@ import (
 
 const CookieKeySize = 32
 
-type cookieCipher struct {
+type secretCipher struct {
 	aead cipher.AEAD
 }
 
@@ -37,7 +37,7 @@ func DecodeCookieKey(encoded string) ([]byte, error) {
 	return nil, fmt.Errorf("CHARGE_COOKIE_KEY must be a base64-encoded %d-byte key", CookieKeySize)
 }
 
-func newCookieCipher(key []byte) (*cookieCipher, error) {
+func newCookieCipher(key []byte) (*secretCipher, error) {
 	if len(key) != CookieKeySize {
 		return nil, fmt.Errorf("cookie encryption key must be %d bytes", CookieKeySize)
 	}
@@ -49,26 +49,42 @@ func newCookieCipher(key []byte) (*cookieCipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create cookie GCM: %w", err)
 	}
-	return &cookieCipher{aead: aead}, nil
+	return &secretCipher{aead: aead}, nil
 }
 
-func (c *cookieCipher) encrypt(userID string, plaintext string) ([]byte, []byte, error) {
-	if plaintext == "" {
+func (c *secretCipher) encryptWithAAD(aad string, plaintext []byte) ([]byte, []byte, error) {
+	if len(plaintext) == 0 {
 		return nil, nil, nil
 	}
 	nonce := make([]byte, c.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, nil, fmt.Errorf("generate cookie nonce: %w", err)
+		return nil, nil, fmt.Errorf("generate secret nonce: %w", err)
 	}
-	ciphertext := c.aead.Seal(nil, nonce, []byte(plaintext), []byte(userID))
+	ciphertext := c.aead.Seal(nil, nonce, plaintext, []byte(aad))
 	return nonce, ciphertext, nil
 }
 
-func (c *cookieCipher) decrypt(userID string, nonce []byte, ciphertext []byte) (string, error) {
+func (c *secretCipher) decryptWithAAD(aad string, nonce []byte, ciphertext []byte) ([]byte, error) {
 	if len(ciphertext) == 0 {
-		return "", nil
+		return nil, nil
 	}
-	plaintext, err := c.aead.Open(nil, nonce, ciphertext, []byte(userID))
+	plaintext, err := c.aead.Open(nil, nonce, ciphertext, []byte(aad))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt secret for %s: %w", aad, err)
+	}
+	return plaintext, nil
+}
+
+func (c *secretCipher) encrypt(userID string, plaintext string) ([]byte, []byte, error) {
+	nonce, ciphertext, err := c.encryptWithAAD(userID, []byte(plaintext))
+	if err != nil {
+		return nil, nil, fmt.Errorf("encrypt cookie for user %s: %w", userID, err)
+	}
+	return nonce, ciphertext, nil
+}
+
+func (c *secretCipher) decrypt(userID string, nonce []byte, ciphertext []byte) (string, error) {
+	plaintext, err := c.decryptWithAAD(userID, nonce, ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("decrypt cookie for user %s: %w", userID, err)
 	}

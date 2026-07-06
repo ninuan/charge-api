@@ -1,0 +1,26 @@
+[Unit]
+Description=Charge Console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=charge
+Group=charge
+WorkingDirectory=/opt/charge-api/backend
+EnvironmentFile=/etc/charge-api.env
+
+ExecStart=/opt/charge-api/backend/charge-server -listen 127.0.0.1:8080 -database /var/lib/charge-api/charge_state.db -state /var/lib/charge-api/charge_state.json
+
+Restart=always
+RestartSec=3
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/charge-api
+
+[Install]
+WantedBy=multi-user.target

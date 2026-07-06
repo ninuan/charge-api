@@ -14,11 +14,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 type Store struct {
 	db     *sql.DB
-	cipher *cookieCipher
+	cipher *secretCipher
 }
 
 func OpenSQLite(path string, cookieKey []byte) (*Store, error) {
@@ -116,6 +116,12 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := s.ensureColumn("users", "usage_guide_ack_at", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("user_states", "yyb_binding_nonce", "BLOB"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("user_states", "yyb_binding_ciphertext", "BLOB"); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(
@@ -366,7 +372,8 @@ func (s *Store) Load() (State, bool, error) {
 
 	stateRows, err := s.db.Query(`
 		SELECT user_id, piles_json, refresh_json, device_ids_json,
-		       cookie_nonce, cookie_ciphertext, stats_json
+		       cookie_nonce, cookie_ciphertext, stats_json,
+		       yyb_binding_nonce, yyb_binding_ciphertext
 		FROM user_states
 	`)
 	if err != nil {
@@ -378,6 +385,7 @@ func (s *Store) Load() (State, bool, error) {
 		var userID string
 		var pilesJSON, refreshJSON, deviceIDsJSON, statsJSON []byte
 		var nonce, ciphertext []byte
+		var yybBindingNonce, yybBindingCiphertext []byte
 		if err := stateRows.Scan(
 			&userID,
 			&pilesJSON,
@@ -386,6 +394,8 @@ func (s *Store) Load() (State, bool, error) {
 			&nonce,
 			&ciphertext,
 			&statsJSON,
+			&yybBindingNonce,
+			&yybBindingCiphertext,
 		); err != nil {
 			return State{}, false, fmt.Errorf("scan user state: %w", err)
 		}
@@ -407,6 +417,17 @@ func (s *Store) Load() (State, bool, error) {
 		if err != nil {
 			return State{}, false, err
 		}
+		if len(yybBindingCiphertext) > 0 {
+			bindingJSON, err := s.cipher.decryptWithAAD(yybBindingAAD(userID), yybBindingNonce, yybBindingCiphertext)
+			if err != nil {
+				return State{}, false, err
+			}
+			var binding model.YYBBinding
+			if err := json.Unmarshal(bindingJSON, &binding); err != nil {
+				return State{}, false, fmt.Errorf("parse yyb binding for user %s: %w", userID, err)
+			}
+			userState.YYBBinding = &binding
+		}
 		state.UserStates[userID] = userState
 	}
 	if err := stateRows.Err(); err != nil {
@@ -422,6 +443,10 @@ func (s *Store) metadata(key string) (string, bool, error) {
 		return "", false, nil
 	}
 	return value, err == nil, err
+}
+
+func yybBindingAAD(userID string) string {
+	return "charge:user_state:yyb_binding:" + userID
 }
 
 func formatOptionalTime(value *time.Time) any {
@@ -490,12 +515,24 @@ func (s *Store) Save(state State) error {
 		if err != nil {
 			return err
 		}
+		var yybBindingNonce, yybBindingCiphertext []byte
+		if userState.YYBBinding != nil {
+			bindingJSON, err := json.Marshal(userState.YYBBinding)
+			if err != nil {
+				return fmt.Errorf("encode yyb binding for user %s: %w", user.ID, err)
+			}
+			yybBindingNonce, yybBindingCiphertext, err = s.cipher.encryptWithAAD(yybBindingAAD(user.ID), bindingJSON)
+			if err != nil {
+				return fmt.Errorf("encrypt yyb binding for user %s: %w", user.ID, err)
+			}
+		}
 
 		if _, err := tx.Exec(`
 			INSERT INTO user_states(
 				user_id, piles_json, refresh_json, device_ids_json,
-				cookie_nonce, cookie_ciphertext, stats_json
-			) VALUES(?, ?, ?, ?, ?, ?, ?)
+				cookie_nonce, cookie_ciphertext, stats_json,
+				yyb_binding_nonce, yyb_binding_ciphertext
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			user.ID,
 			pilesJSON,
@@ -504,6 +541,8 @@ func (s *Store) Save(state State) error {
 			nonce,
 			ciphertext,
 			statsJSON,
+			yybBindingNonce,
+			yybBindingCiphertext,
 		); err != nil {
 			return fmt.Errorf("insert state for user %s: %w", user.ID, err)
 		}
