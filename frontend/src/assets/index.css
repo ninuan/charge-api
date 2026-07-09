@@ -280,12 +280,12 @@
   .refresh-status--warning { @apply border-amber-700/20 bg-amber-50 text-amber-950; }
 
   .yyb-login-grid {
-    @apply grid gap-4 md:grid-cols-[minmax(220px,.85fr)_minmax(0,1.15fr)];
+    @apply grid min-w-0 max-w-full gap-4 md:grid-cols-[minmax(220px,.85fr)_minmax(0,1.15fr)];
   }
 
   .yyb-qr-panel,
   .yyb-status-panel {
-    @apply rounded-2xl border border-border bg-background/60 p-4;
+    @apply min-w-0 max-w-full rounded-2xl border border-border bg-background/60 p-4;
   }
 
   .yyb-status-panel {
@@ -306,7 +306,7 @@
   }
 
   .yyb-binding-card {
-    @apply flex min-h-20 items-start gap-3 rounded-2xl border border-border bg-card p-4;
+    @apply flex min-h-20 min-w-0 items-start gap-3 rounded-2xl border border-border bg-card p-4;
   }
 
   .yyb-binding-card--active {

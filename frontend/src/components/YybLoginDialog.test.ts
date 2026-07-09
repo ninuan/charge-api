@@ -79,9 +79,29 @@ describe("YybLoginDialog", () => {
     const content = wrapper.find('[data-testid="yyb-login-dialog"]');
     expect(content.exists()).toBe(true);
     expect(content.classes()).toContain("max-h-[calc(100dvh-2rem)]");
-    expect(content.classes()).toContain("overflow-y-auto");
+    expect(content.classes()).toContain("w-[calc(100vw-1rem)]");
+    expect(content.classes()).toContain("overflow-hidden");
     expect(content.classes()).toContain("sm:max-w-2xl");
+    expect(wrapper.get('[data-testid="yyb-login-body"]').classes()).toContain("overflow-y-auto");
+    expect(wrapper.get('[data-testid="yyb-login-footer"]').classes()).toContain("mt-auto");
+    expect(wrapper.get('[data-testid="yyb-login-footer"]').classes()).toContain("pb-[calc(1rem+env(safe-area-inset-bottom))]");
+    const noteClasses = wrapper.get('[data-testid="yyb-login-mobile-note"]').classes();
+    expect(noteClasses).toContain("my-4");
+    expect(noteClasses).toContain("sm:my-5");
     expect(wrapper.get('[data-testid="yyb-login-close"]').text()).toContain("关闭");
+  });
+
+  it("explains mobile users need another device for camera scanning and can return on phone after binding", () => {
+    const wrapper = mount(YybLoginDialog, {
+      global: {
+        stubs: dialogStubs
+      }
+    });
+
+    expect(wrapper.text()).toContain("该二维码仅支持微信扫一扫摄像头识别");
+    expect(wrapper.text()).toContain("如果你正在手机上使用，请在电脑或另一台设备打开本页面");
+    expect(wrapper.text()).toContain("绑定成功后，手机端再次登录即可直接查看");
+    expect(wrapper.text()).not.toContain("截图后从相册识别");
   });
 
 });

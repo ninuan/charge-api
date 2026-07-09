@@ -108,13 +108,21 @@ watch(open, (value) => {
     <DialogTrigger as-child>
       <UiButton class="dashboard-action" variant="outline"><QrCode />扫码登录</UiButton>
     </DialogTrigger>
-    <DialogContent data-testid="yyb-login-dialog" class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+    <DialogContent data-testid="yyb-login-dialog" class="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:max-w-2xl">
+      <div data-testid="yyb-login-body" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-6">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2"><ShieldCheck class="size-5 text-primary" />扫码登录远端账号</DialogTitle>
         <DialogDescription>
-          微信扫码后，Charge 会通过后端服务保存当前账户的登录绑定；以后添加充电桩时会自动维护访问凭据。
+          微信扫码后会保存当前账户的登录绑定；以后添加充电桩时会自动维护访问凭据。
         </DialogDescription>
       </DialogHeader>
+
+      <div data-testid="yyb-login-mobile-note" class="my-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-xs leading-5 text-amber-900 sm:my-5 sm:text-sm">
+        <strong class="mb-1 block text-amber-950">手机端使用提醒</strong>
+        <p>该二维码仅支持微信扫一扫摄像头识别，不能通过截图、长按图片或相册读取。</p>
+        <p class="mt-1">如果你正在手机上使用，请在电脑或另一台设备打开本页面，再用当前手机微信扫码。</p>
+        <p class="mt-1">绑定成功后，手机端再次登录即可直接查看充电桩状态，不用再次扫码。</p>
+      </div>
 
       <div class="yyb-login-grid">
         <section class="yyb-qr-panel" aria-label="扫码二维码">
@@ -171,8 +179,10 @@ watch(open, (value) => {
         </section>
       </div>
 
-      <DialogFooter class="sticky bottom-0 -mx-6 -mb-6 mt-2 border-t border-border bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:static sm:m-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
-        <UiButton data-testid="yyb-login-close" variant="ghost" @click="open = false">关闭</UiButton>
+      </div>
+
+      <DialogFooter data-testid="yyb-login-footer" class="mt-auto border-t border-border bg-background/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:bg-transparent sm:backdrop-blur-none">
+        <UiButton data-testid="yyb-login-close" class="w-full sm:w-auto" variant="ghost" @click="open = false">关闭</UiButton>
       </DialogFooter>
     </DialogContent>
   </Dialog>
