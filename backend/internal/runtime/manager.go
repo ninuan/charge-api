@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,6 +23,8 @@ import (
 )
 
 const moceleAppID = "wx9cbffc15d3cb7739"
+
+var ErrYYBBindingRequired = errors.New("yyb binding required")
 
 type YYBCodeClient interface {
 	GetCode(ctx context.Context, ref string, appID string) (string, error)
@@ -694,7 +697,7 @@ func (m *Manager) AddPileWithYYB(userID string, req model.PileUpsertRequest, yyb
 		return model.Pile{}, bindingErr
 	}
 	if binding == nil || binding.Ref == "" {
-		return model.Pile{}, err
+		return model.Pile{}, ErrYYBBindingRequired
 	}
 	if _, syncErr := m.SyncCookieFromYYB(userID, req.ID, yybClient, moceleClient); syncErr != nil {
 		return model.Pile{}, fmt.Errorf("自动更新登录凭据失败: %w", syncErr)

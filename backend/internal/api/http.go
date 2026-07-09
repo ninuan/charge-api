@@ -385,13 +385,24 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 			pile, err = s.manager.AddPile(user.ID, req)
 		}
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeAddPileError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, pile)
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func writeAddPileError(w http.ResponseWriter, err error) {
+	if errors.Is(err, appruntime.ErrYYBBindingRequired) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"code":  "YYB_BINDING_REQUIRED",
+			"error": "请先完成扫码登录绑定，再添加充电桩",
+		})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 }
 
 func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {

@@ -39,6 +39,29 @@ func TestAdminCannotUseDashboardAPI(t *testing.T) {
 	}
 }
 
+func TestWriteAddPileErrorReturnsFriendlyMessageWhenYYBBindingIsMissing(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeAddPileError(recorder, appruntime.ErrYYBBindingRequired)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "YYB_BINDING_REQUIRED" {
+		t.Fatalf("code = %q, want YYB_BINDING_REQUIRED", payload.Code)
+	}
+	if payload.Error != "请先完成扫码登录绑定，再添加充电桩" {
+		t.Fatalf("error = %q", payload.Error)
+	}
+}
+
 func TestAdminUpdateRevokesTargetUserSessions(t *testing.T) {
 	server, manager, sessions := newTestServer(t)
 	admin := findUser(t, manager, "admin")

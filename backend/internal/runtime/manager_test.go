@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -345,6 +346,47 @@ func TestAddPileWithYYBRetriesWhenRemoteReturnsLoginScript(t *testing.T) {
 	}
 	if statusCalls != 2 {
 		t.Fatalf("status calls = %d, want 2", statusCalls)
+	}
+}
+
+func TestAddPileWithYYBRequiresBindingAfterAuthExpired(t *testing.T) {
+	const deviceID = "2601201412385560001"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"err":"cookie expired"}`))
+	}))
+	defer server.Close()
+
+	requests := []parser.CaptureRequest{{
+		Name:   "template",
+		URL:    server.URL + "/action/i/api/devicewithnumbers",
+		Method: http.MethodPost,
+		Body:   "id=YOUR_DEVICE_LONG_ID",
+		Headers: map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
+	}}
+	manager := &Manager{
+		repository: testRepository(t),
+		requests:   requests,
+		users: map[string]model.User{
+			"user-1": {ID: "user-1", Username: "alice", Role: model.RoleUser, Enabled: true, DeviceLimit: 10, RefreshEnabled: true},
+		},
+		runtimes: map[string]*UserRuntime{
+			"user-1": newUserRuntime(requests, persistence.UserState{}, 30*time.Second),
+		},
+		settings: model.RegistrationSettings{DefaultDeviceLimit: 10, DefaultRefreshEnabled: true},
+		invites:  map[string]model.InviteCode{},
+	}
+
+	_, err := manager.AddPileWithYYB(
+		"user-1",
+		model.PileUpsertRequest{ID: deviceID},
+		&fakeYYBClient{},
+		&fakeMoceleClient{},
+	)
+	if !errors.Is(err, ErrYYBBindingRequired) {
+		t.Fatalf("AddPileWithYYB error = %v, want ErrYYBBindingRequired", err)
 	}
 }
 
