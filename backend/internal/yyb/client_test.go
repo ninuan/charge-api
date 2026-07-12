@@ -2,11 +2,49 @@ package yyb
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestClientHealth(t *testing.T) {
+	t.Run("healthy", func(t *testing.T) {
+		transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet || r.URL.Path != "/health" {
+				t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+			}
+			return jsonResponse(http.StatusOK, `{"code":0,"msg":"success","data":{"ok":true}}`), nil
+		})
+		client, err := NewClient(Config{
+			BaseURL: "http://127.0.0.1:8000", APISecret: []byte("secret"),
+			HTTPClient: &http.Client{Transport: transport},
+		})
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		if err := client.Health(t.Context()); err != nil {
+			t.Fatalf("Health: %v", err)
+		}
+	})
+
+	t.Run("transport failure", func(t *testing.T) {
+		transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("connection refused")
+		})
+		client, err := NewClient(Config{
+			BaseURL: "http://127.0.0.1:8000", APISecret: []byte("secret"),
+			HTTPClient: &http.Client{Transport: transport},
+		})
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		if err := client.Health(t.Context()); err == nil {
+			t.Fatal("expected Health error")
+		}
+	})
+}
 
 func TestClientParsesEnvelopeAndDirectYYBResponses(t *testing.T) {
 	var seen []string

@@ -180,15 +180,45 @@ type MetricPoint struct {
 	Remote       int       `json:"remote"`
 	CacheHits    int       `json:"cacheHits"`
 	RemoteOK     int       `json:"remoteOk"`
+	RemoteFailed int       `json:"remoteFailed"`
 	CookieErrors int       `json:"cookieErrors"`
 	ActiveUsers  int       `json:"activeUsers"`
 }
 
+type AdminOverview struct {
+	OpenIssues        int     `json:"openIssues"`
+	RemoteSuccessRate float64 `json:"remoteSuccessRate"`
+	ActiveUsers       int     `json:"activeUsers"`
+	ManagedDevices    int     `json:"managedDevices"`
+	OfflinePorts      int     `json:"offlinePorts"`
+}
+
 type AdminStats struct {
+	Overview   AdminOverview      `json:"overview"`
 	Users      []AdminUserSummary `json:"users"`
 	Hourly     []MetricPoint      `json:"hourly"`
 	Daily      []MetricPoint      `json:"daily"`
 	Exceptions []SystemException  `json:"exceptions"`
+}
+
+type HealthState string
+
+const (
+	HealthHealthy     HealthState = "healthy"
+	HealthDegraded    HealthState = "degraded"
+	HealthUnavailable HealthState = "unavailable"
+)
+
+type ServiceHealth struct {
+	State   HealthState `json:"state"`
+	Message string      `json:"message"`
+}
+
+type AdminHealth struct {
+	CheckedAt time.Time     `json:"checkedAt"`
+	Charge    ServiceHealth `json:"charge"`
+	Database  ServiceHealth `json:"database"`
+	YYB       ServiceHealth `json:"yyb"`
 }
 
 type SystemException struct {
@@ -216,11 +246,47 @@ type TrafficStats struct {
 	LastRemoteOKAt    *time.Time `json:"lastRemoteOkAt,omitempty"`
 }
 
+type CredentialState string
+
+const (
+	CredentialUnbound       CredentialState = "unbound"
+	CredentialWaitingDevice CredentialState = "waiting_device"
+	CredentialHealthy       CredentialState = "healthy"
+	CredentialSyncFailed    CredentialState = "sync_failed"
+	CredentialExpired       CredentialState = "expired"
+)
+
+type CredentialSummary struct {
+	State         CredentialState `json:"state"`
+	Bound         bool            `json:"bound"`
+	HasCredential bool            `json:"hasCredential"`
+	LastCheckedAt *time.Time      `json:"lastCheckedAt,omitempty"`
+}
+
 type AdminUserSummary struct {
-	User        CurrentUser       `json:"user"`
-	Stats       TrafficStats      `json:"stats"`
-	Dashboard   DashboardCounters `json:"dashboard"`
-	DeviceIDs   []string          `json:"deviceIds"`
-	HasCookie   bool              `json:"hasCookie"`
-	LastRefresh RefreshInfo       `json:"lastRefresh"`
+	User              CurrentUser       `json:"user"`
+	Stats             TrafficStats      `json:"stats"`
+	Dashboard         DashboardCounters `json:"dashboard"`
+	DeviceIDs         []string          `json:"deviceIds"`
+	HasCookie         bool              `json:"hasCookie"`
+	Credential        CredentialSummary `json:"credential"`
+	SnapshotUpdatedAt time.Time         `json:"snapshotUpdatedAt"`
+	LastRefresh       RefreshInfo       `json:"lastRefresh"`
+}
+
+type AdminUserListQuery struct {
+	Page       int
+	PageSize   int
+	Search     string
+	Account    string
+	Credential string
+	Health     string
+}
+
+type AdminUserPage struct {
+	Items      []AdminUserSummary `json:"items"`
+	Page       int                `json:"page"`
+	PageSize   int                `json:"pageSize"`
+	Total      int                `json:"total"`
+	TotalPages int                `json:"totalPages"`
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasActiveAuthFailure, hasAdminRisk } from "./adminRisk";
+import { hasActiveAuthFailure, hasAdminRisk, hasCredentialRisk } from "./adminRisk";
 import type { AdminUserSummary, TrafficStats } from "@/types/dashboard";
 
 const baseStats: TrafficStats = {
@@ -32,6 +32,12 @@ function summary(overrides: Partial<AdminUserSummary> = {}): AdminUserSummary {
     },
     deviceIds: [],
     hasCookie: true,
+    credential: {
+      state: "healthy",
+      bound: true,
+      hasCredential: true
+    },
+    snapshotUpdatedAt: "2026-07-06T00:00:00Z",
     lastRefresh: {
       minIntervalSeconds: 30,
       attemptedDevices: 0,
@@ -68,5 +74,35 @@ describe("admin risk helpers", () => {
 
     expect(hasActiveAuthFailure(stats)).toBe(true);
     expect(hasAdminRisk(summary({ stats }))).toBe(true);
+  });
+
+  it("does not treat an unused unbound user as credential risk", () => {
+    const unused = summary({
+      deviceIds: [],
+      hasCookie: false,
+      credential: {
+        state: "unbound",
+        bound: false,
+        hasCredential: false
+      }
+    });
+
+    expect(hasCredentialRisk(unused)).toBe(false);
+    expect(hasAdminRisk(unused)).toBe(false);
+  });
+
+  it("treats an unbound user with a device as credential risk", () => {
+    const configured = summary({
+      deviceIds: ["2601201412385560001"],
+      hasCookie: false,
+      credential: {
+        state: "unbound",
+        bound: false,
+        hasCredential: false
+      }
+    });
+
+    expect(hasCredentialRisk(configured)).toBe(true);
+    expect(hasAdminRisk(configured)).toBe(true);
   });
 });

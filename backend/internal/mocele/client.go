@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
@@ -69,9 +70,16 @@ func (c *Client) ExchangeCode(ctx context.Context, deviceID string, code string)
 	if err != nil {
 		return CookieResult{}, err
 	}
-	entryCookie := fmt.Sprintf("deviceid=%s; org=%s; openindex=%s", deviceID, c.org, c.openIndex)
-	req.Header.Set("Cookie", entryCookie)
-	resp, err := c.http.Do(req)
+	httpClient, jar, err := c.exchangeHTTPClient()
+	if err != nil {
+		return CookieResult{}, err
+	}
+	jar.SetCookies(req.URL, []*http.Cookie{
+		{Name: "deviceid", Value: deviceID},
+		{Name: "org", Value: c.org},
+		{Name: "openindex", Value: c.openIndex},
+	})
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return CookieResult{}, err
 	}
@@ -84,7 +92,7 @@ func (c *Client) ExchangeCode(ctx context.Context, deviceID string, code string)
 		return CookieResult{}, fmt.Errorf("mocele autologin failed: status=%d body=%s", resp.StatusCode, security.RedactText(string(body), 256))
 	}
 	cookies := map[string]string{}
-	for _, cookie := range resp.Cookies() {
+	for _, cookie := range jar.Cookies(resp.Request.URL) {
 		cookies[strings.ToLower(cookie.Name)] = cookie.Value
 	}
 	wxopenid := cookies["wxopenid"]
@@ -97,6 +105,16 @@ func (c *Client) ExchangeCode(ctx context.Context, deviceID string, code string)
 	}
 	finalCookie := fmt.Sprintf("deviceid=%s; org=%s; openindex=%s; wxopenid=%s; info=%s", deviceID, c.org, c.openIndex, wxopenid, info)
 	return CookieResult{Cookie: finalCookie, WXOpenID: wxopenid, Info: info}, nil
+}
+
+func (c *Client) exchangeHTTPClient() (*http.Client, http.CookieJar, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create autologin cookie jar: %w", err)
+	}
+	client := *c.http
+	client.Jar = jar
+	return &client, jar, nil
 }
 
 func (c *Client) autologinURL(deviceID string, code string) (string, error) {

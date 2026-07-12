@@ -85,13 +85,45 @@ export interface TrafficStats {
   lastRemoteOkAt?: string;
 }
 
+export type CredentialState = "unbound" | "waiting_device" | "healthy" | "sync_failed" | "expired";
+
+export interface CredentialSummary {
+  state: CredentialState;
+  bound: boolean;
+  hasCredential: boolean;
+  lastCheckedAt?: string;
+}
+
 export interface AdminUserSummary {
   user: CurrentUser;
   stats: TrafficStats;
   dashboard: DashboardCounters;
   deviceIds: string[];
   hasCookie: boolean;
+  credential: CredentialSummary;
+  snapshotUpdatedAt: string;
   lastRefresh: RefreshInfo;
+}
+
+export type AdminAccountFilter = "all" | "enabled" | "disabled";
+export type AdminHealthFilter = "all" | "healthy" | "risk";
+export type AdminCredentialFilter = "all" | CredentialState;
+
+export interface AdminUserListQuery {
+  page: number;
+  pageSize: number;
+  search: string;
+  account: AdminAccountFilter;
+  credential: AdminCredentialFilter;
+  health: AdminHealthFilter;
+}
+
+export interface AdminUserPage {
+  items: AdminUserSummary[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
 export interface RegistrationSettings {
@@ -124,8 +156,31 @@ export interface MetricPoint {
   remote: number;
   cacheHits: number;
   remoteOk: number;
+  remoteFailed: number;
   cookieErrors: number;
   activeUsers: number;
+}
+
+export interface AdminOverview {
+  openIssues: number;
+  remoteSuccessRate: number;
+  activeUsers: number;
+  managedDevices: number;
+  offlinePorts: number;
+}
+
+export type HealthState = "healthy" | "degraded" | "unavailable";
+
+export interface ServiceHealth {
+  state: HealthState;
+  message: string;
+}
+
+export interface AdminHealth {
+  checkedAt: string;
+  charge: ServiceHealth;
+  database: ServiceHealth;
+  yyb: ServiceHealth;
 }
 
 export interface SystemException {
@@ -140,6 +195,7 @@ export interface SystemException {
 }
 
 export interface AdminStats {
+  overview: AdminOverview;
   users: AdminUserSummary[];
   hourly: MetricPoint[];
   daily: MetricPoint[];

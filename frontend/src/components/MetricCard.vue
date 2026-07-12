@@ -17,13 +17,13 @@ withDefaults(defineProps<{
   <article :class="['metric-panel', `metric-panel--${tone}`]">
     <div class="flex items-start justify-between gap-3">
       <div>
-        <p class="text-sm font-medium text-muted-foreground">{{ label }}</p>
-        <p class="mt-3 font-mono text-3xl font-bold tracking-[-0.05em] tabular-nums lg:text-4xl">{{ value }}</p>
+        <p class="metric-label text-sm font-medium text-muted-foreground">{{ label }}</p>
+        <p class="metric-value mt-3 font-mono text-3xl font-bold tracking-[-0.05em] tabular-nums lg:text-4xl">{{ value }}</p>
       </div>
       <span class="metric-icon" aria-hidden="true">
         <component :is="icon" />
       </span>
     </div>
-    <p v-if="detail" class="mt-4 text-xs leading-5 text-muted-foreground">{{ detail }}</p>
+    <p v-if="detail" class="metric-detail mt-4 text-xs leading-5 text-muted-foreground">{{ detail }}</p>
   </article>
 </template>

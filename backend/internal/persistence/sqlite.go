@@ -51,6 +51,10 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 func (s *Store) initialize() error {
 	statements := []string{
 		`PRAGMA journal_mode = WAL`,
@@ -636,6 +640,8 @@ func (s *Store) MetricSeries(since time.Time, bucketSeconds int64) ([]model.Metr
 			point.CacheHits += count
 		case "remote_ok":
 			point.RemoteOK += count
+		case "remote_failed":
+			point.RemoteFailed += count
 		case "cookie_error":
 			point.CookieErrors += count
 		}

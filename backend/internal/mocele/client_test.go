@@ -51,6 +51,34 @@ func TestExchangeCodeBuildsAutologinRequestAndCookie(t *testing.T) {
 	}
 }
 
+func TestExchangeCodeKeepsCookiesSetBeforeAutologinRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ajax/WxPay/Api/autologin":
+			http.SetCookie(w, &http.Cookie{Name: "info", Value: "info-from-redirect", Path: "/"})
+			http.Redirect(w, r, "/i/device/open?id=device-123", http.StatusFound)
+		case "/i/device/open":
+			if cookie := r.Header.Get("Cookie"); !strings.Contains(cookie, "info=info-from-redirect") {
+				t.Fatalf("redirect request did not keep info cookie: %q", cookie)
+			}
+			http.SetCookie(w, &http.Cookie{Name: "wxopenid", Value: "openid-from-final", Path: "/"})
+			_, _ = w.Write([]byte("ok"))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{BaseURL: server.URL})
+	result, err := client.ExchangeCode(t.Context(), "device-123", "wx-code-1")
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if result.Info != "info-from-redirect" || result.WXOpenID != "openid-from-final" {
+		t.Fatalf("CookieResult = %#v", result)
+	}
+}
+
 func TestExchangeCodeRequiresWXOpenIDAndInfoCookies(t *testing.T) {
 	tests := []struct {
 		name      string

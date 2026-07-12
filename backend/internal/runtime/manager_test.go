@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -119,7 +120,7 @@ func TestAddPileResolvesDeviceIDFromNumber(t *testing.T) {
 		longID = "2601201412385560001"
 	)
 	var postedID string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/i/cnum":
 			if got := r.URL.Query().Get("n"); got != number {
@@ -143,7 +144,6 @@ func TestAddPileResolvesDeviceIDFromNumber(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.String())
 		}
 	}))
-	defer server.Close()
 
 	requests := []parser.CaptureRequest{{
 		Name:   "template",
@@ -196,7 +196,7 @@ func TestAddPileWithYYBRetriesWithSyncedCookieWhenAuthExpired(t *testing.T) {
 	)
 	var statusCalls int
 	var cookies []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/i/cnum":
 			if got := r.URL.Query().Get("n"); got != number {
@@ -229,7 +229,6 @@ func TestAddPileWithYYBRetriesWithSyncedCookieWhenAuthExpired(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.String())
 		}
 	}))
-	defer server.Close()
 
 	requests := []parser.CaptureRequest{{
 		Name:   "template",
@@ -290,7 +289,7 @@ func TestAddPileWithYYBRetriesWhenRemoteReturnsLoginScript(t *testing.T) {
 		longID = "2601201412385560001"
 	)
 	var statusCalls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/i/cnum":
 			w.Header().Set("Location", "/i/device/opening?id="+longID+"&i=1")
@@ -308,7 +307,6 @@ func TestAddPileWithYYBRetriesWhenRemoteReturnsLoginScript(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.String())
 		}
 	}))
-	defer server.Close()
 
 	requests := []parser.CaptureRequest{{
 		Name:   "template",
@@ -351,11 +349,10 @@ func TestAddPileWithYYBRetriesWhenRemoteReturnsLoginScript(t *testing.T) {
 
 func TestAddPileWithYYBRequiresBindingAfterAuthExpired(t *testing.T) {
 	const deviceID = "2601201412385560001"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"err":"cookie expired"}`))
 	}))
-	defer server.Close()
 
 	requests := []parser.CaptureRequest{{
 		Name:   "template",
@@ -488,6 +485,196 @@ func TestAdminStatsClearsAuthExceptionAfterLaterRemoteSuccess(t *testing.T) {
 	}
 }
 
+func TestAdminCredentialStatesAndIssues(t *testing.T) {
+	const (
+		secretCookie = "sid=valid-secret"
+		secretOpenID = "secret-openid-123"
+		secretRef    = "secret-ref-123"
+	)
+	tests := []struct {
+		name      string
+		state     persistence.UserState
+		wantState model.CredentialState
+		wantIssue bool
+	}{
+		{
+			name:      "unused user",
+			state:     persistence.UserState{},
+			wantState: model.CredentialUnbound,
+			wantIssue: false,
+		},
+		{
+			name: "bound without device",
+			state: persistence.UserState{
+				YYBBinding: &model.YYBBinding{Ref: secretRef, OpenID: secretOpenID, Status: "alive"},
+			},
+			wantState: model.CredentialWaitingDevice,
+			wantIssue: false,
+		},
+		{
+			name: "device without credential",
+			state: persistence.UserState{
+				DeviceIDs: []string{"2601201412385560001"},
+			},
+			wantState: model.CredentialUnbound,
+			wantIssue: true,
+		},
+		{
+			name: "healthy manual cookie",
+			state: persistence.UserState{
+				DeviceIDs: []string{"2601201412385560001"},
+				Cookie:    secretCookie,
+			},
+			wantState: model.CredentialHealthy,
+			wantIssue: false,
+		},
+		{
+			name: "binding sync failed",
+			state: persistence.UserState{
+				DeviceIDs: []string{"2601201412385560001"},
+				YYBBinding: &model.YYBBinding{
+					Ref: secretRef, OpenID: secretOpenID, Status: "alive", LastError: "secret-upstream-error",
+				},
+			},
+			wantState: model.CredentialSyncFailed,
+			wantIssue: true,
+		},
+		{
+			name: "expired binding",
+			state: persistence.UserState{
+				DeviceIDs: []string{"2601201412385560001"},
+				YYBBinding: &model.YYBBinding{
+					Ref: secretRef, OpenID: secretOpenID, Status: "expired",
+				},
+			},
+			wantState: model.CredentialExpired,
+			wantIssue: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user := model.User{
+				ID: "user-1", Username: "alice", Role: model.RoleUser, Enabled: true,
+				CreatedAt: time.Date(2026, 7, 9, 8, 0, 0, 0, time.UTC),
+			}
+			manager := &Manager{
+				repository: testRepository(t),
+				users:      map[string]model.User{user.ID: user},
+				runtimes: map[string]*UserRuntime{
+					user.ID: newUserRuntime(parser.DefaultCaptureRequests(), tt.state, 30*time.Second),
+				},
+			}
+
+			stats := manager.AdminStats()
+			if len(stats.Users) != 1 {
+				t.Fatalf("users = %d, want 1", len(stats.Users))
+			}
+			summary := stats.Users[0]
+			if summary.Credential.State != tt.wantState {
+				t.Fatalf("credential state = %q, want %q", summary.Credential.State, tt.wantState)
+			}
+			if got := hasExceptionType(stats.Exceptions, user.ID, "credential"); got != tt.wantIssue {
+				t.Fatalf("credential issue = %v, want %v: %+v", got, tt.wantIssue, stats.Exceptions)
+			}
+			body, err := json.Marshal(stats)
+			if err != nil {
+				t.Fatalf("marshal stats: %v", err)
+			}
+			for _, secret := range []string{secretCookie, secretOpenID, secretRef, "secret-upstream-error"} {
+				if bytes.Contains(body, []byte(secret)) {
+					t.Fatalf("admin stats leaked %q: %s", secret, body)
+				}
+			}
+		})
+	}
+}
+
+func TestAdminIssuesUseActualFailureTime(t *testing.T) {
+	failedAt := time.Date(2026, 7, 9, 8, 30, 0, 0, time.UTC)
+	user := model.User{
+		ID: "user-1", Username: "alice", Role: model.RoleUser, Enabled: true,
+		CreatedAt: failedAt.Add(-time.Hour),
+	}
+	state := persistence.UserState{
+		Cookie: "sid=valid",
+		Stats: model.TrafficStats{
+			AuthFailures:      1,
+			LastAuthFailureAt: &failedAt,
+		},
+	}
+	manager := &Manager{
+		repository: testRepository(t),
+		users:      map[string]model.User{user.ID: user},
+		runtimes: map[string]*UserRuntime{
+			user.ID: newUserRuntime(parser.DefaultCaptureRequests(), state, 30*time.Second),
+		},
+	}
+
+	stats := manager.AdminStats()
+	issue, ok := findException(stats.Exceptions, user.ID, "cookie_expired")
+	if !ok {
+		t.Fatalf("missing auth issue: %+v", stats.Exceptions)
+	}
+	if !issue.Time.Equal(failedAt) {
+		t.Fatalf("issue time = %v, want %v", issue.Time, failedAt)
+	}
+
+	recoveredAt := failedAt.Add(time.Minute)
+	manager.runtimes[user.ID].recordRemoteOK(recoveredAt)
+	stats = manager.AdminStats()
+	if hasExceptionType(stats.Exceptions, user.ID, "cookie_expired") {
+		t.Fatalf("auth issue remained after recovery: %+v", stats.Exceptions)
+	}
+}
+
+func hasExceptionType(exceptions []model.SystemException, userID, issueType string) bool {
+	_, ok := findException(exceptions, userID, issueType)
+	return ok
+}
+
+func findException(exceptions []model.SystemException, userID, issueType string) (model.SystemException, bool) {
+	for _, exception := range exceptions {
+		if exception.UserID == userID && exception.Type == issueType {
+			return exception, true
+		}
+	}
+	return model.SystemException{}, false
+}
+
+func TestAdminOverviewUsesPerDeviceRemoteSuccessRate(t *testing.T) {
+	repository := testRepository(t)
+	manager := &Manager{
+		repository: repository,
+		users: map[string]model.User{
+			"user-1": {ID: "user-1", Username: "alice", Role: model.RoleUser, Enabled: true},
+		},
+		runtimes: map[string]*UserRuntime{
+			"user-1": newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{}, 30*time.Second),
+		},
+	}
+
+	now := time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < 4; i++ {
+		if err := repository.RecordMetric("user-1", "remote", now); err != nil {
+			t.Fatalf("RecordMetric remote: %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := repository.RecordMetric("user-1", "remote_ok", now); err != nil {
+			t.Fatalf("RecordMetric remote_ok: %v", err)
+		}
+	}
+	if err := repository.RecordMetric("user-1", "remote_failed", now); err != nil {
+		t.Fatalf("RecordMetric remote_failed: %v", err)
+	}
+
+	stats := manager.AdminStats()
+	if stats.Overview.RemoteSuccessRate != 75 {
+		t.Fatalf("success rate = %v, want 75", stats.Overview.RemoteSuccessRate)
+	}
+}
+
 func TestAdminStatsJSONUsesEmptyArrays(t *testing.T) {
 	manager, err := NewManager(
 		testRepository(t),
@@ -603,6 +790,21 @@ func testRepository(t *testing.T) *persistence.Store {
 	return repository
 }
 
+func newIPv4TestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp4: %v", err)
+	}
+	server := &httptest.Server{
+		Listener: listener,
+		Config:   &http.Server{Handler: handler},
+	}
+	server.Start()
+	t.Cleanup(server.Close)
+	return server
+}
+
 func TestSaveAndClearYYBBinding(t *testing.T) {
 	manager := testYYBManager(t)
 	account := yyb.YYBAccount{
@@ -712,6 +914,64 @@ func TestSyncCookieFromYYBRequiresBinding(t *testing.T) {
 	_, err := manager.SyncCookieFromYYB("user-1", "device-1", &fakeYYBClient{}, &fakeMoceleClient{})
 	if err == nil || !strings.Contains(err.Error(), "yyb binding") {
 		t.Fatalf("expected missing binding error, got %v", err)
+	}
+}
+
+func TestRefreshWithYYBAutomaticallyReplacesExpiredCookie(t *testing.T) {
+	const deviceID = "2601201412385560001"
+	var requests int
+	server := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/action/i/api/devicewithnumbers" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		requests++
+		if !strings.Contains(r.Header.Get("Cookie"), "wxopenid=open") {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"err":"cookie expired"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"61034278","name":"远端名称","status":"在线","opennum":10}`, deviceID)
+	}))
+
+	requestsTemplate := []parser.CaptureRequest{{
+		Name:   "template",
+		URL:    server.URL + "/action/i/api/devicewithnumbers",
+		Method: http.MethodPost,
+		Body:   "id=YOUR_DEVICE_LONG_ID",
+		Headers: map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
+	}}
+	runtime := newUserRuntime(requestsTemplate, persistence.UserState{Cookie: "sid=expired"}, 30*time.Second)
+	if err := runtime.client.AddDevice(deviceID); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	manager := &Manager{
+		repository: testRepository(t),
+		users: map[string]model.User{
+			"user-1": {ID: "user-1", Username: "alice", Role: model.RoleUser, Enabled: true, RefreshEnabled: true, DeviceLimit: 10},
+		},
+		runtimes: map[string]*UserRuntime{"user-1": runtime},
+		settings: model.RegistrationSettings{DefaultDeviceLimit: 10, DefaultRefreshEnabled: true},
+		invites:  map[string]model.InviteCode{},
+	}
+	if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "ref-1", OpenID: "openid-1"}); err != nil {
+		t.Fatalf("SaveYYBBinding: %v", err)
+	}
+	yybClient := &fakeYYBClient{codes: []string{"wx-code-1"}}
+	moceleClient := &fakeMoceleClient{cookie: "deviceid=" + deviceID + "; wxopenid=open; info=info"}
+
+	snapshot, err := manager.RefreshWithYYB("user-1", false, yybClient, moceleClient)
+	if err != nil {
+		t.Fatalf("RefreshWithYYB: %v", err)
+	}
+	if requests != 2 || moceleClient.calls != 1 || len(snapshot.Piles) != 1 {
+		t.Fatalf("requests=%d mocele=%d snapshot=%+v", requests, moceleClient.calls, snapshot)
+	}
+	binding, err := manager.YYBBinding("user-1")
+	if err != nil || binding == nil || binding.Status != "alive" || binding.LastError != "" {
+		t.Fatalf("binding after automatic recovery = %#v, %v", binding, err)
 	}
 }
 

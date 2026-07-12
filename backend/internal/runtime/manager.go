@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -182,6 +183,10 @@ func (m *Manager) InitialAdminPassword() string {
 	return m.initialPass
 }
 
+func (m *Manager) Ping(ctx context.Context) error {
+	return m.repository.Ping(ctx)
+}
+
 func (m *Manager) MigratedLegacyJSON() bool {
 	return m.migrated
 }
@@ -281,18 +286,164 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 	summaries := make([]model.AdminUserSummary, 0, len(users))
 	for i, user := range users {
 		runtime := runtimes[i]
-		summary := model.AdminUserSummary{User: publicUser(user), DeviceIDs: []string{}}
+		summary := model.AdminUserSummary{
+			User:              publicUser(user),
+			DeviceIDs:         []string{},
+			Credential:        model.CredentialSummary{State: model.CredentialUnbound},
+			SnapshotUpdatedAt: user.CreatedAt,
+		}
 		if runtime != nil {
 			snapshot := runtime.store.Snapshot()
 			summary.Stats = runtime.statsSnapshot()
 			summary.Dashboard = snapshot.Statistics
 			summary.DeviceIDs = runtime.client.DeviceIDs()
-			summary.HasCookie = runtime.client.Cookie() != ""
+			summary.Credential = credentialSummary(runtime, len(summary.DeviceIDs))
+			summary.HasCookie = summary.Credential.HasCredential
+			summary.SnapshotUpdatedAt = latestSnapshotDataTime(snapshot, user.CreatedAt)
 			summary.LastRefresh = snapshot.Refresh
 		}
 		summaries = append(summaries, summary)
 	}
 	return summaries
+}
+
+func (m *Manager) ListUsersPage(query model.AdminUserListQuery) model.AdminUserPage {
+	query = normalizeAdminUserListQuery(query)
+	items := make([]model.AdminUserSummary, 0)
+	for _, summary := range m.ListUsers() {
+		if !matchesAdminUserListQuery(summary, query) {
+			continue
+		}
+		items = append(items, summary)
+	}
+
+	total := len(items)
+	totalPages := int(math.Ceil(float64(total) / float64(query.PageSize)))
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if query.Page > totalPages {
+		query.Page = totalPages
+	}
+	start := (query.Page - 1) * query.PageSize
+	end := start + query.PageSize
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	pageItems := items[start:end]
+	if pageItems == nil {
+		pageItems = []model.AdminUserSummary{}
+	}
+	return model.AdminUserPage{
+		Items:      pageItems,
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	}
+}
+
+func normalizeAdminUserListQuery(query model.AdminUserListQuery) model.AdminUserListQuery {
+	if query.Page < 1 {
+		query.Page = 1
+	}
+	if query.PageSize < 1 {
+		query.PageSize = 15
+	}
+	if query.PageSize > 100 {
+		query.PageSize = 100
+	}
+	query.Search = strings.TrimSpace(strings.ToLower(query.Search))
+	return query
+}
+
+func matchesAdminUserListQuery(summary model.AdminUserSummary, query model.AdminUserListQuery) bool {
+	if query.Search != "" && !strings.Contains(strings.ToLower(summary.User.Username), query.Search) {
+		return false
+	}
+	switch query.Account {
+	case "enabled":
+		if !summary.User.Enabled {
+			return false
+		}
+	case "disabled":
+		if summary.User.Enabled {
+			return false
+		}
+	}
+	if query.Credential != "" && query.Credential != "all" && string(summary.Credential.State) != query.Credential {
+		return false
+	}
+	switch query.Health {
+	case "healthy":
+		if hasAdminUserRisk(summary) {
+			return false
+		}
+	case "risk":
+		if !hasAdminUserRisk(summary) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasAdminUserRisk(summary model.AdminUserSummary) bool {
+	hasCredentialRisk := len(summary.DeviceIDs) > 0 && (summary.Credential.State == model.CredentialUnbound || summary.Credential.State == model.CredentialSyncFailed || summary.Credential.State == model.CredentialExpired)
+	return !summary.User.Enabled || hasCredentialRisk || hasActiveAuthFailure(summary.Stats) || summary.LastRefresh.FailedDevices > 0 || summary.Dashboard.OfflinePorts > 0
+}
+
+func credentialSummary(runtime *UserRuntime, deviceCount int) model.CredentialSummary {
+	if runtime == nil {
+		return model.CredentialSummary{State: model.CredentialUnbound}
+	}
+	runtime.mu.Lock()
+	binding := cloneYYBBinding(runtime.yybBinding)
+	runtime.mu.Unlock()
+
+	hasCookie := strings.TrimSpace(runtime.client.Cookie()) != ""
+	result := model.CredentialSummary{
+		Bound:         binding != nil && binding.Ref != "",
+		HasCredential: hasCookie,
+	}
+	if binding != nil {
+		result.LastCheckedAt = binding.LastCheckedAt
+	}
+	switch {
+	case binding != nil && binding.Status == "expired":
+		result.State = model.CredentialExpired
+	case hasCookie:
+		result.State = model.CredentialHealthy
+	case binding != nil && binding.LastError != "":
+		result.State = model.CredentialSyncFailed
+	case binding != nil && deviceCount == 0:
+		result.State = model.CredentialWaitingDevice
+	case binding != nil:
+		result.State = model.CredentialSyncFailed
+	default:
+		result.State = model.CredentialUnbound
+	}
+	return result
+}
+
+func latestSnapshotDataTime(snapshot model.DashboardSnapshot, fallback time.Time) time.Time {
+	latest := fallback
+	if snapshot.Refresh.LastRemoteAt != nil && snapshot.Refresh.LastRemoteAt.After(latest) {
+		latest = *snapshot.Refresh.LastRemoteAt
+	}
+	for _, pile := range snapshot.Piles {
+		if pile.UpdatedAt.After(latest) {
+			latest = pile.UpdatedAt
+		}
+		for _, port := range pile.Ports {
+			if port.UpdatedAt.After(latest) {
+				latest = port.UpdatedAt
+			}
+		}
+	}
+	return latest
 }
 
 func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, error) {
@@ -647,15 +798,17 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 		return model.Pile{}, err
 	}
 	if err := runtime.refresh(true); err != nil {
+		info := runtime.store.Snapshot().Refresh
+		m.recordRefreshMetrics(userID, info)
 		m.recordMetric(userID, "cookie_error")
 		runtime.client.RemoveDevice(req.ID)
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
 		return model.Pile{}, err
 	}
-	m.recordMetric(userID, "remote")
-	m.recordMetric(userID, "remote_ok")
-	for _, pile := range runtime.store.Snapshot().Piles {
+	snapshot := runtime.store.Snapshot()
+	m.recordRefreshMetrics(userID, snapshot.Refresh)
+	for _, pile := range snapshot.Piles {
 		if pile.ID == req.ID {
 			updated, _ := runtime.store.UpdatePile(req.ID, req.Name, req.Address, pile.SortOrder)
 			return updated, m.Save()
@@ -751,6 +904,8 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		return snapshot, nil
 	}
 	if err := runtime.refresh(force); err != nil {
+		info := runtime.store.Snapshot().Refresh
+		m.recordRefreshMetrics(userID, info)
 		m.recordMetric(userID, "cookie_error")
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
@@ -760,12 +915,35 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 	if snapshot.Refresh.Cached {
 		m.recordMetric(userID, "cache")
 	} else {
-		m.recordMetric(userID, "remote")
-		if snapshot.Refresh.SuccessfulDevices > 0 {
-			m.recordMetric(userID, "remote_ok")
-		}
+		m.recordRefreshMetrics(userID, snapshot.Refresh)
 	}
 	return snapshot, m.Save()
+}
+
+func (m *Manager) RefreshWithYYB(userID string, force bool, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
+	snapshot, err := m.Refresh(userID, force)
+	if err == nil || !charger.IsAuthExpired(err) {
+		return snapshot, err
+	}
+	if yybClient == nil || moceleClient == nil {
+		return model.DashboardSnapshot{}, err
+	}
+	return m.RecoverRefreshWithYYB(userID, yybClient, moceleClient)
+}
+
+func (m *Manager) RecoverRefreshWithYYB(userID string, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
+	deviceID, ok, deviceErr := m.FirstDeviceID(userID)
+	if deviceErr != nil || !ok {
+		if deviceErr != nil {
+			return model.DashboardSnapshot{}, deviceErr
+		}
+		return model.DashboardSnapshot{}, fmt.Errorf("no device is available for automatic credential recovery")
+	}
+	snapshot, syncErr := m.SyncCookieFromYYB(userID, deviceID, yybClient, moceleClient)
+	if syncErr != nil {
+		return model.DashboardSnapshot{}, fmt.Errorf("自动更新登录凭据失败: %w", syncErr)
+	}
+	return snapshot, nil
 }
 
 func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSnapshot, error) {
@@ -793,14 +971,16 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		return snapshot, nil
 	}
 	if err := runtime.refresh(true); err != nil {
+		info := runtime.store.Snapshot().Refresh
+		m.recordRefreshMetrics(userID, info)
 		_ = runtime.client.UpdateCookie(previous)
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
-	m.recordMetric(userID, "remote")
-	m.recordMetric(userID, "remote_ok")
-	return runtime.store.Snapshot(), m.Save()
+	snapshot := runtime.store.Snapshot()
+	m.recordRefreshMetrics(userID, snapshot.Refresh)
+	return snapshot, m.Save()
 }
 
 func (m *Manager) Subscribe(userID string) (chan model.DashboardSnapshot, error) {
@@ -1189,26 +1369,37 @@ func (m *Manager) AdminStats() model.AdminStats {
 		if summary.User.Role != model.RoleUser {
 			continue
 		}
-		if !summary.HasCookie {
-			exceptions = append(exceptions, model.SystemException{ID: "cookie-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "cookie", Level: "warning", Message: "尚未配置 Cookie", Time: now})
+		if len(summary.DeviceIDs) > 0 && summary.Credential.State != model.CredentialHealthy {
+			exceptions = append(exceptions, model.SystemException{
+				ID:       "credential-" + summary.User.ID,
+				UserID:   summary.User.ID,
+				Username: summary.User.Username,
+				Type:     "credential",
+				Level:    credentialIssueLevel(summary.Credential.State),
+				Message:  credentialIssueMessage(summary.Credential.State),
+				Time:     summary.SnapshotUpdatedAt,
+			})
 		}
 		if hasActiveAuthFailure(summary.Stats) {
-			at := now
-			if summary.Stats.LastAuthFailureAt != nil {
-				at = *summary.Stats.LastAuthFailureAt
-			}
+			at := *summary.Stats.LastAuthFailureAt
 			exceptions = append(exceptions, model.SystemException{ID: "auth-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "cookie_expired", Level: "critical", Message: "远端鉴权失败，Cookie 可能已失效", Time: at})
 		}
 		if summary.LastRefresh.FailedDevices > 0 {
-			exceptions = append(exceptions, model.SystemException{ID: "refresh-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "refresh", Level: "warning", Message: fmt.Sprintf("%d 台设备刷新失败", summary.LastRefresh.FailedDevices), Time: now})
+			exceptions = append(exceptions, model.SystemException{ID: "refresh-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "refresh", Level: "warning", Message: fmt.Sprintf("%d 台设备刷新失败", summary.LastRefresh.FailedDevices), Time: issueTime(summary)})
 		}
 		if summary.LastRefresh.LastRemoteAt != nil && now.Sub(*summary.LastRefresh.LastRemoteAt) > 24*time.Hour {
 			exceptions = append(exceptions, model.SystemException{ID: "stale-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "stale", Level: "warning", Message: "设备数据已超过 24 小时未更新", Time: *summary.LastRefresh.LastRemoteAt})
 		}
 		if summary.Dashboard.OfflinePorts > 0 {
-			exceptions = append(exceptions, model.SystemException{ID: "offline-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "offline", Level: "warning", Message: fmt.Sprintf("%d 个充电口处于离线状态", summary.Dashboard.OfflinePorts), Time: now})
+			exceptions = append(exceptions, model.SystemException{ID: "offline-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "offline", Level: "warning", Message: fmt.Sprintf("%d 个充电口处于离线状态", summary.Dashboard.OfflinePorts), Time: summary.SnapshotUpdatedAt})
 		}
 	}
+	sort.SliceStable(exceptions, func(i, j int) bool {
+		if exceptions[i].Level != exceptions[j].Level {
+			return exceptions[i].Level == "critical"
+		}
+		return exceptions[i].Time.After(exceptions[j].Time)
+	})
 	if hourly == nil {
 		hourly = []model.MetricPoint{}
 	}
@@ -1218,7 +1409,33 @@ func (m *Manager) AdminStats() model.AdminStats {
 	if users == nil {
 		users = []model.AdminUserSummary{}
 	}
-	return model.AdminStats{Users: users, Hourly: hourly, Daily: daily, Exceptions: exceptions}
+	overview := adminOverview(users, hourly, len(exceptions))
+	return model.AdminStats{Overview: overview, Users: users, Hourly: hourly, Daily: daily, Exceptions: exceptions}
+}
+
+func credentialIssueLevel(state model.CredentialState) string {
+	if state == model.CredentialExpired {
+		return "critical"
+	}
+	return "warning"
+}
+
+func credentialIssueMessage(state model.CredentialState) string {
+	switch state {
+	case model.CredentialExpired:
+		return "扫码登录绑定已失效"
+	case model.CredentialSyncFailed:
+		return "扫码登录凭据同步失败"
+	default:
+		return "尚未完成扫码登录绑定"
+	}
+}
+
+func issueTime(summary model.AdminUserSummary) time.Time {
+	if summary.LastRefresh.LastRemoteAt != nil {
+		return *summary.LastRefresh.LastRemoteAt
+	}
+	return summary.SnapshotUpdatedAt
 }
 
 func hasActiveAuthFailure(stats model.TrafficStats) bool {
@@ -1231,14 +1448,57 @@ func hasActiveAuthFailure(stats model.TrafficStats) bool {
 	return stats.LastAuthFailureAt.After(*stats.LastRemoteOKAt)
 }
 
+func adminOverview(users []model.AdminUserSummary, hourly []model.MetricPoint, issueCount int) model.AdminOverview {
+	remote := 0
+	remoteOK := 0
+	active := map[string]struct{}{}
+	managed := 0
+	offline := 0
+	for _, point := range hourly {
+		remote += point.Remote
+		remoteOK += point.RemoteOK
+	}
+	for _, summary := range users {
+		managed += len(summary.DeviceIDs)
+		offline += summary.Dashboard.OfflinePorts
+		if summary.User.Role == model.RoleUser && summary.Stats.LastRequestAt != nil &&
+			time.Since(*summary.Stats.LastRequestAt) <= 24*time.Hour {
+			active[summary.User.ID] = struct{}{}
+		}
+	}
+	rate := 0.0
+	if remote > 0 {
+		rate = math.Round(float64(remoteOK)/float64(remote)*1000) / 10
+	}
+	return model.AdminOverview{
+		OpenIssues: issueCount, RemoteSuccessRate: rate,
+		ActiveUsers: len(active), ManagedDevices: managed, OfflinePorts: offline,
+	}
+}
+
 func (m *Manager) recordMetric(userID, kind string) {
+	m.recordMetricCount(userID, kind, 1)
+}
+
+func (m *Manager) recordMetricCount(userID, kind string, count int) {
+	if count <= 0 {
+		return
+	}
 	now := time.Now()
 	if kind == "remote_ok" {
 		if runtime, err := m.runtimeFor(userID); err == nil {
 			runtime.recordRemoteOK(now)
 		}
 	}
-	_ = m.repository.RecordMetric(userID, kind, now)
+	for i := 0; i < count; i++ {
+		_ = m.repository.RecordMetric(userID, kind, now)
+	}
+}
+
+func (m *Manager) recordRefreshMetrics(userID string, info model.RefreshInfo) {
+	m.recordMetricCount(userID, "remote", info.AttemptedDevices)
+	m.recordMetricCount(userID, "remote_ok", info.SuccessfulDevices)
+	m.recordMetricCount(userID, "remote_failed", info.FailedDevices)
 }
 
 func randomID(prefix string) string {

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"charge-dashboard/internal/auth"
@@ -32,13 +33,15 @@ var deviceIDPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 var pileNumberPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 
 type Server struct {
-	manager      *appruntime.Manager
-	sessions     *auth.SessionManager
-	turnstile    *auth.TurnstileVerifier
-	authGuard    *auth.AuthGuard
-	captcha      *auth.CaptchaStore
-	yybClient    yybSessionClient
-	moceleClient appruntime.MoceleCookieClient
+	manager             *appruntime.Manager
+	sessions            *auth.SessionManager
+	turnstile           *auth.TurnstileVerifier
+	authGuard           *auth.AuthGuard
+	captcha             *auth.CaptchaStore
+	yybClient           yybSessionClient
+	moceleClient        appruntime.MoceleCookieClient
+	devMu               sync.Mutex
+	devForceAuthExpired bool
 }
 
 type yybSessionClient interface {
@@ -46,11 +49,29 @@ type yybSessionClient interface {
 	CreateQR(ctx context.Context) (yyb.QRSession, error)
 	PollQR(ctx context.Context, sessionID string) (yyb.QRPollResult, error)
 	ConfirmQR(ctx context.Context, sessionID string) (yyb.YYBAccount, error)
+	Health(ctx context.Context) error
 }
 
 func (s *Server) SetYYBIntegration(yybClient yybSessionClient, moceleClient appruntime.MoceleCookieClient) {
 	s.yybClient = yybClient
 	s.moceleClient = moceleClient
+}
+
+// EnableDevForceAuthExpired enables a one-time local development refresh simulation.
+func (s *Server) EnableDevForceAuthExpired() {
+	s.devMu.Lock()
+	s.devForceAuthExpired = true
+	s.devMu.Unlock()
+}
+
+func (s *Server) consumeDevForceAuthExpired() bool {
+	s.devMu.Lock()
+	defer s.devMu.Unlock()
+	if !s.devForceAuthExpired {
+		return false
+	}
+	s.devForceAuthExpired = false
+	return true
 }
 
 func NewServer(
@@ -82,6 +103,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/users", s.handleAdminUsers)
 	mux.HandleFunc("/api/admin/users/", s.handleAdminUserActions)
 	mux.HandleFunc("/api/admin/stats", s.handleAdminStats)
+	mux.HandleFunc("/api/admin/health", s.handleAdminHealth)
 	mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
 	mux.HandleFunc("/api/admin/invites", s.handleAdminInvites)
 	mux.HandleFunc("/api/admin/invites/", s.handleAdminInviteActions)
@@ -458,7 +480,19 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := s.manager.Refresh(user.ID, false)
+	var snapshot model.DashboardSnapshot
+	var err error
+	if s.consumeDevForceAuthExpired() {
+		if s.yybClient == nil || s.moceleClient == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本地鉴权失效测试需要先配置 YYB 扫码服务"})
+			return
+		}
+		snapshot, err = s.manager.RecoverRefreshWithYYB(user.ID, s.yybClient, s.moceleClient)
+	} else if s.yybClient != nil && s.moceleClient != nil {
+		snapshot, err = s.manager.RefreshWithYYB(user.ID, false, s.yybClient, s.moceleClient)
+	} else {
+		snapshot, err = s.manager.Refresh(user.ID, false)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -732,7 +766,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.manager.ListUsers())
+		writeJSON(w, http.StatusOK, s.manager.ListUsersPage(adminUserListQuery(r)))
 	case http.MethodPost:
 		var req model.UserCreateRequest
 		if !decodeJSON(w, r, adminBodyLimit, &req) {
@@ -747,6 +781,26 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func adminUserListQuery(r *http.Request) model.AdminUserListQuery {
+	values := r.URL.Query()
+	return model.AdminUserListQuery{
+		Page:       queryInt(values.Get("page"), 1),
+		PageSize:   queryInt(values.Get("pageSize"), 15),
+		Search:     values.Get("search"),
+		Account:    values.Get("account"),
+		Credential: values.Get("credential"),
+		Health:     values.Get("health"),
+	}
+}
+
+func queryInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) {
@@ -810,6 +864,48 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.manager.AdminStats())
+}
+
+func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	result := model.AdminHealth{
+		CheckedAt: time.Now(),
+		Charge: model.ServiceHealth{
+			State: model.HealthHealthy, Message: "服务正常",
+		},
+		Database: model.ServiceHealth{
+			State: model.HealthHealthy, Message: "存储正常",
+		},
+		YYB: model.ServiceHealth{
+			State: model.HealthUnavailable, Message: "扫码服务未配置",
+		},
+	}
+	if err := s.manager.Ping(ctx); err != nil {
+		result.Database = model.ServiceHealth{
+			State: model.HealthUnavailable, Message: "存储暂不可用",
+		}
+	}
+	if s.yybClient != nil {
+		if err := s.yybClient.Health(ctx); err != nil {
+			result.YYB = model.ServiceHealth{
+				State: model.HealthDegraded, Message: "扫码服务连接异常",
+			}
+		} else {
+			result.YYB = model.ServiceHealth{
+				State: model.HealthHealthy, Message: "扫码服务正常",
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {

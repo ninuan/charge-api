@@ -155,6 +155,19 @@ func (c *Client) RefreshAccount(ctx context.Context, ref string) error {
 	return c.doJSON(ctx, http.MethodPost, "/accounts/refresh", map[string]any{"ref": ref}, &out)
 }
 
+func (c *Client) Health(ctx context.Context) error {
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/health", nil, &out); err != nil {
+		return err
+	}
+	if !out.OK {
+		return fmt.Errorf("yyb health check failed")
+	}
+	return nil
+}
+
 func (c *Client) doJSON(ctx context.Context, method string, path string, payload any, out any) error {
 	var body []byte
 	var err error

@@ -44,6 +44,10 @@ func moceleClientFromEnv(lookup envLookup) *mocele.Client {
 	})
 }
 
+func devForceAuthExpiredEnabled(lookup envLookup) bool {
+	return lookup("CHARGE_LOCAL_DEV") == "1" && strings.EqualFold(strings.TrimSpace(lookup("CHARGE_DEV_FORCE_AUTH_EXPIRED")), "true")
+}
+
 func main() {
 	var (
 		listenAddr    = flag.String("listen", ":8080", "http listen address")
@@ -137,6 +141,10 @@ func main() {
 	server := api.NewServer(manager, sessions, turnstile, auth.NewAuthGuard())
 	if yybClient != nil {
 		server.SetYYBIntegration(yybClient, moceleClientFromEnv(os.Getenv))
+	}
+	if devForceAuthExpiredEnabled(os.Getenv) {
+		server.EnableDevForceAuthExpired()
+		log.Printf("local development: next refresh will simulate an expired login credential")
 	}
 	mux := http.NewServeMux()
 	server.Register(mux)

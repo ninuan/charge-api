@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -36,6 +37,177 @@ func TestAdminCannotUseDashboardAPI(t *testing.T) {
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("admin dashboard request returned %d, want 403", recorder.Code)
+	}
+}
+
+func TestDevForceAuthExpiredIsConsumedOnce(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	if server.consumeDevForceAuthExpired() {
+		t.Fatal("test switch should be disabled by default")
+	}
+	server.EnableDevForceAuthExpired()
+	if !server.consumeDevForceAuthExpired() {
+		t.Fatal("test switch was not consumed")
+	}
+	if server.consumeDevForceAuthExpired() {
+		t.Fatal("test switch must only affect one refresh")
+	}
+}
+
+func TestAdminHealthRequiresAdminAndReturnsRedactedServiceState(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	user, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "health-user", Password: "password123", Role: model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	adminSession, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create admin session: %v", err)
+	}
+	userSession, err := sessions.Create(user.ID)
+	if err != nil {
+		t.Fatalf("Create user session: %v", err)
+	}
+	server.SetYYBIntegration(&fakeAPIYYBClient{}, &fakeAPIMoceleClient{})
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	anonymousRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(anonymousRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/health", nil))
+	if anonymousRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous status = %d, want 401", anonymousRecorder.Code)
+	}
+
+	userRequest := httptest.NewRequest(http.MethodGet, "/api/admin/health", nil)
+	userRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: userSession.Token})
+	userRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(userRecorder, userRequest)
+	if userRecorder.Code != http.StatusForbidden {
+		t.Fatalf("user status = %d, want 403", userRecorder.Code)
+	}
+
+	adminRequest := httptest.NewRequest(http.MethodGet, "/api/admin/health", nil)
+	adminRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	adminRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(adminRecorder, adminRequest)
+	if adminRecorder.Code != http.StatusOK {
+		t.Fatalf("admin status = %d: %s", adminRecorder.Code, adminRecorder.Body.String())
+	}
+	var payload model.AdminHealth
+	if err := json.NewDecoder(adminRecorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if payload.Charge.State != model.HealthHealthy ||
+		payload.Database.State != model.HealthHealthy ||
+		payload.YYB.State != model.HealthHealthy {
+		t.Fatalf("unexpected health payload: %+v", payload)
+	}
+	body := adminRecorder.Body.String()
+	for _, secret := range []string{"YYB_API_SECRET", "charge_state.db", "127.0.0.1:8000"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("health response leaked %q: %s", secret, body)
+		}
+	}
+}
+
+func TestAdminResponsesDoNotLeakIntegrationSecrets(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	user, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "privacy-user", Password: "password123", Role: model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := manager.SetYYBBinding(user.ID, &model.YYBBinding{
+		OpenID: "private-open-id", Ref: "private-ref", Nickname: "Privacy User",
+		Status: "alive", BoundAt: now, LastCheckedAt: &now,
+	}); err != nil {
+		t.Fatalf("SetYYBBinding: %v", err)
+	}
+	session, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	server.SetYYBIntegration(&fakeAPIYYBClient{}, &fakeAPIMoceleClient{})
+
+	var response bytes.Buffer
+	for _, path := range []string{"/api/admin/stats", "/api/admin/health"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+		recorder := httptest.NewRecorder()
+		if path == "/api/admin/stats" {
+			server.handleAdminStats(recorder, request)
+		} else {
+			server.handleAdminHealth(recorder, request)
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s returned %d: %s", path, recorder.Code, recorder.Body.String())
+		}
+		response.Write(recorder.Body.Bytes())
+	}
+
+	for _, secret := range []string{
+		"wxopenid=", "deviceid=", `"openId"`, `"ref"`, "private-open-id", "private-ref",
+		"YYB_API_SECRET", "charge_state.db", "127.0.0.1:8000",
+	} {
+		if bytes.Contains(response.Bytes(), []byte(secret)) {
+			t.Fatalf("admin response leaked %q: %s", secret, response.String())
+		}
+	}
+}
+
+func TestAdminUsersListsFilteredPageInsteadOfEveryAccount(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	adminSession, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create admin session: %v", err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		if _, err := manager.CreateUser(model.UserCreateRequest{
+			Username: fmt.Sprintf("page-user-%02d", i),
+			Password: "password123",
+			Role:     model.RoleUser,
+		}); err != nil {
+			t.Fatalf("Create page user %d: %v", i, err)
+		}
+	}
+	disabled := false
+	if _, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "page-user-disabled", Password: "password123", Role: model.RoleUser, Enabled: &disabled,
+	}); err != nil {
+		t.Fatalf("Create disabled page user: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/users?page=2&pageSize=2&search=page-user&account=enabled", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	recorder := httptest.NewRecorder()
+	server.handleAdminUsers(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Items      []model.AdminUserSummary `json:"items"`
+		Page       int                      `json:"page"`
+		PageSize   int                      `json:"pageSize"`
+		Total      int                      `json:"total"`
+		TotalPages int                      `json:"totalPages"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode paginated users: %v", err)
+	}
+	if payload.Page != 2 || payload.PageSize != 2 || payload.Total != 5 || payload.TotalPages != 3 {
+		t.Fatalf("unexpected page metadata: %+v", payload)
+	}
+	if len(payload.Items) != 2 || payload.Items[0].User.Username != "page-user-03" || payload.Items[1].User.Username != "page-user-04" {
+		t.Fatalf("unexpected second page: %+v", payload.Items)
 	}
 }
 
@@ -94,6 +266,32 @@ func TestAdminUpdateRevokesTargetUserSessions(t *testing.T) {
 	}
 	if _, ok := sessions.Get(userSession.Token); ok {
 		t.Fatal("target user's previous session remains valid")
+	}
+}
+
+func TestAdminInviteIsGeneratedByServer(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	session, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/invites", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	recorder := httptest.NewRecorder()
+	server.handleAdminInvites(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create invite returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var invite model.InviteCode
+	if err := json.NewDecoder(recorder.Body).Decode(&invite); err != nil {
+		t.Fatalf("decode invite: %v", err)
+	}
+	if !strings.HasPrefix(invite.Code, "CHG-") {
+		t.Fatalf("invite code = %q, want CHG- prefix", invite.Code)
 	}
 }
 
@@ -750,6 +948,7 @@ type fakeAPIYYBClient struct {
 	code         string
 	getCodeRef   string
 	getCodeAppID string
+	healthErr    error
 }
 
 func (f *fakeAPIYYBClient) CreateQR(ctx context.Context) (yyb.QRSession, error) {
@@ -771,6 +970,8 @@ func (f *fakeAPIYYBClient) GetCode(ctx context.Context, ref string, appID string
 }
 
 func (f *fakeAPIYYBClient) RefreshAccount(ctx context.Context, ref string) error { return nil }
+
+func (f *fakeAPIYYBClient) Health(context.Context) error { return f.healthErr }
 
 type fakeAPIMoceleClient struct {
 	cookie   string

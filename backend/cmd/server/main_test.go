@@ -48,3 +48,18 @@ func TestYYBClientConfigFromEnv(t *testing.T) {
 		t.Fatalf("client is nil")
 	}
 }
+
+func TestDevForceAuthExpiredRequiresLocalDevMode(t *testing.T) {
+	lookup := func(values map[string]string) envLookup {
+		return func(name string) string { return values[name] }
+	}
+	if devForceAuthExpiredEnabled(lookup(map[string]string{"CHARGE_DEV_FORCE_AUTH_EXPIRED": "true"})) {
+		t.Fatal("force auth expiry must remain disabled outside local development mode")
+	}
+	if !devForceAuthExpiredEnabled(lookup(map[string]string{
+		"CHARGE_LOCAL_DEV":              "1",
+		"CHARGE_DEV_FORCE_AUTH_EXPIRED": "true",
+	})) {
+		t.Fatal("force auth expiry should be enabled for local development")
+	}
+}

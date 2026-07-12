@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,18 @@ import (
 
 	"charge-dashboard/internal/model"
 )
+
+func TestStorePing(t *testing.T) {
+	store, err := OpenSQLite(t.TempDir()+"/state.db", bytes.Repeat([]byte{0x10}, CookieKeySize))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if err := store.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+}
 
 func TestSQLiteEncryptsCookieAtRestAndLoadsIt(t *testing.T) {
 	path := t.TempDir() + "/state.db"
@@ -248,5 +261,40 @@ func TestSQLiteEncryptsYYBBindingAtRestAndLoadsIt(t *testing.T) {
 	}
 	if binding.OpenID != "yyb-openid-secret" || binding.Nickname != "nickname-secret" || binding.Ref != "yyb-ref-secret" || binding.LastError != "refresh token expired" {
 		t.Fatalf("YYBBinding did not round-trip: %#v", binding)
+	}
+}
+
+func TestMetricSeriesIncludesRemoteFailures(t *testing.T) {
+	path := t.TempDir() + "/state.db"
+	store, err := OpenSQLite(path, bytes.Repeat([]byte{0x41}, CookieKeySize))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Truncate(time.Hour).Add(15 * time.Minute)
+	for i := 0; i < 3; i++ {
+		if err := store.RecordMetric("user-1", "remote", now); err != nil {
+			t.Fatalf("RecordMetric remote: %v", err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if err := store.RecordMetric("user-1", "remote_ok", now); err != nil {
+			t.Fatalf("RecordMetric remote_ok: %v", err)
+		}
+	}
+	if err := store.RecordMetric("user-1", "remote_failed", now); err != nil {
+		t.Fatalf("RecordMetric remote_failed: %v", err)
+	}
+
+	points, err := store.MetricSeries(now.Add(-time.Hour), 3600)
+	if err != nil {
+		t.Fatalf("MetricSeries: %v", err)
+	}
+	if len(points) != 1 {
+		t.Fatalf("points = %d, want 1", len(points))
+	}
+	if points[0].Remote != 3 || points[0].RemoteOK != 2 || points[0].RemoteFailed != 1 {
+		t.Fatalf("unexpected remote counts: %+v", points[0])
 	}
 }
