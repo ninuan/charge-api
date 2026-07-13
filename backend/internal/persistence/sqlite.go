@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 type Store struct {
 	db     *sql.DB
@@ -126,6 +126,9 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := s.ensureColumn("user_states", "yyb_binding_ciphertext", "BLOB"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("user_states", "recovery_diagnostics_json", "BLOB NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(
@@ -376,8 +379,8 @@ func (s *Store) Load() (State, bool, error) {
 
 	stateRows, err := s.db.Query(`
 		SELECT user_id, piles_json, refresh_json, device_ids_json,
-		       cookie_nonce, cookie_ciphertext, stats_json,
-		       yyb_binding_nonce, yyb_binding_ciphertext
+			cookie_nonce, cookie_ciphertext, stats_json,
+			yyb_binding_nonce, yyb_binding_ciphertext, recovery_diagnostics_json
 		FROM user_states
 	`)
 	if err != nil {
@@ -387,7 +390,7 @@ func (s *Store) Load() (State, bool, error) {
 
 	for stateRows.Next() {
 		var userID string
-		var pilesJSON, refreshJSON, deviceIDsJSON, statsJSON []byte
+		var pilesJSON, refreshJSON, deviceIDsJSON, statsJSON, recoveryDiagnosticsJSON []byte
 		var nonce, ciphertext []byte
 		var yybBindingNonce, yybBindingCiphertext []byte
 		if err := stateRows.Scan(
@@ -400,6 +403,7 @@ func (s *Store) Load() (State, bool, error) {
 			&statsJSON,
 			&yybBindingNonce,
 			&yybBindingCiphertext,
+			&recoveryDiagnosticsJSON,
 		); err != nil {
 			return State{}, false, fmt.Errorf("scan user state: %w", err)
 		}
@@ -416,6 +420,11 @@ func (s *Store) Load() (State, bool, error) {
 		}
 		if err := json.Unmarshal(statsJSON, &userState.Stats); err != nil {
 			return State{}, false, fmt.Errorf("parse stats for user %s: %w", userID, err)
+		}
+		if len(recoveryDiagnosticsJSON) > 0 {
+			if err := json.Unmarshal(recoveryDiagnosticsJSON, &userState.RecoveryDiagnostics); err != nil {
+				return State{}, false, fmt.Errorf("parse recovery diagnostics for user %s: %w", userID, err)
+			}
 		}
 		userState.Cookie, err = s.cipher.decrypt(userID, nonce, ciphertext)
 		if err != nil {
@@ -515,6 +524,10 @@ func (s *Store) Save(state State) error {
 		if err != nil {
 			return fmt.Errorf("encode stats for user %s: %w", user.ID, err)
 		}
+		recoveryDiagnosticsJSON, err := json.Marshal(userState.RecoveryDiagnostics)
+		if err != nil {
+			return fmt.Errorf("encode recovery diagnostics for user %s: %w", user.ID, err)
+		}
 		nonce, ciphertext, err := s.cipher.encrypt(user.ID, userState.Cookie)
 		if err != nil {
 			return err
@@ -535,8 +548,8 @@ func (s *Store) Save(state State) error {
 			INSERT INTO user_states(
 				user_id, piles_json, refresh_json, device_ids_json,
 				cookie_nonce, cookie_ciphertext, stats_json,
-				yyb_binding_nonce, yyb_binding_ciphertext
-			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+				yyb_binding_nonce, yyb_binding_ciphertext, recovery_diagnostics_json
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			user.ID,
 			pilesJSON,
@@ -547,6 +560,7 @@ func (s *Store) Save(state State) error {
 			statsJSON,
 			yybBindingNonce,
 			yybBindingCiphertext,
+			recoveryDiagnosticsJSON,
 		); err != nil {
 			return fmt.Errorf("insert state for user %s: %w", user.ID, err)
 		}

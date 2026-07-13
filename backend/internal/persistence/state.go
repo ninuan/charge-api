@@ -25,12 +25,13 @@ type State struct {
 }
 
 type UserState struct {
-	Piles      []model.Pile       `json:"piles"`
-	Refresh    model.RefreshInfo  `json:"refresh"`
-	DeviceIDs  []string           `json:"deviceIds"`
-	Cookie     string             `json:"cookie,omitempty"`
-	Stats      model.TrafficStats `json:"stats"`
-	YYBBinding *model.YYBBinding  `json:"yybBinding,omitempty"`
+	Piles               []model.Pile               `json:"piles"`
+	Refresh             model.RefreshInfo          `json:"refresh"`
+	DeviceIDs           []string                   `json:"deviceIds"`
+	Cookie              string                     `json:"cookie,omitempty"`
+	Stats               model.TrafficStats         `json:"stats"`
+	YYBBinding          *model.YYBBinding          `json:"yybBinding,omitempty"`
+	RecoveryDiagnostics []model.RecoveryDiagnostic `json:"recoveryDiagnostics,omitempty"`
 }
 
 func LoadJSON(path string) (State, bool, error) {

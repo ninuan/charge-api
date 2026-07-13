@@ -263,15 +263,27 @@ type CredentialSummary struct {
 	LastCheckedAt *time.Time      `json:"lastCheckedAt,omitempty"`
 }
 
+// RecoveryDiagnostic is a deliberately non-sensitive trace of a credential
+// recovery attempt. It must never contain cookies, login codes, OpenIDs, refs,
+// or raw upstream response bodies.
+type RecoveryDiagnostic struct {
+	Code         string    `json:"code"`
+	Message      string    `json:"message"`
+	DeviceSuffix string    `json:"deviceSuffix,omitempty"`
+	StatusCode   int       `json:"statusCode,omitempty"`
+	At           time.Time `json:"at"`
+}
+
 type AdminUserSummary struct {
-	User              CurrentUser       `json:"user"`
-	Stats             TrafficStats      `json:"stats"`
-	Dashboard         DashboardCounters `json:"dashboard"`
-	DeviceIDs         []string          `json:"deviceIds"`
-	HasCookie         bool              `json:"hasCookie"`
-	Credential        CredentialSummary `json:"credential"`
-	SnapshotUpdatedAt time.Time         `json:"snapshotUpdatedAt"`
-	LastRefresh       RefreshInfo       `json:"lastRefresh"`
+	User                CurrentUser          `json:"user"`
+	Stats               TrafficStats         `json:"stats"`
+	Dashboard           DashboardCounters    `json:"dashboard"`
+	DeviceIDs           []string             `json:"deviceIds"`
+	HasCookie           bool                 `json:"hasCookie"`
+	Credential          CredentialSummary    `json:"credential"`
+	SnapshotUpdatedAt   time.Time            `json:"snapshotUpdatedAt"`
+	LastRefresh         RefreshInfo          `json:"lastRefresh"`
+	RecoveryDiagnostics []RecoveryDiagnostic `json:"recoveryDiagnostics"`
 }
 
 type AdminUserListQuery struct {

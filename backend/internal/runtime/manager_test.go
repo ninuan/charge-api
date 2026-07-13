@@ -973,6 +973,181 @@ func TestRefreshWithYYBAutomaticallyReplacesExpiredCookie(t *testing.T) {
 	if err != nil || binding == nil || binding.Status != "alive" || binding.LastError != "" {
 		t.Fatalf("binding after automatic recovery = %#v, %v", binding, err)
 	}
+	diagnostics, err := manager.RecoveryDiagnostics("user-1")
+	if err != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", err)
+	}
+	assertDiagnosticCodes(t, diagnostics, "remote_auth_rejected", "yyb_get_code_succeeded", "recovery_succeeded")
+}
+
+func TestRecoverRefreshWithYYBRecordsGetCodeRetryFailureWithoutSecrets(t *testing.T) {
+	manager := testYYBManager(t)
+	runtime := manager.runtimes["user-1"]
+	if err := runtime.client.AddDevice("2601201412385560001"); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "secret-ref", OpenID: "secret-openid"}); err != nil {
+		t.Fatalf("SaveYYBBinding: %v", err)
+	}
+
+	_, err := manager.RecoverRefreshWithYYB(
+		"user-1",
+		&fakeYYBClient{errors: []error{errors.New("yyb status=409 ref=secret-ref"), errors.New("yyb status=409 ref=secret-ref")}},
+		&fakeMoceleClient{},
+	)
+	if err == nil {
+		t.Fatal("expected recovery failure")
+	}
+	diagnostics, diagnosticsErr := manager.RecoveryDiagnostics("user-1")
+	if diagnosticsErr != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", diagnosticsErr)
+	}
+	assertDiagnosticCodes(t, diagnostics, "yyb_get_code_failed", "yyb_account_refresh_succeeded", "yyb_get_code_retry_failed", "recovery_failed")
+	assertDiagnosticsDoNotLeak(t, diagnostics, "secret-ref", "secret-openid")
+}
+
+func TestRecoverRefreshWithYYBRecordsMissingInfoCookie(t *testing.T) {
+	manager := testYYBManager(t)
+	runtime := manager.runtimes["user-1"]
+	if err := runtime.client.AddDevice("2601201412385560001"); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "ref-1", OpenID: "openid-1"}); err != nil {
+		t.Fatalf("SaveYYBBinding: %v", err)
+	}
+
+	_, err := manager.RecoverRefreshWithYYB(
+		"user-1",
+		&fakeYYBClient{codes: []string{"wx-code-secret"}},
+		&fakeMoceleClient{err: errors.New("mocele autologin response missing info cookie")},
+	)
+	if err == nil {
+		t.Fatal("expected recovery failure")
+	}
+	diagnostics, diagnosticsErr := manager.RecoveryDiagnostics("user-1")
+	if diagnosticsErr != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", diagnosticsErr)
+	}
+	assertDiagnosticCodes(t, diagnostics, "yyb_get_code_succeeded", "mocele_autologin_missing_info", "recovery_failed")
+	assertDiagnosticsDoNotLeak(t, diagnostics, "wx-code-secret", "openid-1")
+}
+
+func TestRecoverRefreshWithYYBRecordsNewCookieValidationFailure(t *testing.T) {
+	const deviceID = "2601201412385560001"
+	server := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"err":"cookie expired"}`))
+	}))
+	requests := []parser.CaptureRequest{{
+		Name: "template", URL: server.URL + "/action/i/api/devicewithnumbers", Method: http.MethodPost,
+		Body: "id=YOUR_DEVICE_LONG_ID", Headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}}
+	runtime := newUserRuntime(requests, persistence.UserState{Cookie: "sid=expired"}, 30*time.Second)
+	if err := runtime.client.AddDevice(deviceID); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	manager := &Manager{
+		repository: testRepository(t),
+		users:      map[string]model.User{"user-1": {ID: "user-1", Username: "alice", Role: model.RoleUser, Enabled: true, RefreshEnabled: true, DeviceLimit: 10}},
+		runtimes:   map[string]*UserRuntime{"user-1": runtime},
+		settings:   model.RegistrationSettings{DefaultDeviceLimit: 10, DefaultRefreshEnabled: true},
+		invites:    map[string]model.InviteCode{},
+	}
+	if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "ref-1", OpenID: "openid-1"}); err != nil {
+		t.Fatalf("SaveYYBBinding: %v", err)
+	}
+
+	_, err := manager.RecoverRefreshWithYYB("user-1", &fakeYYBClient{codes: []string{"wx-code"}}, &fakeMoceleClient{cookie: "deviceid=" + deviceID + "; wxopenid=open; info=info"})
+	if err == nil {
+		t.Fatal("expected validation failure")
+	}
+	diagnostics, diagnosticsErr := manager.RecoveryDiagnostics("user-1")
+	if diagnosticsErr != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", diagnosticsErr)
+	}
+	assertDiagnosticCodes(t, diagnostics, "yyb_get_code_succeeded", "new_cookie_validation_failed", "recovery_failed")
+}
+
+func TestRecoveryDiagnosticsKeepNewestTwentyAndPersist(t *testing.T) {
+	manager := testYYBManager(t)
+	for index := 0; index < 25; index++ {
+		manager.recordRecoveryDiagnostic("user-1", model.RecoveryDiagnostic{
+			Code: "recovery_failed", Message: "Cookie=secret-cookie", DeviceSuffix: "2601201412385560001",
+		})
+	}
+	diagnostics, err := manager.RecoveryDiagnostics("user-1")
+	if err != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", err)
+	}
+	if len(diagnostics) != 20 {
+		t.Fatalf("diagnostics count = %d, want 20", len(diagnostics))
+	}
+	state, ok, err := manager.repository.Load()
+	if err != nil || !ok {
+		t.Fatalf("Load = %v, %v", ok, err)
+	}
+	if got := len(state.UserStates["user-1"].RecoveryDiagnostics); got != 20 {
+		t.Fatalf("persisted diagnostics count = %d, want 20", got)
+	}
+	assertDiagnosticsDoNotLeak(t, diagnostics, "secret-cookie", "2601201412385560001")
+	if diagnostics[0].DeviceSuffix != "0001" || diagnostics[0].Message != "登录凭据自动恢复失败" {
+		t.Fatalf("diagnostic was not sanitized: %#v", diagnostics[0])
+	}
+}
+
+func TestRecoverRefreshWithYYBRecordsUnavailableWithoutBindingOrDevice(t *testing.T) {
+	manager := testYYBManager(t)
+	_, err := manager.RecoverRefreshWithYYB("user-1", &fakeYYBClient{}, &fakeMoceleClient{})
+	if err == nil {
+		t.Fatal("expected unavailable recovery")
+	}
+	diagnostics, diagnosticsErr := manager.RecoveryDiagnostics("user-1")
+	if diagnosticsErr != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", diagnosticsErr)
+	}
+	assertDiagnosticCodes(t, diagnostics, "recovery_unavailable")
+}
+
+func TestRecoverRefreshWithYYBRecordsMissingBindingForExistingDevice(t *testing.T) {
+	manager := testYYBManager(t)
+	if err := manager.runtimes["user-1"].client.AddDevice("2601201412385560001"); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	_, err := manager.RecoverRefreshWithYYB("user-1", &fakeYYBClient{}, &fakeMoceleClient{})
+	if err == nil {
+		t.Fatal("expected missing binding failure")
+	}
+	diagnostics, diagnosticsErr := manager.RecoveryDiagnostics("user-1")
+	if diagnosticsErr != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", diagnosticsErr)
+	}
+	assertDiagnosticCodes(t, diagnostics, "binding_missing", "recovery_failed")
+}
+
+func assertDiagnosticCodes(t *testing.T, diagnostics []model.RecoveryDiagnostic, want ...string) {
+	t.Helper()
+	seen := make(map[string]bool, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		seen[diagnostic.Code] = true
+	}
+	for _, code := range want {
+		if !seen[code] {
+			t.Fatalf("diagnostics missing %q: %#v", code, diagnostics)
+		}
+	}
+}
+
+func assertDiagnosticsDoNotLeak(t *testing.T, diagnostics []model.RecoveryDiagnostic, secrets ...string) {
+	t.Helper()
+	body, err := json.Marshal(diagnostics)
+	if err != nil {
+		t.Fatalf("marshal diagnostics: %v", err)
+	}
+	for _, secret := range secrets {
+		if bytes.Contains(body, []byte(secret)) {
+			t.Fatalf("diagnostics leaked %q: %s", secret, body)
+		}
+	}
 }
 
 func testYYBManager(t *testing.T) *Manager {
@@ -1023,12 +1198,16 @@ type fakeMoceleClient struct {
 	deviceID string
 	code     string
 	calls    int
+	err      error
 }
 
 func (f *fakeMoceleClient) ExchangeCode(ctx context.Context, deviceID string, code string) (mocele.CookieResult, error) {
 	f.calls++
 	f.deviceID = deviceID
 	f.code = code
+	if f.err != nil {
+		return mocele.CookieResult{}, f.err
+	}
 	return mocele.CookieResult{Cookie: f.cookie, WXOpenID: "openid", Info: "info"}, nil
 }
 

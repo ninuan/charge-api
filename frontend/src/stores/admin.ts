@@ -11,6 +11,7 @@ import type {
   CurrentUser,
   DashboardCounters,
   InviteCode,
+  RecoveryDiagnostic,
   RefreshInfo,
   RegistrationSettings,
   SystemException,
@@ -18,13 +19,14 @@ import type {
   UserRole
 } from "@/types/dashboard";
 
-type NullableAdminUserSummary = Omit<AdminUserSummary, "credential" | "dashboard" | "deviceIds" | "lastRefresh" | "snapshotUpdatedAt" | "stats"> & {
+type NullableAdminUserSummary = Omit<AdminUserSummary, "credential" | "dashboard" | "deviceIds" | "lastRefresh" | "snapshotUpdatedAt" | "stats" | "recoveryDiagnostics"> & {
   credential?: CredentialSummary | null;
   dashboard?: DashboardCounters | null;
   deviceIds?: string[] | null;
   lastRefresh?: RefreshInfo | null;
   snapshotUpdatedAt?: string | null;
   stats?: TrafficStats | null;
+  recoveryDiagnostics?: RecoveryDiagnostic[] | null;
 };
 
 type NullableAdminStats = {
@@ -108,6 +110,7 @@ function normalizeSummary(summary: NullableAdminUserSummary): AdminUserSummary {
     dashboard: summary.dashboard ?? emptyDashboard,
     deviceIds: arrayOrEmpty(summary.deviceIds),
     credential: summary.credential ?? emptyCredential,
+    recoveryDiagnostics: arrayOrEmpty(summary.recoveryDiagnostics),
     snapshotUpdatedAt: summary.snapshotUpdatedAt ?? summary.user.createdAt,
     lastRefresh: summary.lastRefresh ?? emptyRefresh
   };

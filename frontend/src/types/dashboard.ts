@@ -94,6 +94,14 @@ export interface CredentialSummary {
   lastCheckedAt?: string;
 }
 
+export interface RecoveryDiagnostic {
+  code: string;
+  message: string;
+  deviceSuffix?: string;
+  statusCode?: number;
+  at: string;
+}
+
 export interface AdminUserSummary {
   user: CurrentUser;
   stats: TrafficStats;
@@ -103,6 +111,7 @@ export interface AdminUserSummary {
   credential: CredentialSummary;
   snapshotUpdatedAt: string;
   lastRefresh: RefreshInfo;
+  recoveryDiagnostics?: RecoveryDiagnostic[];
 }
 
 export type AdminAccountFilter = "all" | "enabled" | "disabled";

@@ -47,6 +47,7 @@ function makeUser(
       lastCheckedAt: "2026-07-09T07:58:00Z"
     },
     snapshotUpdatedAt: "2026-07-09T08:00:00Z",
+    recoveryDiagnostics: [],
     lastRefresh: {
       lastRemoteAt: "2026-07-09T07:58:00Z",
       minIntervalSeconds: 30,
@@ -148,5 +149,34 @@ describe("AdminUserDrawer", () => {
     expect(drawer.classes()).toContain("h-dvh");
     expect(drawer.classes()).toContain("w-full");
     expect(drawer.classes()).toContain("sm:max-w-xl");
+  });
+
+  it("shows a sanitized credential recovery timeline instead of raw upstream errors", () => {
+    const user = makeUser("diagnostic", "sync_failed");
+    user.recoveryDiagnostics = [
+      {
+        code: "remote_auth_rejected",
+        message: "远端拒绝原登录凭据，开始自动恢复",
+        deviceSuffix: "6001",
+        statusCode: 403,
+        at: "2026-07-13T13:24:32Z"
+      },
+      {
+        code: "mocele_autologin_missing_info",
+        message: "自动登录未返回必要的 info 凭据",
+        deviceSuffix: "6001",
+        at: "2026-07-13T13:24:35Z"
+      }
+    ];
+    const wrapper = mount(AdminUserDrawer, {
+      props: { user, currentUserId: "admin-1" },
+      global: { plugins: [createPinia()], stubs: dialogStubs }
+    });
+
+    expect(wrapper.text()).toContain("凭据恢复诊断");
+    expect(wrapper.text()).toContain("远端拒绝原登录凭据，开始自动恢复");
+    expect(wrapper.text()).toContain("设备尾号 6001");
+    expect(wrapper.text()).toContain("HTTP 403");
+    expect(wrapper.text()).not.toContain("Cookie=");
   });
 });

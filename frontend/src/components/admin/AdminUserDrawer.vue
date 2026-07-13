@@ -57,6 +57,10 @@ watch(() => props.user?.user.deviceLimit, (value) => {
 }, { immediate: true });
 
 const isSelf = computed(() => props.user?.user.id === props.currentUserId);
+const recoveryDiagnostics = computed(() => {
+  if (!props.user) return [];
+  return [...(props.user.recoveryDiagnostics ?? [])].sort((left, right) => right.at.localeCompare(left.at));
+});
 const issues = computed(() => {
   if (!props.user) return [];
   const result: string[] = [];
@@ -194,6 +198,28 @@ async function deleteUser() {
             <p v-else class="mt-3 flex items-center gap-2 text-sm text-primary">
               <CheckCircle2 class="size-4" />当前没有需要处理的问题
             </p>
+          </section>
+
+          <section class="admin-drawer-section">
+            <p class="section-kicker">诊断记录</p>
+            <div class="mt-2 flex items-center justify-between gap-3">
+              <h3 class="font-bold">凭据恢复诊断</h3>
+              <span class="text-xs text-muted-foreground">最近 {{ recoveryDiagnostics.length }} 条</span>
+            </div>
+            <div v-if="recoveryDiagnostics.length" class="mt-4 space-y-2" role="log" aria-label="凭据恢复诊断记录">
+              <article v-for="diagnostic in recoveryDiagnostics" :key="`${diagnostic.at}-${diagnostic.code}`" class="rounded-xl border border-border bg-muted/35 px-3 py-3">
+                <div class="flex items-start justify-between gap-3">
+                  <p class="text-sm font-medium leading-5">{{ diagnostic.message }}</p>
+                  <time class="shrink-0 text-xs text-muted-foreground">{{ formatDateTime(diagnostic.at) }}</time>
+                </div>
+                <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span class="font-mono">{{ diagnostic.code }}</span>
+                  <span v-if="diagnostic.deviceSuffix">设备尾号 {{ diagnostic.deviceSuffix }}</span>
+                  <span v-if="diagnostic.statusCode">HTTP {{ diagnostic.statusCode }}</span>
+                </div>
+              </article>
+            </div>
+            <p v-else class="mt-3 text-sm text-muted-foreground">暂无诊断记录。后续发生自动恢复时会在这里显示处理节点。</p>
           </section>
 
           <section class="admin-drawer-section">

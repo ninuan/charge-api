@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -37,10 +38,13 @@ type MoceleCookieClient interface {
 }
 
 const (
-	stateVersion       = 3
-	defaultDeviceLimit = 10
-	maxDevicesPerUser  = defaultDeviceLimit
+	stateVersion           = 3
+	defaultDeviceLimit     = 10
+	maxDevicesPerUser      = defaultDeviceLimit
+	maxRecoveryDiagnostics = 20
 )
+
+var recoveryStatusCodePattern = regexp.MustCompile(`(?:status=|returned\s+)([1-5][0-9]{2})`)
 
 type Manager struct {
 	mu          sync.RWMutex
@@ -57,13 +61,14 @@ type Manager struct {
 }
 
 type UserRuntime struct {
-	mu              sync.Mutex
-	store           *store.DashboardStore
-	client          *charger.Client
-	stats           model.TrafficStats
-	lastRemoteFetch time.Time
-	minInterval     time.Duration
-	yybBinding      *model.YYBBinding
+	mu                  sync.Mutex
+	store               *store.DashboardStore
+	client              *charger.Client
+	stats               model.TrafficStats
+	lastRemoteFetch     time.Time
+	minInterval         time.Duration
+	yybBinding          *model.YYBBinding
+	recoveryDiagnostics []model.RecoveryDiagnostic
 }
 
 func NewManager(
@@ -301,6 +306,7 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 			summary.HasCookie = summary.Credential.HasCredential
 			summary.SnapshotUpdatedAt = latestSnapshotDataTime(snapshot, user.CreatedAt)
 			summary.LastRefresh = snapshot.Refresh
+			summary.RecoveryDiagnostics = runtime.recoveryDiagnosticsSnapshot()
 		}
 		summaries = append(summaries, summary)
 	}
@@ -414,10 +420,10 @@ func credentialSummary(runtime *UserRuntime, deviceCount int) model.CredentialSu
 	switch {
 	case binding != nil && binding.Status == "expired":
 		result.State = model.CredentialExpired
-	case hasCookie:
-		result.State = model.CredentialHealthy
 	case binding != nil && binding.LastError != "":
 		result.State = model.CredentialSyncFailed
+	case hasCookie:
+		result.State = model.CredentialHealthy
 	case binding != nil && deviceCount == 0:
 		result.State = model.CredentialWaitingDevice
 	case binding != nil:
@@ -659,27 +665,35 @@ func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YY
 		return model.DashboardSnapshot{}, err
 	}
 	if binding == nil || binding.Ref == "" {
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("binding_missing", deviceID, 0))
 		return model.DashboardSnapshot{}, fmt.Errorf("yyb binding is required")
 	}
 	ctx := context.Background()
 	code, err := yybClient.GetCode(ctx, binding.Ref, moceleAppID)
 	if err != nil {
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_get_code_failed", deviceID, err))
 		if refreshErr := yybClient.RefreshAccount(ctx, binding.Ref); refreshErr != nil {
+			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_account_refresh_failed", deviceID, refreshErr))
 			err = fmt.Errorf("get code failed: %v; refresh failed: %w", err, refreshErr)
 			m.markYYBBindingExpired(userID, binding, err)
 			return model.DashboardSnapshot{}, err
 		}
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("yyb_account_refresh_succeeded", deviceID, 0))
 		code, err = yybClient.GetCode(ctx, binding.Ref, moceleAppID)
 		if err != nil {
+			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_get_code_retry_failed", deviceID, err))
 			m.markYYBBindingExpired(userID, binding, err)
 			return model.DashboardSnapshot{}, err
 		}
 	}
+	m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("yyb_get_code_succeeded", deviceID, 0))
 	cookieResult, err := moceleClient.ExchangeCode(ctx, deviceID, code)
 	if err != nil {
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError(moceleDiagnosticCode(err), deviceID, err))
 		m.markYYBBindingError(userID, binding, err)
 		return model.DashboardSnapshot{}, err
 	}
+	m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("mocele_autologin_succeeded", deviceID, 0))
 	now := time.Now().UTC()
 	binding.Status = "alive"
 	binding.LastError = ""
@@ -687,7 +701,13 @@ func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YY
 	if err := m.SetYYBBinding(userID, binding); err != nil {
 		return model.DashboardSnapshot{}, err
 	}
-	return m.UpdateCookie(userID, cookieResult.Cookie)
+	snapshot, err := m.UpdateCookie(userID, cookieResult.Cookie)
+	if err != nil {
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("new_cookie_validation_failed", deviceID, err))
+		m.markYYBBindingError(userID, binding, err)
+		return model.DashboardSnapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func (m *Manager) markYYBBindingExpired(userID string, binding *model.YYBBinding, cause error) {
@@ -747,6 +767,106 @@ func (m *Manager) FirstDeviceID(userID string) (string, bool, error) {
 		return "", false, nil
 	}
 	return ids[0], true, nil
+}
+
+func (m *Manager) RecoveryDiagnostics(userID string) ([]model.RecoveryDiagnostic, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return nil, err
+	}
+	return runtime.recoveryDiagnosticsSnapshot(), nil
+}
+
+func (m *Manager) recordRecoveryDiagnostic(userID string, diagnostic model.RecoveryDiagnostic) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return
+	}
+	// Callers may carry an upstream error. Normalize every displayable field here
+	// so a future call site cannot accidentally persist a cookie, code, ref, or
+	// raw response body.
+	diagnostic.Message = recoveryDiagnosticMessage(diagnostic.Code)
+	diagnostic.DeviceSuffix = deviceSuffix(diagnostic.DeviceSuffix)
+	if diagnostic.StatusCode < 100 || diagnostic.StatusCode > 599 {
+		diagnostic.StatusCode = 0
+	}
+	if diagnostic.At.IsZero() {
+		diagnostic.At = time.Now().UTC()
+	}
+	runtime.mu.Lock()
+	runtime.recoveryDiagnostics = append(runtime.recoveryDiagnostics, diagnostic)
+	if overflow := len(runtime.recoveryDiagnostics) - maxRecoveryDiagnostics; overflow > 0 {
+		runtime.recoveryDiagnostics = append([]model.RecoveryDiagnostic(nil), runtime.recoveryDiagnostics[overflow:]...)
+	}
+	runtime.mu.Unlock()
+	_ = m.Save()
+}
+
+func recoveryDiagnostic(code string, deviceID string, statusCode int) model.RecoveryDiagnostic {
+	return model.RecoveryDiagnostic{
+		Code: code, Message: recoveryDiagnosticMessage(code), DeviceSuffix: deviceSuffix(deviceID), StatusCode: statusCode,
+	}
+}
+
+func recoveryDiagnosticWithError(code string, deviceID string, err error) model.RecoveryDiagnostic {
+	return recoveryDiagnostic(code, deviceID, diagnosticStatusCode(err))
+}
+
+func recoveryDiagnosticMessage(code string) string {
+	messages := map[string]string{
+		"remote_auth_rejected":              "远端拒绝原登录凭据，开始自动恢复",
+		"recovery_unavailable":              "无法自动恢复：缺少已绑定的账号或设备",
+		"binding_missing":                   "无法同步凭据：尚未完成扫码登录绑定",
+		"yyb_get_code_failed":               "扫码服务未能生成临时登录凭据",
+		"yyb_account_refresh_failed":        "扫码服务刷新已绑定账号失败",
+		"yyb_account_refresh_succeeded":     "扫码服务已刷新已绑定账号",
+		"yyb_get_code_retry_failed":         "刷新账号后仍无法生成临时登录凭据",
+		"yyb_get_code_succeeded":            "扫码服务已生成临时登录凭据",
+		"mocele_autologin_missing_info":     "自动登录未返回必要的 info 凭据",
+		"mocele_autologin_missing_wxopenid": "自动登录未返回必要的 wxopenid 凭据",
+		"mocele_autologin_failed":           "自动登录服务请求失败",
+		"mocele_autologin_succeeded":        "自动登录服务已生成新凭据",
+		"new_cookie_validation_failed":      "新凭据校验设备接口失败",
+		"recovery_succeeded":                "登录凭据已自动恢复并校验成功",
+		"recovery_failed":                   "登录凭据自动恢复失败",
+	}
+	if message, ok := messages[code]; ok {
+		return message
+	}
+	return "登录凭据恢复过程发生未知错误"
+}
+
+func moceleDiagnosticCode(err error) string {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "missing info cookie"):
+		return "mocele_autologin_missing_info"
+	case strings.Contains(message, "missing wxopenid cookie"):
+		return "mocele_autologin_missing_wxopenid"
+	default:
+		return "mocele_autologin_failed"
+	}
+}
+
+func diagnosticStatusCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	match := recoveryStatusCodePattern.FindStringSubmatch(err.Error())
+	if len(match) != 2 {
+		return 0
+	}
+	var statusCode int
+	_, _ = fmt.Sscanf(match[1], "%d", &statusCode)
+	return statusCode
+}
+
+func deviceSuffix(deviceID string) string {
+	deviceID = strings.TrimSpace(deviceID)
+	if len(deviceID) <= 4 {
+		return deviceID
+	}
+	return deviceID[len(deviceID)-4:]
 }
 
 func (m *Manager) Snapshot(userID string) (model.DashboardSnapshot, error) {
@@ -925,7 +1045,9 @@ func (m *Manager) RefreshWithYYB(userID string, force bool, yybClient YYBCodeCli
 	if err == nil || !charger.IsAuthExpired(err) {
 		return snapshot, err
 	}
+	m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("remote_auth_rejected", "", err))
 	if yybClient == nil || moceleClient == nil {
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("recovery_unavailable", "", 0))
 		return model.DashboardSnapshot{}, err
 	}
 	return m.RecoverRefreshWithYYB(userID, yybClient, moceleClient)
@@ -937,12 +1059,15 @@ func (m *Manager) RecoverRefreshWithYYB(userID string, yybClient YYBCodeClient, 
 		if deviceErr != nil {
 			return model.DashboardSnapshot{}, deviceErr
 		}
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("recovery_unavailable", "", 0))
 		return model.DashboardSnapshot{}, fmt.Errorf("no device is available for automatic credential recovery")
 	}
 	snapshot, syncErr := m.SyncCookieFromYYB(userID, deviceID, yybClient, moceleClient)
 	if syncErr != nil {
+		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("recovery_failed", deviceID, syncErr))
 		return model.DashboardSnapshot{}, fmt.Errorf("自动更新登录凭据失败: %w", syncErr)
 	}
+	m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("recovery_succeeded", deviceID, 0))
 	return snapshot, nil
 }
 
@@ -1069,11 +1194,12 @@ func newUserRuntime(requests []parser.CaptureRequest, state persistence.UserStat
 	}
 
 	runtime := &UserRuntime{
-		store:       store,
-		client:      client,
-		stats:       state.Stats,
-		minInterval: minInterval,
-		yybBinding:  cloneYYBBinding(state.YYBBinding),
+		store:               store,
+		client:              client,
+		stats:               state.Stats,
+		minInterval:         minInterval,
+		yybBinding:          cloneYYBBinding(state.YYBBinding),
+		recoveryDiagnostics: cloneRecoveryDiagnostics(state.RecoveryDiagnostics),
 	}
 	if refresh.LastRemoteAt != nil {
 		runtime.lastRemoteFetch = *refresh.LastRemoteAt
@@ -1197,17 +1323,31 @@ func (r *UserRuntime) statsSnapshot() model.TrafficStats {
 	return r.stats
 }
 
+func (r *UserRuntime) recoveryDiagnosticsSnapshot() []model.RecoveryDiagnostic {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return cloneRecoveryDiagnostics(r.recoveryDiagnostics)
+}
+
+func cloneRecoveryDiagnostics(items []model.RecoveryDiagnostic) []model.RecoveryDiagnostic {
+	if len(items) == 0 {
+		return []model.RecoveryDiagnostic{}
+	}
+	return append([]model.RecoveryDiagnostic(nil), items...)
+}
+
 func (r *UserRuntime) state() persistence.UserState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.store.Snapshot()
 	return persistence.UserState{
-		Piles:      snapshot.Piles,
-		Refresh:    snapshot.Refresh,
-		DeviceIDs:  r.client.DeviceIDs(),
-		Cookie:     r.client.Cookie(),
-		Stats:      r.stats,
-		YYBBinding: cloneYYBBinding(r.yybBinding),
+		Piles:               snapshot.Piles,
+		Refresh:             snapshot.Refresh,
+		DeviceIDs:           r.client.DeviceIDs(),
+		Cookie:              r.client.Cookie(),
+		Stats:               r.stats,
+		YYBBinding:          cloneYYBBinding(r.yybBinding),
+		RecoveryDiagnostics: cloneRecoveryDiagnostics(r.recoveryDiagnostics),
 	}
 }
 
