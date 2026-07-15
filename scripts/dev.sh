@@ -103,7 +103,7 @@ echo "Cookie 密钥: $COOKIE_KEY_FILE"
 if [[ -f "$DEV_ENV_FILE" ]]; then
   echo "本地配置: $DEV_ENV_FILE"
 else
-  echo "本地配置: $DEV_ENV_FILE（未创建，可复制 examples/dev.env.example）"
+  echo "本地配置: ${DEV_ENV_FILE}（未创建，可复制 examples/dev.env.example）"
 fi
 if [[ -n "${YYB_BASE_URL:-}" ]]; then
   echo "YYB sidecar: ${YYB_BASE_URL}"
@@ -140,7 +140,7 @@ echo "Go 后端已就绪。"
 (
   cd "$ROOT_DIR/frontend"
   NEXT_PUBLIC_API_TARGET="http://127.0.0.1:$BACKEND_PORT" \
-  pnpm dev -- --hostname 127.0.0.1 --port "$FRONTEND_PORT"
+  pnpm exec next dev --hostname 127.0.0.1 --port "$FRONTEND_PORT"
 ) &
 FRONTEND_PID=$!
 
