@@ -12,7 +12,7 @@ LEGACY_STATE_FILE="${LOCAL_STATE_FILE:-$ROOT_DIR/.local/charge_state.json}"
 COOKIE_KEY_FILE="${LOCAL_COOKIE_KEY_FILE:-$ROOT_DIR/.local/cookie.key}"
 ADMIN_PASSWORD="${LOCAL_ADMIN_PASSWORD:-localadmin123}"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
-FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 BACKEND_PID=""
 FRONTEND_PID=""
 
@@ -63,7 +63,7 @@ cleanup() {
 }
 
 require_command go
-require_command npm
+require_command pnpm
 require_command curl
 check_port "$BACKEND_PORT"
 check_port "$FRONTEND_PORT"
@@ -83,8 +83,8 @@ else
 fi
 
 if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
-  echo "前端依赖尚未安装，正在执行 npm ci..."
-  (cd "$ROOT_DIR/frontend" && npm ci)
+  echo "前端依赖尚未安装，正在执行 pnpm install..."
+  (cd "$ROOT_DIR/frontend" && pnpm install --frozen-lockfile)
 fi
 
 trap cleanup EXIT
@@ -139,8 +139,8 @@ echo "Go 后端已就绪。"
 
 (
   cd "$ROOT_DIR/frontend"
-  VITE_API_TARGET="http://127.0.0.1:$BACKEND_PORT" \
-  npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --force
+  NEXT_PUBLIC_API_TARGET="http://127.0.0.1:$BACKEND_PORT" \
+  pnpm dev -- --hostname 127.0.0.1 --port "$FRONTEND_PORT"
 ) &
 FRONTEND_PID=$!
 

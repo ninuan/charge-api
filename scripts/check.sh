@@ -38,13 +38,13 @@ echo "4/6 Go 构建"
 echo "5/6 前端测试"
 (
   cd "$ROOT_DIR/frontend"
-  npm test
+  pnpm test
 )
 
 echo "6/6 前端类型检查与生产构建"
 (
   cd "$ROOT_DIR/frontend"
-  npm run build
+  pnpm run build:static
 )
 
 echo

@@ -152,8 +152,8 @@ set -Eeuo pipefail
 cd $remote_path_quoted
 bash scripts/check_frontend_sources.sh
 cd frontend
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build:static
 cd ../backend
 go build -o charge-server.new ./cmd/server
 mv charge-server.new charge-server

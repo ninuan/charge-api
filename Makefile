@@ -2,7 +2,7 @@
 
 setup:
 	cd backend && go mod download
-	cd frontend && npm ci
+	cd frontend && pnpm install --frozen-lockfile
 
 dev:
 	bash scripts/dev.sh

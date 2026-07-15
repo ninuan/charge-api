@@ -11,8 +11,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TMP_DIR/frontend/src/stores"
-cat >"$TMP_DIR/frontend/src/stores/auth.js" <<'JS'
+mkdir -p "$TMP_DIR/frontend/lib"
+cat >"$TMP_DIR/frontend/lib/auth.js" <<'JS'
 export const stale = true;
 JS
 
@@ -26,17 +26,14 @@ if [[ "$status" -eq 0 ]]; then
   exit 1
 fi
 
-if [[ "$output" != *"frontend/src/stores/auth.js"* ]]; then
+if [[ "$output" != *"frontend/lib/auth.js"* ]]; then
   echo "check_frontend_sources should print the offending file path"
   exit 1
 fi
 
-rm "$TMP_DIR/frontend/src/stores/auth.js"
-mkdir -p "$TMP_DIR/frontend/src/components"
-cat >"$TMP_DIR/frontend/src/components/App.vue" <<'VUE'
-<template><main /></template>
-VUE
-cat >"$TMP_DIR/frontend/src/stores/auth.ts" <<'TS'
+rm "$TMP_DIR/frontend/lib/auth.js"
+mkdir -p "$TMP_DIR/frontend/components"
+cat >"$TMP_DIR/frontend/components/app.tsx" <<'TS'
 export const fresh = true;
 TS
 

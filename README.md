@@ -3,7 +3,7 @@
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
 ![License](https://img.shields.io/badge/Usage-Personal%20Monitoring-lightgrey)
 
 一个用于查看充电桩使用情况的轻量看板。它把常看的充电桩和充电口集中到一个页面里，方便快速判断哪里空闲、哪里正在使用、哪里离线，不用每次都找到服务号、扫码、再进入对应页面查看。
@@ -31,7 +31,7 @@
 | Layer | Stack |
 | --- | --- |
 | Backend | Go, net/http |
-| Frontend | Vue 3, TypeScript, Vite, Pinia, shadcn-style components |
+| Frontend | Next.js, React, TypeScript, shadcn/ui, Tailwind CSS |
 | Storage | SQLite |
 | Data Source | Remote charger API request template |
 
@@ -60,10 +60,9 @@ backend/
   internal/store/          # 看板状态管理
 
 frontend/
-  src/
-    components/            # 看板组件
-    stores/                # Pinia 状态
-    types/                 # TypeScript 类型
+  app/                     # Next 路由与页面
+  components/              # shadcn/ui 与业务组件
+  lib/                     # API、状态与领域逻辑
 
 examples/capture-template/ # 脱敏请求模板
 ```
@@ -84,10 +83,10 @@ make setup
 make dev
 ```
 
-该命令会同时启动 Go 后端和 Vite 前端，并自动使用 Cloudflare Turnstile 官方测试密钥：
+该命令会同时启动 Go 后端和 Next 前端，并自动使用 Cloudflare Turnstile 官方测试密钥：
 
 ```text
-前端地址：http://127.0.0.1:5173
+前端地址：http://127.0.0.1:3000
 管理员账号：admin
 管理员密码：localadmin123
 本地数据库：.local/charge_state.db
@@ -210,7 +209,7 @@ SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@8.148.25.204 DEPLOY_ARGS=--dry-run
 
 ```bash
 git pull --ff-only origin main
-cd frontend && npm ci && npm run build
+cd frontend && pnpm install --frozen-lockfile && pnpm run build:static
 cd ../backend && go build -o charge-server ./cmd/server
 sudo systemctl restart charge-api
 curl http://127.0.0.1:8080/healthz
