@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -231,6 +232,103 @@ func TestWriteAddPileErrorReturnsFriendlyMessageWhenYYBBindingIsMissing(t *testi
 	}
 	if payload.Error != "请先完成扫码登录绑定，再添加充电桩" {
 		t.Fatalf("error = %q", payload.Error)
+	}
+}
+
+func TestWriteAddPileErrorRedactsUnexpectedError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeAddPileError(recorder, fmt.Errorf("dial internal-yyb:8443 token=secret"))
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if strings.Contains(recorder.Body.String(), "internal-yyb") || strings.Contains(recorder.Body.String(), "secret") {
+		t.Fatalf("response leaked an internal error: %s", recorder.Body.String())
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Error != "添加充电桩失败，请检查桩号后重试。" {
+		t.Fatalf("error = %q", payload.Error)
+	}
+}
+
+func TestWriteCodedErrorReturnsOnlyStablePublicDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeCodedError(recorder, http.StatusBadRequest, "PILE_NUMBER_INVALID", "桩号必须是 6-64 位数字")
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "PILE_NUMBER_INVALID" || payload.Error != "桩号必须是 6-64 位数字" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestPileValidationReturnsStablePublicCode(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	user, err := manager.CreateUser(model.UserCreateRequest{Username: "pile-code-user", Password: "password123", Role: model.RoleUser})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	session, err := sessions.Create(user.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/piles", strings.NewReader(`{"number":"not-a-number"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	recorder := httptest.NewRecorder()
+
+	server.handlePiles(recorder, request)
+
+	var payload struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if recorder.Code != http.StatusBadRequest || payload.Code != "PILE_NUMBER_INVALID" || payload.Error != "桩号必须是 6-64 位数字" {
+		t.Fatalf("unexpected response: status=%d payload=%#v", recorder.Code, payload)
+	}
+	diagnostics, err := manager.RecoveryDiagnostics(user.ID)
+	if err != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", err)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Operation != "add_pile" || diagnostics[0].Code != "pile_number_invalid" {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
+func TestAuthLockRecordsOneSanitizedSecurityDiagnostic(t *testing.T) {
+	server, manager, _ := newTestServer(t)
+	user, err := manager.CreateUser(model.UserCreateRequest{Username: "locked-user", Password: "password123", Role: model.RoleUser})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		server.writeAuthFailure(httptest.NewRecorder(), "203.0.113.11", user.Username, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "authenticate user", "用户名或密码错误", errors.New("password mismatch"))
+	}
+
+	diagnostics, err := manager.RecoveryDiagnostics(user.ID)
+	if err != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", err)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Operation != "auth_protection" || diagnostics[0].Code != "auth_rate_limited" {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 	}
 }
 

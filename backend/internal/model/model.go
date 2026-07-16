@@ -263,10 +263,11 @@ type CredentialSummary struct {
 	LastCheckedAt *time.Time      `json:"lastCheckedAt,omitempty"`
 }
 
-// RecoveryDiagnostic is a deliberately non-sensitive trace of a credential
-// recovery attempt. It must never contain cookies, login codes, OpenIDs, refs,
-// or raw upstream response bodies.
+// RecoveryDiagnostic is a deliberately non-sensitive user-operation trace. It
+// must never contain cookies, login codes, OpenIDs, refs, or raw upstream
+// response bodies.
 type RecoveryDiagnostic struct {
+	Operation    string    `json:"operation"`
 	Code         string    `json:"code"`
 	Message      string    `json:"message"`
 	DeviceSuffix string    `json:"deviceSuffix,omitempty"`

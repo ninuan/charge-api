@@ -60,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, captchaToken }),
       },
-      "login failed"
+      "登录失败，请检查用户名、密码和验证后重试。"
     )
     setCurrentUser(user)
     setReady(true)
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, captchaToken, captchaId, captchaAnswer, inviteCode }),
       },
-      "register failed"
+      "注册失败，请检查填写信息和验证后重试。"
     )
     setCurrentUser(user)
     setReady(true)

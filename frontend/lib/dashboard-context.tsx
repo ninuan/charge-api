@@ -2,6 +2,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useRef, useState } from "react"
 
+import { responseErrorMessage } from "@/lib/http"
 import type { DashboardSnapshot, Pile } from "@/lib/types"
 
 const initialSnapshot: DashboardSnapshot = {
@@ -46,12 +47,7 @@ type DashboardContextValue = {
 const DashboardContext = createContext<DashboardContextValue | null>(null)
 
 async function throwResponseError(response: Response, fallback: string): Promise<never> {
-  if (response.status === 401) {
-    throw new Error("登录已失效，请重新登录")
-  }
-
-  const body = (await response.json().catch(() => ({ error: fallback }))) as { error?: string }
-  throw new Error(body.error ?? fallback)
+  throw new Error(await responseErrorMessage(response, fallback))
 }
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
@@ -68,7 +64,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     try {
       const response = await fetch("/api/piles", { credentials: "include" })
-      if (!response.ok) await throwResponseError(response, "Load failed")
+      if (!response.ok) await throwResponseError(response, "暂时无法加载充电桩信息，请稍后重试。")
       setSnapshot((await response.json()) as DashboardSnapshot)
     } finally {
       setLoading(false)
@@ -82,7 +78,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
-    if (!response.ok) await throwResponseError(response, "add pile failed")
+    if (!response.ok) await throwResponseError(response, "添加充电桩失败，请检查桩号后重试。")
     const pile = (await response.json()) as Pile
     await fetchSnapshot()
     return pile
@@ -90,7 +86,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const deletePile = useCallback(async (id: string) => {
     const response = await fetch(`/api/piles/${id}`, { method: "DELETE", credentials: "include" })
-    if (!response.ok && response.status !== 204) await throwResponseError(response, "delete pile failed")
+    if (!response.ok && response.status !== 204) await throwResponseError(response, "删除充电桩失败，请稍后重试。")
     await fetchSnapshot()
   }, [fetchSnapshot])
 
@@ -101,13 +97,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
-    if (!response.ok) await throwResponseError(response, "更新充电桩失败")
+    if (!response.ok) await throwResponseError(response, "更新充电桩失败，请稍后重试。")
     await fetchSnapshot()
   }, [fetchSnapshot])
 
   const refreshFromCapture = useCallback(async () => {
     const response = await fetch("/api/refresh", { method: "POST", credentials: "include" })
-    if (!response.ok) await throwResponseError(response, "refresh failed")
+    if (!response.ok) await throwResponseError(response, "暂时无法刷新设备状态，请稍后重试。")
     setSnapshot((await response.json()) as DashboardSnapshot)
   }, [])
 
@@ -118,7 +114,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cookie }),
     })
-    if (!response.ok) await throwResponseError(response, "cookie update failed")
+    if (!response.ok) await throwResponseError(response, "凭据更新失败，请检查内容后重试。")
     setSnapshot((await response.json()) as DashboardSnapshot)
   }, [])
 
@@ -133,6 +129,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setStreamState("connecting")
     const stream = new EventSource("/api/stream", { withCredentials: true })
     streamRef.current = stream
+    stream.onopen = () => setStreamState("connected")
     stream.addEventListener("snapshot", (event) => {
       try {
         setSnapshot(JSON.parse((event as MessageEvent<string>).data) as DashboardSnapshot)

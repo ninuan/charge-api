@@ -485,6 +485,21 @@ func TestAdminStatsClearsAuthExceptionAfterLaterRemoteSuccess(t *testing.T) {
 	}
 }
 
+func TestAdminStatsIncludesLatestActionableOperationDiagnostic(t *testing.T) {
+	manager := testYYBManager(t)
+
+	manager.RecordOperationDiagnostic("user-1", "update_cookie", "cookie_update_failed", "2601201412385560001", 403)
+
+	stats := manager.AdminStats()
+	issue, ok := findException(stats.Exceptions, "user-1", "operation")
+	if !ok {
+		t.Fatalf("missing operation diagnostic: %#v", stats.Exceptions)
+	}
+	if issue.Message != "更新登录凭据失败，请检查凭据后重试" || issue.DeviceID != "0001" {
+		t.Fatalf("unexpected operation diagnostic: %#v", issue)
+	}
+}
+
 func TestAdminCredentialStatesAndIssues(t *testing.T) {
 	const (
 		secretCookie = "sid=valid-secret"
@@ -1092,6 +1107,33 @@ func TestRecoveryDiagnosticsKeepNewestTwentyAndPersist(t *testing.T) {
 	assertDiagnosticsDoNotLeak(t, diagnostics, "secret-cookie", "2601201412385560001")
 	if diagnostics[0].DeviceSuffix != "0001" || diagnostics[0].Message != "登录凭据自动恢复失败" {
 		t.Fatalf("diagnostic was not sanitized: %#v", diagnostics[0])
+	}
+}
+
+func TestRecordOperationDiagnosticSanitizesAndPersists(t *testing.T) {
+	manager := testYYBManager(t)
+
+	manager.RecordOperationDiagnostic("user-1", "add_pile", "add_pile_failed", "2601201412385560001", 502)
+
+	diagnostics, err := manager.RecoveryDiagnostics("user-1")
+	if err != nil {
+		t.Fatalf("RecoveryDiagnostics: %v", err)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Operation != "add_pile" || got.Code != "add_pile_failed" || got.Message != "添加充电桩时未能完成远端校验" || got.DeviceSuffix != "0001" || got.StatusCode != 502 {
+		t.Fatalf("unexpected diagnostic: %#v", got)
+	}
+	assertDiagnosticsDoNotLeak(t, diagnostics, "2601201412385560001")
+
+	state, ok, err := manager.repository.Load()
+	if err != nil || !ok {
+		t.Fatalf("Load = %v, %v", ok, err)
+	}
+	if persisted := state.UserStates["user-1"].RecoveryDiagnostics; len(persisted) != 1 || persisted[0].Operation != "add_pile" {
+		t.Fatalf("persisted diagnostics = %#v", persisted)
 	}
 }
 

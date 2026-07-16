@@ -24,9 +24,6 @@ export function AddPileDialog() {
     event.preventDefault()
     const id = form.id.trim()
     const number = form.number.trim()
-    if (!id && !number) return toast.error("请输入桩号")
-    if (number && !/^\d{6,64}$/.test(number)) return toast.error("桩号需要为 6–64 位数字")
-    if (id && !/^\d{6,64}$/.test(id)) return toast.error("设备长 ID 需要为 6–64 位数字")
     setSubmitting(true)
     try {
       await addPile({ id, name: form.name.trim() || `充电桩 ${number || id.slice(-6)}`, number, openNum: Number(form.openNum), status: form.status.trim() || "在线", address: form.address.trim() })

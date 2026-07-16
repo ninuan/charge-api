@@ -23,4 +23,39 @@ describe("DashboardProvider", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/piles", { credentials: "include" })
     expect(result.current.snapshot.statistics.pileCount).toBe(2)
   })
+
+  it("uses the add-pile fallback instead of an internal server error", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "dial internal-yyb:8443 with token=secret" }), { status: 502 })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { result } = renderHook(() => useDashboard(), { wrapper: DashboardProvider })
+
+    await expect(result.current.addPile({
+      id: "61034278",
+      name: "充电桩 61034278",
+      number: "61034278",
+      openNum: 10,
+      status: "在线",
+      address: "松园 3 号楼",
+    })).rejects.toThrow("添加充电桩失败，请检查桩号后重试。")
+  })
+
+  it("marks the stream connected as soon as EventSource opens", () => {
+    class MockEventSource {
+      static latest: MockEventSource | null = null
+      onerror: ((event: Event) => void) | null = null
+      onopen: ((event: Event) => void) | null = null
+      constructor() { MockEventSource.latest = this }
+      addEventListener = vi.fn()
+      close = vi.fn()
+    }
+    vi.stubGlobal("EventSource", MockEventSource)
+    const { result } = renderHook(() => useDashboard(), { wrapper: DashboardProvider })
+
+    act(() => result.current.connectStream())
+    act(() => MockEventSource.latest?.onopen?.(new Event("open")))
+
+    expect(result.current.streamState).toBe("connected")
+  })
 })

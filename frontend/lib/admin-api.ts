@@ -1,8 +1,9 @@
 import type { AdminHealth, AdminStats, AdminUserListQuery, AdminUserPage, CurrentUser, InviteCode, RegistrationSettings, UserRole } from "@/lib/types"
+import { responseErrorMessage } from "@/lib/http"
 
 async function adminRequest<T>(path: string, init: RequestInit = {}, fallback: string): Promise<T> {
   const response = await fetch(path, { credentials: "include", ...init })
-  if (!response.ok && response.status !== 204) { const body = (await response.json().catch(() => ({ error: fallback }))) as { error?: string }; throw new Error(body.error ?? fallback) }
+  if (!response.ok && response.status !== 204) throw new Error(await responseErrorMessage(response, fallback))
   return response.status === 204 ? undefined as T : response.json() as Promise<T>
 }
 

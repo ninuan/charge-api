@@ -38,10 +38,17 @@ type MoceleCookieClient interface {
 }
 
 const (
-	stateVersion           = 3
-	defaultDeviceLimit     = 10
-	maxDevicesPerUser      = defaultDeviceLimit
-	maxRecoveryDiagnostics = 20
+	stateVersion                = 3
+	defaultDeviceLimit          = 10
+	maxDevicesPerUser           = defaultDeviceLimit
+	maxRecoveryDiagnostics      = 20
+	diagnosticOperationRecovery = "credential_recovery"
+	diagnosticOperationAddPile  = "add_pile"
+	diagnosticOperationRefresh  = "refresh"
+	diagnosticOperationCookie   = "update_cookie"
+	diagnosticOperationScan     = "scan_login"
+	diagnosticOperationSync     = "sync_cookie"
+	diagnosticOperationAuth     = "auth_protection"
 )
 
 var recoveryStatusCodePattern = regexp.MustCompile(`(?:status=|returned\s+)([1-5][0-9]{2})`)
@@ -252,6 +259,20 @@ func (m *Manager) User(id string) (model.CurrentUser, bool) {
 		return model.CurrentUser{}, false
 	}
 	return publicUser(user), true
+}
+
+// UserIDByUsername returns an existing account identifier for internal
+// security-event attribution. It intentionally exposes no account details.
+func (m *Manager) UserIDByUsername(username string) (string, bool) {
+	username = strings.TrimSpace(username)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, user := range m.users {
+		if user.Username == username {
+			return user.ID, true
+		}
+	}
+	return "", false
 }
 
 func (m *Manager) AcknowledgeUsageGuide(userID string) (model.CurrentUser, error) {
@@ -777,7 +798,20 @@ func (m *Manager) RecoveryDiagnostics(userID string) ([]model.RecoveryDiagnostic
 	return runtime.recoveryDiagnosticsSnapshot(), nil
 }
 
+// RecordOperationDiagnostic persists a fixed, non-sensitive operation result
+// for administrator troubleshooting. It intentionally accepts no error value.
+func (m *Manager) RecordOperationDiagnostic(userID, operation, code, deviceID string, statusCode int) {
+	m.recordDiagnostic(userID, model.RecoveryDiagnostic{
+		Operation: operation, Code: code, DeviceSuffix: deviceID, StatusCode: statusCode,
+	})
+}
+
 func (m *Manager) recordRecoveryDiagnostic(userID string, diagnostic model.RecoveryDiagnostic) {
+	diagnostic.Operation = diagnosticOperationRecovery
+	m.recordDiagnostic(userID, diagnostic)
+}
+
+func (m *Manager) recordDiagnostic(userID string, diagnostic model.RecoveryDiagnostic) {
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
 		return
@@ -785,6 +819,7 @@ func (m *Manager) recordRecoveryDiagnostic(userID string, diagnostic model.Recov
 	// Callers may carry an upstream error. Normalize every displayable field here
 	// so a future call site cannot accidentally persist a cookie, code, ref, or
 	// raw response body.
+	diagnostic.Operation = normalizeDiagnosticOperation(diagnostic.Operation)
 	diagnostic.Message = recoveryDiagnosticMessage(diagnostic.Code)
 	diagnostic.DeviceSuffix = deviceSuffix(diagnostic.DeviceSuffix)
 	if diagnostic.StatusCode < 100 || diagnostic.StatusCode > 599 {
@@ -804,16 +839,37 @@ func (m *Manager) recordRecoveryDiagnostic(userID string, diagnostic model.Recov
 
 func recoveryDiagnostic(code string, deviceID string, statusCode int) model.RecoveryDiagnostic {
 	return model.RecoveryDiagnostic{
-		Code: code, Message: recoveryDiagnosticMessage(code), DeviceSuffix: deviceSuffix(deviceID), StatusCode: statusCode,
+		Operation: diagnosticOperationRecovery, Code: code, Message: recoveryDiagnosticMessage(code), DeviceSuffix: deviceSuffix(deviceID), StatusCode: statusCode,
 	}
 }
 
 func recoveryDiagnosticWithError(code string, deviceID string, err error) model.RecoveryDiagnostic {
-	return recoveryDiagnostic(code, deviceID, diagnosticStatusCode(err))
+	return recoveryDiagnostic(code, deviceID, DiagnosticStatusCode(err))
 }
 
 func recoveryDiagnosticMessage(code string) string {
 	messages := map[string]string{
+		"pile_identifier_required":          "未填写桩号或设备长 ID",
+		"pile_id_invalid":                   "设备长 ID 格式不正确",
+		"pile_number_invalid":               "桩号格式不正确",
+		"pile_fields_invalid":               "充电桩字段长度超出限制",
+		"pile_port_count_invalid":           "充电口数量不在允许范围内",
+		"add_pile_failed":                   "添加充电桩时未能完成远端校验",
+		"pile_update_failed":                "更新充电桩信息失败",
+		"pile_delete_failed":                "删除充电桩失败",
+		"refresh_failed":                    "刷新设备状态失败，请稍后重试",
+		"cookie_required":                   "未填写登录凭据",
+		"cookie_too_large":                  "登录凭据内容过长",
+		"cookie_update_failed":              "更新登录凭据失败，请检查凭据后重试",
+		"qr_create_failed":                  "扫码登录二维码生成失败",
+		"qr_poll_failed":                    "扫码登录状态获取失败",
+		"qr_confirm_failed":                 "扫码登录确认失败",
+		"qr_session_invalid":                "扫码登录会话已失效",
+		"scan_service_unavailable":          "扫码登录服务暂不可用",
+		"binding_save_failed":               "扫码登录绑定保存失败",
+		"credential_sync_failed":            "登录凭据同步失败",
+		"device_id_invalid":                 "设备长 ID 格式不正确",
+		"auth_rate_limited":                 "登录防护触发临时限流",
 		"remote_auth_rejected":              "远端拒绝原登录凭据，开始自动恢复",
 		"recovery_unavailable":              "无法自动恢复：缺少已绑定的账号或设备",
 		"binding_missing":                   "无法同步凭据：尚未完成扫码登录绑定",
@@ -833,7 +889,16 @@ func recoveryDiagnosticMessage(code string) string {
 	if message, ok := messages[code]; ok {
 		return message
 	}
-	return "登录凭据恢复过程发生未知错误"
+	return "用户操作未能完成，请稍后重试"
+}
+
+func normalizeDiagnosticOperation(operation string) string {
+	switch operation {
+	case diagnosticOperationAddPile, diagnosticOperationRefresh, diagnosticOperationCookie, diagnosticOperationScan, diagnosticOperationSync, diagnosticOperationAuth:
+		return operation
+	default:
+		return diagnosticOperationRecovery
+	}
 }
 
 func moceleDiagnosticCode(err error) string {
@@ -848,7 +913,9 @@ func moceleDiagnosticCode(err error) string {
 	}
 }
 
-func diagnosticStatusCode(err error) int {
+// DiagnosticStatusCode extracts only a valid HTTP status from a diagnostic
+// error. Callers must never persist or expose the original error text.
+func DiagnosticStatusCode(err error) int {
 	if err == nil {
 		return 0
 	}
@@ -1533,6 +1600,21 @@ func (m *Manager) AdminStats() model.AdminStats {
 		if summary.Dashboard.OfflinePorts > 0 {
 			exceptions = append(exceptions, model.SystemException{ID: "offline-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "offline", Level: "warning", Message: fmt.Sprintf("%d 个充电口处于离线状态", summary.Dashboard.OfflinePorts), Time: summary.SnapshotUpdatedAt})
 		}
+		for _, diagnostic := range summary.RecoveryDiagnostics {
+			if !isActionableDiagnostic(diagnostic) {
+				continue
+			}
+			exceptions = append(exceptions, model.SystemException{
+				ID:       "diagnostic-" + summary.User.ID + "-" + diagnostic.Code + "-" + diagnostic.At.Format(time.RFC3339Nano),
+				UserID:   summary.User.ID,
+				Username: summary.User.Username,
+				DeviceID: diagnostic.DeviceSuffix,
+				Type:     "operation",
+				Level:    "warning",
+				Message:  diagnostic.Message,
+				Time:     diagnostic.At,
+			})
+		}
 	}
 	sort.SliceStable(exceptions, func(i, j int) bool {
 		if exceptions[i].Level != exceptions[j].Level {
@@ -1551,6 +1633,20 @@ func (m *Manager) AdminStats() model.AdminStats {
 	}
 	overview := adminOverview(users, hourly, len(exceptions))
 	return model.AdminStats{Overview: overview, Users: users, Hourly: hourly, Daily: daily, Exceptions: exceptions}
+}
+
+func isActionableDiagnostic(diagnostic model.RecoveryDiagnostic) bool {
+	switch diagnostic.Code {
+	case "pile_identifier_required", "pile_id_invalid", "pile_number_invalid", "pile_fields_invalid", "pile_port_count_invalid",
+		"add_pile_failed", "pile_update_failed", "pile_delete_failed", "refresh_failed", "cookie_required", "cookie_too_large",
+		"cookie_update_failed", "qr_create_failed", "qr_poll_failed", "qr_confirm_failed", "qr_session_invalid",
+		"scan_service_unavailable", "binding_save_failed", "credential_sync_failed", "device_id_invalid", "auth_rate_limited",
+		"recovery_unavailable", "binding_missing", "yyb_get_code_failed", "yyb_account_refresh_failed", "yyb_get_code_retry_failed",
+		"mocele_autologin_missing_info", "mocele_autologin_missing_wxopenid", "mocele_autologin_failed", "new_cookie_validation_failed", "recovery_failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func credentialIssueLevel(state model.CredentialState) string {

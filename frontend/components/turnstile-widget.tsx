@@ -48,6 +48,8 @@ function loadTurnstileScript() {
 export const TurnstileWidget = forwardRef<TurnstileWidgetHandle, TurnstileWidgetProps>(function TurnstileWidget({ siteKey, action, onVerified, onExpired, onError }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef("")
+  const callbacksRef = useRef({ onVerified, onExpired, onError })
+  callbacksRef.current = { onVerified, onExpired, onError }
 
   useImperativeHandle(ref, () => ({
     reset: () => {
@@ -69,9 +71,9 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetHandle, TurnstileWidget
           action,
           theme: "light",
           size: "flexible",
-          callback: onVerified,
-          "expired-callback": onExpired,
-          "error-callback": onError,
+          callback: (token: string) => callbacksRef.current.onVerified(token),
+          "expired-callback": () => callbacksRef.current.onExpired(),
+          "error-callback": () => callbacksRef.current.onError(),
         })
       } catch {
         if (active) onError()
@@ -84,7 +86,7 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetHandle, TurnstileWidget
       if (widgetIdRef.current && window.turnstile) window.turnstile.remove(widgetIdRef.current)
       widgetIdRef.current = ""
     }
-  }, [action, onError, onExpired, onVerified, siteKey])
+  }, [action, siteKey])
 
   return <div ref={containerRef} className="grid min-h-16 w-full place-items-center" aria-label="人机验证" />
 })

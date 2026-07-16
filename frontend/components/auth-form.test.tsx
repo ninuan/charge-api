@@ -65,4 +65,35 @@ describe("AuthForm", () => {
       body: JSON.stringify({ username: "alice", password: "password123", captchaToken: "", captchaId: "captcha-1", captchaAnswer: "1234", inviteCode: "" }),
     }))
   })
+
+  it("does not expose an internal error when loading the registration image challenge fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ turnstileEnabled: false, registerCaptchaEnabled: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "dial internal-captcha:8443 with token=secret" }), { status: 502 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <AuthProvider>
+        <AuthForm mode="register" onSuccess={vi.fn()} />
+      </AuthProvider>
+    )
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("验证码加载失败，请稍后重试。")
+    expect(screen.queryByText("dial internal-captcha:8443 with token=secret")).not.toBeInTheDocument()
+  })
+
+  it("hides the optional invite field while public registration is open", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ turnstileEnabled: false, registrationOpen: true, inviteRequired: true }), { status: 200 })
+    ))
+
+    render(
+      <AuthProvider>
+        <AuthForm mode="register" onSuccess={vi.fn()} />
+      </AuthProvider>
+    )
+
+    await screen.findByLabelText("用户名")
+    expect(screen.queryByLabelText("邀请码（选填）")).not.toBeInTheDocument()
+  })
 })

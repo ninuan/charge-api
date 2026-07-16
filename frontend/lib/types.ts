@@ -95,6 +95,7 @@ export interface CredentialSummary {
 }
 
 export interface RecoveryDiagnostic {
+  operation: "credential_recovery" | "add_pile" | "refresh" | "update_cookie" | "scan_login" | "sync_cookie" | "auth_protection"
   code: string
   message: string
   deviceSuffix?: string

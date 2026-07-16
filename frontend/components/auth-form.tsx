@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
+import { responseErrorMessage } from "@/lib/http"
 import { resolveHomeRoute } from "@/lib/routing"
 
 type AuthMode = "login" | "register"
@@ -47,8 +48,7 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess: (path
     try {
       const response = await fetch("/api/auth/register-captcha", { credentials: "include", cache: "no-store" })
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({ error: "验证码加载失败" }))) as { error?: string }
-        throw new Error(body.error ?? "验证码加载失败")
+        throw new Error(await responseErrorMessage(response, "验证码加载失败，请稍后重试。"))
       }
       const challenge = (await response.json()) as { id: string; image: string }
       setCaptchaId(challenge.id)
@@ -121,8 +121,8 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess: (path
           <Alert><ShieldCheckIcon /><AlertTitle>自助注册暂未开放</AlertTitle><AlertDescription>请联系管理员为你创建账户。</AlertDescription></Alert>
         )}
         <Field><FieldLabel htmlFor="username">用户名</FieldLabel><Input id="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" /></Field>
-        {mode === "register" && config?.inviteRequired && (
-          <Field><FieldLabel htmlFor="invite-code">邀请码{!config.registrationOpen ? "（必填）" : "（选填）"}</FieldLabel><Input id="invite-code" autoComplete="off" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="请输入管理员提供的邀请码" /></Field>
+        {mode === "register" && config?.inviteRequired && !config.registrationOpen && (
+          <Field><FieldLabel htmlFor="invite-code">邀请码（必填）</FieldLabel><Input id="invite-code" autoComplete="off" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="请输入邀请码" /></Field>
         )}
         <Field>
           <FieldLabel htmlFor="password">密码</FieldLabel>
