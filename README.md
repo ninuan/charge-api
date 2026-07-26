@@ -202,14 +202,14 @@ make check
 服务器初次配置完成后，推荐通过 GitHub 同步代码、远端构建并重启服务：
 
 ```bash
-make deploy-git DEPLOY_HOST=root@8.148.25.204
+make deploy-git DEPLOY_HOST=root@<服务器IP>
 ```
 
 `deploy-git` 会先确认本地没有未提交改动，然后执行：
 
 ```bash
 git push origin main
-ssh root@8.148.25.204
+ssh root@<服务器IP>
 cd /opt/charge-api
 git pull --ff-only origin main
 ```
@@ -220,7 +220,7 @@ git pull --ff-only origin main
 
 ```bash
 make deploy-git \
-  DEPLOY_HOST=root@8.148.25.204 \
+  DEPLOY_HOST=root@<服务器IP> \
   DEPLOY_PATH=/opt/charge-api \
   DEPLOY_BRANCH=main \
   SERVICE_NAME=charge-api
@@ -229,13 +229,13 @@ make deploy-git \
 如果只是改了文案或已经本地验证过，可以临时跳过本地检查：
 
 ```bash
-SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@8.148.25.204
+SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@<服务器IP>
 ```
 
 第一次使用前可以先预演，不会推送 GitHub，也不会连接服务器：
 
 ```bash
-SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@8.148.25.204 DEPLOY_ARGS=--dry-run
+SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@<服务器IP> DEPLOY_ARGS=--dry-run
 ```
 
 服务器端会执行：
@@ -253,7 +253,7 @@ curl http://127.0.0.1:8080/healthz
 如果 GitHub 临时不可用，也可以使用备用的本地直传方式：
 
 ```bash
-make deploy DEPLOY_HOST=root@8.148.25.204
+make deploy DEPLOY_HOST=root@<服务器IP>
 ```
 
 备用脚本通过 `rsync` 同步本地文件，会排除本地数据库、Cookie 密钥、`.local/`、`.env`、`node_modules/`、`frontend/dist/` 等运行文件。
