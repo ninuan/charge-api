@@ -16,29 +16,83 @@ const publicErrorMessages: Record<string, string> = {
   DEVICE_ID_INVALID: "设备 ID 格式无效",
 }
 
-export async function responseErrorMessage(response: Response, fallback: string) {
-  const body = (await response.json().catch(() => null)) as { code?: string } | null
-  if (body?.code && publicErrorMessages[body.code]) return publicErrorMessages[body.code]
+export async function responseErrorMessage(
+  response: Response,
+  fallback: string
+) {
+  const body = (await response.json().catch(() => null)) as {
+    code?: string
+  } | null
+  if (body?.code && publicErrorMessages[body.code])
+    return publicErrorMessages[body.code]
 
   if (response.status === 401) return "登录已失效，请重新登录"
 
   return fallback
 }
 
-export async function requestJSON<T>(path: string, init: RequestInit = {}, fallback: string): Promise<T> {
-  const response = await fetch(path, { credentials: "include", ...init })
-
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, fallback))
+export class RequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message)
+    this.name = "RequestError"
   }
+}
+
+const defaultTimeoutMs = 30_000
+
+export type RequestOptions = RequestInit & {
+  // 需要串联远端设备请求的长操作（刷新、添加桩等）可放宽超时。
+  timeoutMs?: number
+}
+
+export async function request<T>(
+  path: string,
+  init: RequestOptions = {},
+  fallback: string
+): Promise<T> {
+  const { timeoutMs = defaultTimeoutMs, ...rest } = init
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const external = rest.signal
+  if (external?.aborted) controller.abort()
+  else external?.addEventListener("abort", () => controller.abort(), { once: true })
+
+  let response: Response
+  try {
+    response = await fetch(path, {
+      credentials: "include",
+      ...rest,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (controller.signal.aborted && !external?.aborted)
+      throw new RequestError("请求超时，请检查网络后重试", 0)
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+
+  if (!response.ok && response.status !== 204) {
+    throw new RequestError(
+      await responseErrorMessage(response, fallback),
+      response.status
+    )
+  }
+
+  if (response.status === 204) return undefined as T
 
   return response.json() as Promise<T>
 }
 
-export async function requestEmpty(path: string, init: RequestInit = {}, fallback: string) {
-  const response = await fetch(path, { credentials: "include", ...init })
+export const requestJSON = request
 
-  if (!response.ok && response.status !== 204) {
-    throw new Error(await responseErrorMessage(response, fallback))
-  }
+export async function requestEmpty(
+  path: string,
+  init: RequestOptions = {},
+  fallback: string
+) {
+  await request<void>(path, init, fallback)
 }

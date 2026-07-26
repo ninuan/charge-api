@@ -50,7 +50,9 @@ func devForceAuthExpiredEnabled(lookup envLookup) bool {
 
 func main() {
 	var (
-		listenAddr    = flag.String("listen", ":8080", "http listen address")
+		// 默认只监听回环：后端不带 TLS，手工启动时不该裸露到公网；
+		// 需要对外时用 -listen 显式指定（部署文档即如此）。
+		listenAddr    = flag.String("listen", "127.0.0.1:8080", "http listen address")
 		captureDir    = flag.String("capture", "", "optional capture directory; built-in request template is used when empty")
 		databasePath  = flag.String("database", "../charge_state.db", "SQLite database path")
 		legacyState   = flag.String("state", "../charge_state.json", "legacy JSON state file imported when the database is empty")
@@ -132,8 +134,13 @@ func main() {
 	if manager.MigratedLegacyJSON() {
 		log.Printf("legacy JSON state imported from %s", absLegacyState)
 	}
-	if manager.InitialAdminPassword() != "" {
-		log.Printf("generated initial admin password for admin: %s", manager.InitialAdminPassword())
+	if initialPassword := manager.InitialAdminPassword(); initialPassword != "" {
+		// 日志会进 journald 并常被采集外送，初始密码只落一次性的 0600 文件。
+		passwordPath := filepath.Join(filepath.Dir(absDatabasePath), "initial-admin-password.txt")
+		if err := os.WriteFile(passwordPath, []byte(initialPassword+"\n"), 0o600); err != nil {
+			log.Fatalf("write initial admin password to %s: %v", passwordPath, err)
+		}
+		log.Printf("generated initial admin password for admin, saved to %s (delete it after first login)", passwordPath)
 	}
 
 	sessions := auth.NewPersistentSessionManager(7*24*time.Hour, repository)
@@ -151,7 +158,8 @@ func main() {
 	mux.Handle("/", http.FileServer(http.Dir("../frontend/dist")))
 	allowedOrigins := splitCommaSeparated(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	rateLimiter := api.NewIPRateLimiter(300, time.Minute)
-	handler := api.WithCORS(rateLimiter.Middleware(mux), allowedOrigins)
+	content := api.WithCacheHeaders(api.WithCompression(mux))
+	handler := api.WithSecurityHeaders(api.WithCORS(rateLimiter.Middleware(content), allowedOrigins))
 	httpServer := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           handler,

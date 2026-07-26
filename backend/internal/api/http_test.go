@@ -393,6 +393,39 @@ func TestAdminInviteIsGeneratedByServer(t *testing.T) {
 	}
 }
 
+func TestAdminInvitesArePaginated(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	session, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	for _, code := range []string{"CHG-PAGE-ONE", "CHG-PAGE-TWO", "CHG-PAGE-THREE"} {
+		if _, err := manager.CreateInvite(code, nil); err != nil {
+			t.Fatalf("CreateInvite(%q): %v", code, err)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/invites?page=2&pageSize=2", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	recorder := httptest.NewRecorder()
+	server.handleAdminInvites(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list invites returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var page model.InviteCodePage
+	if err := json.NewDecoder(recorder.Body).Decode(&page); err != nil {
+		t.Fatalf("decode invite page: %v", err)
+	}
+	if page.Page != 2 || page.PageSize != 2 || page.Total != 3 || page.TotalPages != 2 {
+		t.Fatalf("unexpected page metadata: %+v", page)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("page item count = %d, want 1", len(page.Items))
+	}
+}
+
 func TestUserCanAcknowledgeUsageGuide(t *testing.T) {
 	server, manager, sessions := newTestServer(t)
 	user, err := manager.CreateUser(model.UserCreateRequest{
@@ -806,13 +839,7 @@ func TestYYBBindingOwnershipUsesCurrentSessionUser(t *testing.T) {
 	mux := http.NewServeMux()
 	server.Register(mux)
 
-	postBinding(t, mux, sessionA.Token, map[string]any{
-		"openid":   "yyb-openid-a-1234",
-		"ref":      "ref-a",
-		"nickname": "owner A",
-		"avatar":   "https://avatar.example/a.png",
-		"status":   "alive",
-	})
+	setBinding(t, manager, userA.ID, "yyb-openid-a-1234", "ref-a", "owner A")
 
 	bodyA := getBindingBody(t, mux, sessionA.Token)
 	if !strings.Contains(bodyA, `"bound":true`) || !strings.Contains(bodyA, `"openidSuffix":"1234"`) || !strings.Contains(bodyA, `"nickname":"owner A"`) {
@@ -823,33 +850,7 @@ func TestYYBBindingOwnershipUsesCurrentSessionUser(t *testing.T) {
 		t.Fatalf("user B should not see user A binding: %s", bodyB)
 	}
 
-	payloadWithUserID := map[string]any{
-		"userId":   userA.ID,
-		"openid":   "yyb-openid-b-9999",
-		"ref":      "ref-b",
-		"nickname": "owner B attempt",
-		"status":   "alive",
-	}
-	bodyBytes, _ := json.Marshal(payloadWithUserID)
-	req := httptest.NewRequest(http.MethodPost, "/api/session/yyb-binding", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionB.Token})
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("binding with userId returned %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-	bodyA = getBindingBody(t, mux, sessionA.Token)
-	if !strings.Contains(bodyA, `"nickname":"owner A"`) {
-		t.Fatalf("user B overwrote user A binding: %s", bodyA)
-	}
-
-	postBinding(t, mux, sessionB.Token, map[string]any{
-		"openid":   "yyb-openid-b-5678",
-		"ref":      "ref-b",
-		"nickname": "owner B",
-		"status":   "alive",
-	})
+	setBinding(t, manager, userB.ID, "yyb-openid-b-5678", "ref-b", "owner B")
 	bodyB = getBindingBody(t, mux, sessionB.Token)
 	if !strings.Contains(bodyB, `"openidSuffix":"5678"`) || !strings.Contains(bodyB, `"nickname":"owner B"`) {
 		t.Fatalf("user B self binding response = %s", bodyB)
@@ -888,19 +889,71 @@ func TestYYBBindingRejectsAnonymousRequests(t *testing.T) {
 	}
 }
 
-func postBinding(t *testing.T, handler http.Handler, token string, payload map[string]any) {
-	t.Helper()
-	bodyBytes, err := json.Marshal(payload)
+func TestYYBBindingRejectsClientSuppliedRef(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	user, err := manager.CreateUser(model.UserCreateRequest{Username: "ref-injection", Password: "password123", Role: model.RoleUser})
 	if err != nil {
-		t.Fatalf("marshal binding payload: %v", err)
+		t.Fatalf("CreateUser: %v", err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/session/yyb-binding", bytes.NewReader(bodyBytes))
+	session, err := sessions.Create(user.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	body := bytes.NewReader([]byte(`{"openid":"attacker","ref":"1","status":"alive"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/session/yyb-binding", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("post binding returned %d: %s", recorder.Code, recorder.Body.String())
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("post binding returned %d, want 405: %s", recorder.Code, recorder.Body.String())
+	}
+
+	binding, err := manager.YYBBinding(user.ID)
+	if err != nil {
+		t.Fatalf("YYBBinding: %v", err)
+	}
+	if binding != nil {
+		t.Fatalf("client supplied ref was persisted: %+v", binding)
+	}
+}
+
+func TestClientIPIgnoresForgedForwardedForPrefix(t *testing.T) {
+	proxied := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	proxied.RemoteAddr = "127.0.0.1:54321"
+	proxied.Header.Set("X-Forwarded-For", "1.2.3.4, 203.0.113.9")
+	if got := clientIP(proxied); got != "203.0.113.9" {
+		t.Fatalf("clientIP with a proxy appended chain = %q, want the rightmost entry", got)
+	}
+
+	proxied.Header.Set("X-Real-IP", "203.0.113.9")
+	proxied.Header.Set("X-Forwarded-For", "1.2.3.4")
+	if got := clientIP(proxied); got != "203.0.113.9" {
+		t.Fatalf("clientIP with X-Real-IP = %q, want the proxy supplied value", got)
+	}
+
+	direct := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	direct.RemoteAddr = "198.51.100.7:44444"
+	direct.Header.Set("X-Forwarded-For", "1.2.3.4")
+	direct.Header.Set("X-Real-IP", "1.2.3.4")
+	if got := clientIP(direct); got != "198.51.100.7" {
+		t.Fatalf("clientIP for a direct connection = %q, want the socket peer", got)
+	}
+}
+
+func setBinding(t *testing.T, manager *appruntime.Manager, userID, openID, ref, nickname string) {
+	t.Helper()
+	if err := manager.SetYYBBinding(userID, &model.YYBBinding{
+		OpenID:   openID,
+		Ref:      ref,
+		Nickname: nickname,
+		Status:   "alive",
+		BoundAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SetYYBBinding: %v", err)
 	}
 }
 

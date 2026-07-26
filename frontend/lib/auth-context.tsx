@@ -1,8 +1,15 @@
 "use client"
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 
-import { requestEmpty, requestJSON } from "@/lib/http"
+import { RequestError, requestEmpty, requestJSON } from "@/lib/http"
 import type { CurrentUser, SessionView } from "@/lib/types"
 
 type AuthContextValue = {
@@ -12,10 +19,24 @@ type AuthContextValue = {
   isAdmin: boolean
   clearSession: () => void
   fetchMe: () => Promise<CurrentUser | null>
-  login: (username: string, password: string, captchaToken: string) => Promise<CurrentUser>
-  register: (username: string, password: string, captchaToken: string, captchaId: string, captchaAnswer: string, inviteCode: string) => Promise<CurrentUser>
+  login: (
+    username: string,
+    password: string,
+    captchaToken: string
+  ) => Promise<CurrentUser>
+  register: (
+    username: string,
+    password: string,
+    captchaToken: string,
+    captchaId: string,
+    captchaAnswer: string,
+    inviteCode: string
+  ) => Promise<CurrentUser>
   logout: () => Promise<void>
-  changePassword: (currentPassword: string, newPassword: string) => Promise<void>
+  changePassword: (
+    currentPassword: string,
+    newPassword: string
+  ) => Promise<void>
   acknowledgeUsageGuide: () => Promise<CurrentUser>
   fetchSessions: () => Promise<SessionView[]>
   logoutOtherSessions: () => Promise<void>
@@ -36,75 +57,94 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchMe = useCallback(async () => {
     setLoading(true)
     try {
-      const response = await fetch("/api/auth/me", { credentials: "include" })
-      if (response.status === 401) {
+      const user = await requestJSON<CurrentUser>(
+        "/api/auth/me",
+        {},
+        "读取账户信息失败，请稍后重试。"
+      )
+      setCurrentUser(user)
+      return user
+    } catch (reason) {
+      if (reason instanceof RequestError && reason.status === 401) {
         clearSession()
         return null
       }
-      if (!response.ok) throw new Error(`Load user failed: ${response.status}`)
-
-      const user = (await response.json()) as CurrentUser
-      setCurrentUser(user)
-      return user
+      throw reason
     } finally {
       setLoading(false)
       setReady(true)
     }
   }, [clearSession])
 
-  const login = useCallback(async (username: string, password: string, captchaToken: string) => {
-    const user = await requestJSON<CurrentUser>(
-      "/api/auth/login",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, captchaToken }),
-      },
-      "登录失败，请检查用户名、密码和验证后重试。"
-    )
-    setCurrentUser(user)
-    setReady(true)
-    return user
-  }, [])
+  const login = useCallback(
+    async (username: string, password: string, captchaToken: string) => {
+      const user = await requestJSON<CurrentUser>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, captchaToken }),
+        },
+        "登录失败，请检查用户名、密码和验证后重试。"
+      )
+      setCurrentUser(user)
+      setReady(true)
+      return user
+    },
+    []
+  )
 
-  const register = useCallback(async (
-    username: string,
-    password: string,
-    captchaToken: string,
-    captchaId: string,
-    captchaAnswer: string,
-    inviteCode: string
-  ) => {
-    const user = await requestJSON<CurrentUser>(
-      "/api/auth/register",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, captchaToken, captchaId, captchaAnswer, inviteCode }),
-      },
-      "注册失败，请检查填写信息和验证后重试。"
-    )
-    setCurrentUser(user)
-    setReady(true)
-    return user
-  }, [])
+  const register = useCallback(
+    async (
+      username: string,
+      password: string,
+      captchaToken: string,
+      captchaId: string,
+      captchaAnswer: string,
+      inviteCode: string
+    ) => {
+      const user = await requestJSON<CurrentUser>(
+        "/api/auth/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username,
+            password,
+            captchaToken,
+            captchaId,
+            captchaAnswer,
+            inviteCode,
+          }),
+        },
+        "注册失败，请检查填写信息和验证后重试。"
+      )
+      setCurrentUser(user)
+      setReady(true)
+      return user
+    },
+    []
+  )
 
   const logout = useCallback(async () => {
     await requestEmpty("/api/auth/logout", { method: "POST" }, "退出登录失败")
     clearSession()
   }, [clearSession])
 
-  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
-    await requestJSON<unknown>(
-      "/api/auth/password",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      },
-      "修改密码失败"
-    )
-  }, [])
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      await requestJSON<unknown>(
+        "/api/auth/password",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ currentPassword, newPassword }),
+        },
+        "修改密码失败"
+      )
+    },
+    []
+  )
 
   const acknowledgeUsageGuide = useCallback(async () => {
     const user = await requestJSON<CurrentUser>(
@@ -117,27 +157,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return user
   }, [])
 
-  const fetchSessions = useCallback(() => requestJSON<SessionView[]>("/api/auth/sessions", {}, "读取会话失败"), [])
+  const fetchSessions = useCallback(
+    () => requestJSON<SessionView[]>("/api/auth/sessions", {}, "读取会话失败"),
+    []
+  )
 
   const logoutOtherSessions = useCallback(async () => {
-    await requestEmpty("/api/auth/sessions/others", { method: "DELETE" }, "退出其他会话失败")
+    await requestEmpty(
+      "/api/auth/sessions/others",
+      { method: "DELETE" },
+      "退出其他会话失败"
+    )
   }, [])
 
-  const value = useMemo<AuthContextValue>(() => ({
-    currentUser,
-    loading,
-    ready,
-    isAdmin: currentUser?.role === "admin",
-    clearSession,
-    fetchMe,
-    login,
-    register,
-    logout,
-    changePassword,
-    acknowledgeUsageGuide,
-    fetchSessions,
-    logoutOtherSessions,
-  }), [acknowledgeUsageGuide, changePassword, clearSession, currentUser, fetchMe, fetchSessions, loading, login, logout, logoutOtherSessions, ready, register])
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      currentUser,
+      loading,
+      ready,
+      isAdmin: currentUser?.role === "admin",
+      clearSession,
+      fetchMe,
+      login,
+      register,
+      logout,
+      changePassword,
+      acknowledgeUsageGuide,
+      fetchSessions,
+      logoutOtherSessions,
+    }),
+    [
+      acknowledgeUsageGuide,
+      changePassword,
+      clearSession,
+      currentUser,
+      fetchMe,
+      fetchSessions,
+      loading,
+      login,
+      logout,
+      logoutOtherSessions,
+      ready,
+      register,
+    ]
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

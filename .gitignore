@@ -5,6 +5,7 @@ frontend/**/*.tsbuildinfo
 .pnpm-store/
 20260601_202646/
 charge_state.json
+initial-admin-password.txt
 *.migrated
 .local/
 

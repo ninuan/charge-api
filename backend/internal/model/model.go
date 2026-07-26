@@ -167,6 +167,14 @@ type InviteCode struct {
 	UsedCount int        `json:"usedCount"`
 }
 
+type InviteCodePage struct {
+	Items      []InviteCode `json:"items"`
+	Page       int          `json:"page"`
+	PageSize   int          `json:"pageSize"`
+	Total      int          `json:"total"`
+	TotalPages int          `json:"totalPages"`
+}
+
 type SessionView struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"createdAt"`

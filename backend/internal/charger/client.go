@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -248,7 +249,7 @@ func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return "", fmt.Errorf("桩号解析接口返回 %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("桩号解析接口返回 %s: %s", resp.Status, security.RedactText(strings.TrimSpace(string(body)), 512))
 	}
 	if id := extractCnumDeviceID(resp, body); id != "" {
 		return id, nil
@@ -476,12 +477,14 @@ func buildCnumURL(templateURL string, number string) (string, error) {
 	if parsed.Host == "" {
 		return "", fmt.Errorf("template url missing host")
 	}
+	// 该请求携带用户的完整登录 Cookie，指向远端时必须走 https；
+	// 只有回环地址（本地测试与 sidecar）才允许保留明文 http。
 	scheme := parsed.Scheme
 	if scheme == "" {
-		scheme = "http"
+		scheme = "https"
 	}
-	if parsed.Host == "ele.mocele.com" {
-		scheme = "http"
+	if scheme != "https" && !isLoopbackHost(parsed.Hostname()) {
+		scheme = "https"
 	}
 	cnumURL := url.URL{
 		Scheme: scheme,
@@ -492,6 +495,14 @@ func buildCnumURL(templateURL string, number string) (string, error) {
 	query.Set("n", number)
 	cnumURL.RawQuery = query.Encode()
 	return cnumURL.String(), nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func extractCnumDeviceID(resp *http.Response, body []byte) string {

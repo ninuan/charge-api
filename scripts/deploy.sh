@@ -126,6 +126,7 @@ rsync_args=(
   --exclude "*.log"
   --exclude "*.migrated"
   --exclude "charge_state.json"
+  --exclude "initial-admin-password.txt"
   --exclude "20260601_202646/"
   --exclude "backend/charge-server"
   --exclude "backend/server"

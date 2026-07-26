@@ -10,5 +10,13 @@ export function AuthPortal() {
   const router = useRouter()
   const mode = pathname.startsWith("/register") ? "register" : "login"
 
-  return <AuthPageShell mode={mode}><AuthForm mode={mode} onSuccess={(path) => router.replace(path)} /></AuthPageShell>
+  return (
+    <AuthPageShell mode={mode}>
+      <AuthForm
+        key={mode}
+        mode={mode}
+        onSuccess={(path) => router.replace(path)}
+      />
+    </AuthPageShell>
+  )
 }

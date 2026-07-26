@@ -141,10 +141,28 @@ func NewManager(
 			userState := state.UserStates[user.ID]
 			m.runtimes[user.ID] = newUserRuntime(requests, userState, minInterval)
 		}
-		if m.migrated {
+		// 遗留的 sha256$ 弱哈希在启动时整体套上 argon2id（无需明文），
+		// 不必等用户登录才升级——从不登录的账户会永远留着弱哈希。
+		wrappedLegacy := false
+		for id, user := range m.users {
+			if !auth.IsLegacySHA256(user.PasswordHash) {
+				continue
+			}
+			upgraded, err := auth.WrapLegacySHA256(user.PasswordHash)
+			if err != nil {
+				continue
+			}
+			user.PasswordHash = upgraded
+			user.UpdatedAt = time.Now()
+			m.users[id] = user
+			wrappedLegacy = true
+		}
+		if m.migrated || wrappedLegacy {
 			if err := m.Save(); err != nil {
 				return nil, err
 			}
+		}
+		if m.migrated {
 			if err := persistence.ArchiveMigratedJSON(legacyJSONPath, state); err != nil {
 				return nil, err
 			}
@@ -219,6 +237,9 @@ func (m *Manager) Authenticate(username string, password string) (model.CurrentU
 	m.mu.RUnlock()
 
 	if !found {
+		// 不存在的用户也要付出一次 argon2 的耗时，
+		// 否则响应时间差可以用来枚举有效用户名。
+		auth.VerifyDummyPassword(password)
 		return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
 	}
 	if !matched.Enabled {
@@ -1519,6 +1540,47 @@ func (m *Manager) InviteCodes() []model.InviteCode {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result
+}
+
+func (m *Manager) ListInviteCodesPage(page, pageSize int) model.InviteCodePage {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	items := m.InviteCodes()
+	total := len(items)
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	pageItems := items[start:end]
+	if pageItems == nil {
+		pageItems = []model.InviteCode{}
+	}
+	return model.InviteCodePage{
+		Items:      pageItems,
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	}
 }
 
 func (m *Manager) CreateInvite(code string, expiresAt *time.Time) (model.InviteCode, error) {

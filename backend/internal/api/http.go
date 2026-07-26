@@ -31,6 +31,7 @@ const (
 
 var deviceIDPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 var pileNumberPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
+var qrSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 type Server struct {
 	manager             *appruntime.Manager
@@ -115,7 +116,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/session/yyb-qr", s.handleYYBQR)
 	mux.HandleFunc("/api/session/yyb-qr/", s.handleYYBQR)
 	mux.HandleFunc("/api/session/mocele-cookie", s.handleMoceleCookie)
-	mux.HandleFunc("/api/stream", s.handleStream)
+	mux.HandleFunc(streamPath, s.handleStream)
 	mux.HandleFunc("/healthz", s.handleHealth)
 }
 
@@ -589,7 +590,9 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/session/yyb-qr/"), "/")
-	if len(parts) != 2 || parts[0] == "" {
+	// sessionID 会被拼进 sidecar 请求路径并参与 HMAC 签名，只放行安全字符，
+	// 防止 %2F、?、# 等经解码后借服务端密钥为攻击者构造的请求背书。
+	if len(parts) != 2 || !qrSessionIDPattern.MatchString(parts[0]) {
 		s.recordDashboardDiagnostic(user, "scan_login", "qr_session_invalid", "", http.StatusNotFound)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "二维码会话已失效，请重新生成二维码"})
 		return
@@ -692,51 +695,10 @@ func (s *Server) handleYYBBinding(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// 绑定只能由 handleYYBQRConfirm 的扫码流程写入：ref 决定服务端向 sidecar
+	// 取哪个账号的 code，客户端提供的 ref 等同于任意账号凭据的读取权限。
 	switch r.Method {
 	case http.MethodGet:
-		s.writeYYBBindingStatus(w, user.ID)
-	case http.MethodPost:
-		var req struct {
-			OpenID        string     `json:"openid"`
-			Ref           string     `json:"ref"`
-			Nickname      string     `json:"nickname"`
-			Avatar        string     `json:"avatar"`
-			Status        string     `json:"status"`
-			BoundAt       *time.Time `json:"boundAt,omitempty"`
-			LastCheckedAt *time.Time `json:"lastCheckedAt,omitempty"`
-		}
-		if !decodeJSON(w, r, adminBodyLimit, &req) {
-			return
-		}
-		req.OpenID = strings.TrimSpace(req.OpenID)
-		if req.OpenID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "openid is required"})
-			return
-		}
-		req.Ref = strings.TrimSpace(req.Ref)
-		req.Nickname = strings.TrimSpace(req.Nickname)
-		req.Avatar = strings.TrimSpace(req.Avatar)
-		req.Status = strings.TrimSpace(req.Status)
-		if req.Status == "" {
-			req.Status = "bound"
-		}
-		boundAt := time.Now().UTC()
-		if req.BoundAt != nil {
-			boundAt = *req.BoundAt
-		}
-		binding := &model.YYBBinding{
-			OpenID:        req.OpenID,
-			Ref:           req.Ref,
-			Nickname:      req.Nickname,
-			Avatar:        req.Avatar,
-			Status:        req.Status,
-			BoundAt:       boundAt,
-			LastCheckedAt: req.LastCheckedAt,
-		}
-		if err := s.manager.SetYYBBinding(user.ID, binding); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存绑定状态失败"})
-			return
-		}
 		s.writeYYBBindingStatus(w, user.ID)
 	case http.MethodDelete:
 		if err := s.manager.ClearYYBBinding(user.ID); err != nil {
@@ -963,7 +925,11 @@ func (s *Server) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.manager.InviteCodes())
+		values := r.URL.Query()
+		writeJSON(w, http.StatusOK, s.manager.ListInviteCodesPage(
+			queryInt(values.Get("page"), 1),
+			queryInt(values.Get("pageSize"), 20),
+		))
 	case http.MethodPost:
 		var req struct {
 			Code      string     `json:"code,omitempty"`
@@ -1225,15 +1191,29 @@ func clientIP(r *http.Request) string {
 	}
 	parsed := net.ParseIP(host)
 	if parsed != nil && parsed.IsLoopback() {
-		if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
-			return forwarded
-		}
+		// X-Real-IP 由反向代理用 proxy_set_header 覆写，客户端无法影响。
 		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
 			return realIP
+		}
+		// nginx 的 $proxy_add_x_forwarded_for 把真实对端追加在客户端提交的
+		// X-Forwarded-For 之后，因此只有最右一段可信；取最左会让限流和登录
+		// 失败锁定被任意伪造的头绕过。
+		if forwarded := rightmostForwardedFor(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+			return forwarded
 		}
 	}
 	if host == "" {
 		return "unknown"
 	}
 	return host
+}
+
+func rightmostForwardedFor(header string) string {
+	parts := strings.Split(header, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if value := strings.TrimSpace(parts[i]); value != "" {
+			return value
+		}
+	}
+	return ""
 }

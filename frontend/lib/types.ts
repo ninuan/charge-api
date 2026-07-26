@@ -85,7 +85,8 @@ export interface TrafficStats {
   lastRemoteOkAt?: string
 }
 
-export type CredentialState = "unbound" | "waiting_device" | "healthy" | "sync_failed" | "expired"
+export type CredentialState =
+  "unbound" | "waiting_device" | "healthy" | "sync_failed" | "expired"
 
 export interface CredentialSummary {
   state: CredentialState
@@ -95,7 +96,14 @@ export interface CredentialSummary {
 }
 
 export interface RecoveryDiagnostic {
-  operation: "credential_recovery" | "add_pile" | "refresh" | "update_cookie" | "scan_login" | "sync_cookie" | "auth_protection"
+  operation:
+    | "credential_recovery"
+    | "add_pile"
+    | "refresh"
+    | "update_cookie"
+    | "scan_login"
+    | "sync_cookie"
+    | "auth_protection"
   code: string
   message: string
   deviceSuffix?: string
@@ -151,6 +159,14 @@ export interface InviteCode {
   createdAt: string
   expiresAt?: string
   usedCount: number
+}
+
+export interface InviteCodePage {
+  items: InviteCode[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
 }
 
 export interface SessionView {

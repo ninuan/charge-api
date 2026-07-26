@@ -20,7 +20,7 @@ describe("DashboardProvider", () => {
 
     await act(() => result.current.fetchSnapshot())
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/piles", { credentials: "include" })
+    expect(fetchMock).toHaveBeenCalledWith("/api/piles", { credentials: "include", signal: expect.any(AbortSignal) })
     expect(result.current.snapshot.statistics.pileCount).toBe(2)
   })
 

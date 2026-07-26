@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -47,10 +48,66 @@ func VerifyPassword(password string, encoded string) (valid bool, needsUpgrade b
 	if strings.HasPrefix(encoded, argon2Version+"$") {
 		return verifyArgon2(password, encoded), false
 	}
-	if strings.HasPrefix(encoded, "sha256$") {
+	if strings.HasPrefix(encoded, wrappedLegacyPrefix) {
+		return verifyWrappedLegacy(password, encoded), true
+	}
+	if IsLegacySHA256(encoded) {
 		return verifyLegacySHA256(password, encoded), true
 	}
 	return false, false
+}
+
+const wrappedLegacyPrefix = "wrapped-sha256$"
+
+func IsLegacySHA256(encoded string) bool {
+	return strings.HasPrefix(encoded, "sha256$")
+}
+
+// WrapLegacySHA256 在不知道明文密码的情况下，把 sha256$ 旧哈希的摘要整体
+// 套上 argon2id。数据库泄露时不再存在可离线快速爆破的弱哈希；用户下次
+// 登录成功后仍会照常升级为纯 argon2id。
+func WrapLegacySHA256(encoded string) (string, error) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 3 || parts[0] != "sha256" {
+		return "", fmt.Errorf("not a legacy sha256 hash")
+	}
+	inner, err := HashPassword(parts[2])
+	if err != nil {
+		return "", err
+	}
+	return wrappedLegacyPrefix + parts[1] + "$" + inner, nil
+}
+
+func verifyWrappedLegacy(password string, encoded string) bool {
+	rest := strings.TrimPrefix(encoded, wrappedLegacyPrefix)
+	saltEncoded, inner, found := strings.Cut(rest, "$")
+	if !found {
+		return false
+	}
+	salt, err := base64.RawStdEncoding.DecodeString(saltEncoded)
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(append(salt, []byte(password)...))
+	return verifyArgon2(base64.RawStdEncoding.EncodeToString(sum[:]), inner)
+}
+
+var (
+	dummyHashOnce sync.Once
+	dummyHash     string
+)
+
+// VerifyDummyPassword 供"用户不存在"分支调用：跑一次与真实校验同参数的
+// argon2id 计算，消除可用于枚举用户名的响应时间差。
+func VerifyDummyPassword(password string) {
+	dummyHashOnce.Do(func() {
+		if hash, err := HashPassword("charge-timing-equalizer"); err == nil {
+			dummyHash = hash
+		}
+	})
+	if dummyHash != "" {
+		verifyArgon2(password, dummyHash)
+	}
 }
 
 func verifyArgon2(password string, encoded string) bool {

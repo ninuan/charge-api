@@ -1,7 +1,7 @@
 "use client"
 
 import { CheckCircle2Icon, Link2OffIcon, LoaderCircleIcon, QrCodeIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -27,13 +27,30 @@ export function YybLoginDialog() {
   const [polling, setPolling] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [cookie, setCookie] = useState("")
+  const pollFailuresRef = useRef(0)
 
   useEffect(() => { if (open) void requestJSON<Binding>("/api/session/yyb-binding", {}, "暂时无法读取扫码绑定状态，请稍后重试。").then(setBinding).catch((reason) => toast.error(reason.message)) }, [open])
+
+  // 扫码状态每 3 秒自动检测，用户不必反复点"检查扫码状态"；
+  // 二维码到达终态或连续失败 3 次后停止，重新生成二维码会重新开始。
+  const pollStatus = poll?.status
+  useEffect(() => {
+    if (!open || !qr || binding.bound) return
+    if (pollStatus === "expired" || pollStatus === "cancelled") return
+    const sessionId = qr.sessionId
+    pollFailuresRef.current = 0
+    const timer = setInterval(() => {
+      void requestJSON<Poll>(`/api/session/yyb-qr/${encodeURIComponent(sessionId)}/poll`, {}, "暂时无法获取扫码状态，请稍后重试。")
+        .then((next) => { pollFailuresRef.current = 0; setPoll(next) })
+        .catch(() => { pollFailuresRef.current += 1; if (pollFailuresRef.current >= 3) clearInterval(timer) })
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [open, qr, binding.bound, pollStatus])
   const status = binding.bound ? `${binding.nickname || "微信账号"} 已绑定${binding.openidSuffix ? `（尾号 ${binding.openidSuffix}）` : ""}` : poll?.message || ({ pending: "等待扫码，请使用微信扫描左侧二维码。", scanned: "已扫码，请在微信中确认登录。", authorized: "扫码已确认，可以点击确认绑定。", confirmed: "扫码已确认，可以点击确认绑定。", expired: "二维码已过期，请重新生成。", cancelled: "扫码已取消，请重新生成二维码。" }[poll?.status ?? ""] || (qr ? "请使用微信扫码，扫码完成后点击确认。" : "生成二维码后，扫码结果会通过 Charge 后端确认并保存到当前账户。"))
 
-  async function createQr() { setLoading(true); try { const next = await requestJSON<QR>("/api/session/yyb-qr", { method: "POST" }, "二维码暂时无法生成，请稍后重试。"); setQr(next); setPoll(null); toast.success("二维码已生成，扫码后请点击检查扫码状态") } catch (reason) { toast.error((reason as Error).message) } finally { setLoading(false) } }
+  async function createQr() { setLoading(true); try { const next = await requestJSON<QR>("/api/session/yyb-qr", { method: "POST" }, "二维码暂时无法生成，请稍后重试。"); setQr(next); setPoll(null); toast.success("二维码已生成，扫码后状态会自动更新") } catch (reason) { toast.error((reason as Error).message) } finally { setLoading(false) } }
   async function checkStatus() { if (!qr) return; setPolling(true); try { const next = await requestJSON<Poll>(`/api/session/yyb-qr/${encodeURIComponent(qr.sessionId)}/poll`, {}, "暂时无法获取扫码状态，请稍后重试。"); setPoll(next); toast.success(next.message || "扫码状态已更新") } catch (reason) { toast.error((reason as Error).message) } finally { setPolling(false) } }
-  async function confirm() { if (!qr) return; setConfirming(true); try { const next = await requestJSON<Binding>(`/api/session/yyb-qr/${encodeURIComponent(qr.sessionId)}/confirm`, { method: "POST" }, "暂时无法确认扫码结果，请稍后重试。"); setBinding(next); setQr(null); setPoll(null); toast.success(next.message || (next.cookieSynced ? "扫码登录已生效" : "扫码登录已完成")) } catch (reason) { toast.error((reason as Error).message) } finally { setConfirming(false) } }
+  async function confirm() { if (!qr) return; setConfirming(true); try { const next = await requestJSON<Binding>(`/api/session/yyb-qr/${encodeURIComponent(qr.sessionId)}/confirm`, { method: "POST", timeoutMs: 120_000 }, "暂时无法确认扫码结果，请稍后重试。"); setBinding(next); setQr(null); setPoll(null); toast.success(next.message || (next.cookieSynced ? "扫码登录已生效" : "扫码登录已完成")) } catch (reason) { toast.error((reason as Error).message) } finally { setConfirming(false) } }
   async function clearBinding() { try { await requestEmpty("/api/session/yyb-binding", { method: "DELETE" }, "解除扫码绑定失败，请稍后重试。"); setBinding({ bound: false }); setQr(null); setPoll(null); toast.success("扫码绑定已解除") } catch (reason) { toast.error((reason as Error).message) } }
   async function saveCookie(event: React.FormEvent) { event.preventDefault(); try { await updateCookie(cookie); setCookie(""); toast.success("Cookie 已更新") } catch (reason) { toast.error((reason as Error).message) } }
 

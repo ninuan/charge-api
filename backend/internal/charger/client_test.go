@@ -219,3 +219,29 @@ func TestFetchPileRedactsUpstreamErrorBody(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCnumURLKeepsRemoteHostsOnHTTPS(t *testing.T) {
+	remote, err := buildCnumURL("https://ele.mocele.com/action/i/api/devicewithnumbers", "61034278")
+	if err != nil {
+		t.Fatalf("buildCnumURL: %v", err)
+	}
+	if !strings.HasPrefix(remote, "https://ele.mocele.com/i/cnum?") {
+		t.Fatalf("remote cnum URL = %q, want an https URL", remote)
+	}
+
+	downgraded, err := buildCnumURL("http://ele.mocele.com/action/i/api/devicewithnumbers", "61034278")
+	if err != nil {
+		t.Fatalf("buildCnumURL: %v", err)
+	}
+	if !strings.HasPrefix(downgraded, "https://") {
+		t.Fatalf("plaintext template produced %q, want it upgraded to https", downgraded)
+	}
+
+	local, err := buildCnumURL("http://127.0.0.1:8080/action/i/api/devicewithnumbers", "61034278")
+	if err != nil {
+		t.Fatalf("buildCnumURL: %v", err)
+	}
+	if !strings.HasPrefix(local, "http://127.0.0.1:8080/i/cnum?") {
+		t.Fatalf("loopback cnum URL = %q, want the http scheme preserved", local)
+	}
+}
