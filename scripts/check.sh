@@ -19,6 +19,7 @@ bash "$ROOT_DIR/scripts/dev_vite_cache_test.sh"
 bash "$ROOT_DIR/scripts/check_frontend_sources_test.sh"
 bash "$ROOT_DIR/scripts/ops_hardening_test.sh"
 bash "$ROOT_DIR/scripts/security_check_test.sh"
+bash "$ROOT_DIR/scripts/backup_db_test.sh"
 
 echo "2/7 前端源码检查"
 bash "$ROOT_DIR/scripts/check_frontend_sources.sh"

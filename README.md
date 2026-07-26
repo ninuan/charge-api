@@ -1,14 +1,22 @@
 # Charge Console
 
+[![CI](https://github.com/ninuan/charge-api/actions/workflows/ci.yml/badge.svg)](https://github.com/ninuan/charge-api/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
-![Vue](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
-![License](https://img.shields.io/badge/Usage-Personal%20Monitoring-lightgrey)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 一个用于查看充电桩使用情况的轻量看板。它把常看的充电桩和充电口集中到一个页面里，方便快速判断哪里空闲、哪里正在使用、哪里离线，不用每次都找到服务号、扫码、再进入对应页面查看。
 
 这个项目适合个人或小范围内部使用。每个用户维护自己的充电桩列表和访问凭据，系统只在用户主动刷新时请求远端接口，并会在短时间重复刷新时优先返回缓存，尽量减少不必要的远端访问。
+
+## 界面预览
+
+![充电桩运营看板](.github/assets/dashboard.webp)
+
+| 微信扫码绑定 | 添加充电桩 | 账户中心 |
+| --- | --- | --- |
+| ![扫码登录](.github/assets/yyb-login.webp) | ![添加充电桩](.github/assets/add-pile.webp) | ![账户中心](.github/assets/account.webp) |
 
 ## 功能亮点
 
@@ -48,6 +56,28 @@ flowchart LR
   F["管理后台"] -->|"用户与流量统计"| C
 ```
 
+## 部署架构
+
+```mermaid
+flowchart LR
+  subgraph Client["用户浏览器"]
+    UI["Next.js 静态页面<br/>SSE 实时看板"]
+  end
+  subgraph Server["Ubuntu 服务器"]
+    NG["nginx<br/>TLS 终止 / 反向代理"]
+    API["charge-server (Go)<br/>REST + SSE + 静态资源<br/>gzip / 缓存头 / 安全响应头"]
+    DB[("SQLite charge_state.db<br/>凭据 AES-256-GCM 加密落库")]
+    YYB["yyb_go sidecar<br/>微信扫码登录"]
+    TIMER["systemd timer<br/>每日在线备份"]
+  end
+  REMOTE["远端充电服务"]
+  UI -->|"HTTPS"| NG --> API
+  API --> DB
+  API <-->|"HMAC 签名内网调用"| YYB
+  API -->|"用户各自的凭据"| REMOTE
+  TIMER -.->|"sqlite3 .backup"| DB
+```
+
 ## 项目结构
 
 ```text
@@ -65,6 +95,9 @@ frontend/
   lib/                     # API、状态与领域逻辑
 
 examples/capture-template/ # 脱敏请求模板
+
+scripts/                   # 开发、检查、部署与备份脚本（均自带测试）
+deploy/systemd/            # systemd 服务与备份定时器模板
 ```
 
 ## 快速开始
@@ -416,6 +449,29 @@ sudo chmod 0600 /var/lib/charge-api/charge_state.db /opt/yyb_go/resource/db/yyb.
 - 同时离线保存 `CHARGE_COOKIE_KEY`、`YYB_SECRET_KEY`、`YYB_API_SECRET`。
 - 不要在服务运行时只复制 `.db` 主文件；如果启用 WAL，应先停服务或使用 SQLite 在线备份工具。
 - 恢复演练时必须使用原始密钥，否则数据库中的 Cookie 和 yyb_go 凭据无法解密。
+
+仓库自带备份脚本和 systemd 定时器（`scripts/backup_db.sh` + `deploy/systemd/charge-backup.*`），使用 SQLite 在线备份 API，服务运行中执行也安全。安装：
+
+```bash
+sudo apt install -y sqlite3
+sudo cp /opt/charge-api/deploy/systemd/charge-backup.service /etc/systemd/system/
+sudo cp /opt/charge-api/deploy/systemd/charge-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now charge-backup.timer
+```
+
+默认每天 03:30 备份 `charge_state.db`（以及可读时的 `yyb.db`）到 `/var/lib/charge-api/backups/`，产物是 0600 权限的 `.db.gz`，保留 14 天后滚动清理；`BACKUP_DIR`、`RETENTION_DAYS` 等可通过 `/etc/charge-backup.env` 覆盖。手动触发与恢复演练：
+
+```bash
+sudo systemctl start charge-backup.service
+```
+
+```bash
+gunzip -k /var/lib/charge-api/backups/charge_state-<时间戳>.db.gz
+sqlite3 /var/lib/charge-api/backups/charge_state-<时间戳>.db "PRAGMA integrity_check;"
+```
+
+备份文件异地转存时（rsync 到 NAS、对象存储等）请保持 0600 权限，并连同上面三个密钥一起纳入恢复清单。
 
 
 ### 端到端安全检查
