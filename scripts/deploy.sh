@@ -172,13 +172,15 @@ pnpm_fetch_retries=$pnpm_fetch_retries_quoted
 pnpm_network_concurrency=$pnpm_network_concurrency_quoted
 bash scripts/check_frontend_sources.sh
 cd frontend
+# 必须用专用旗标而不是 --config.<key>：后者把值按字符串塞进配置，
+# network-concurrency 在 pnpm 内部有数字类型校验，冷 store 首装会直接报错。
 pnpm_config_args=(
-  "--config.fetch-timeout=\$pnpm_fetch_timeout"
-  "--config.fetch-retries=\$pnpm_fetch_retries"
-  "--config.network-concurrency=\$pnpm_network_concurrency"
+  "--fetch-timeout=\$pnpm_fetch_timeout"
+  "--fetch-retries=\$pnpm_fetch_retries"
+  "--network-concurrency=\$pnpm_network_concurrency"
 )
 if [[ -n "\$npm_registry" ]]; then
-  pnpm_config_args+=("--config.registry=\$npm_registry")
+  pnpm_config_args+=("--registry=\$npm_registry")
 fi
 echo "Install frontend dependencies (timeout: \${pnpm_fetch_timeout}ms, retries: \$pnpm_fetch_retries, concurrency: \$pnpm_network_concurrency)"
 pnpm "\${pnpm_config_args[@]}" install --frozen-lockfile --prefer-offline --reporter=append-only

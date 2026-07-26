@@ -37,12 +37,12 @@ if [[ "$dry_run_output" != *"bash scripts/check_frontend_sources.sh"* ]]; then
   exit 1
 fi
 
-if [[ "$dry_run_output" != *"npm_registry=https://registry.npmmirror.com"* ]] || [[ "$dry_run_output" != *"--config.registry=\$npm_registry"* ]]; then
+if [[ "$dry_run_output" != *"npm_registry=https://registry.npmmirror.com"* ]] || [[ "$dry_run_output" != *"--registry=\$npm_registry"* ]]; then
   echo "dry-run should pass NPM_REGISTRY only to the remote pnpm install"
   exit 1
 fi
 
-if [[ "$dry_run_output" != *"pnpm_fetch_timeout=120000"* ]] || [[ "$dry_run_output" != *"pnpm_fetch_retries=5"* ]] || [[ "$dry_run_output" != *"--config.fetch-timeout=\$pnpm_fetch_timeout"* ]] || [[ "$dry_run_output" != *"--config.fetch-retries=\$pnpm_fetch_retries"* ]]; then
+if [[ "$dry_run_output" != *"pnpm_fetch_timeout=120000"* ]] || [[ "$dry_run_output" != *"pnpm_fetch_retries=5"* ]] || [[ "$dry_run_output" != *"--fetch-timeout=\$pnpm_fetch_timeout"* ]] || [[ "$dry_run_output" != *"--fetch-retries=\$pnpm_fetch_retries"* ]]; then
   echo "dry-run should use resilient pnpm fetch settings"
   exit 1
 fi
