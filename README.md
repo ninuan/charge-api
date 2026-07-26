@@ -193,11 +193,28 @@ make check
 - Go 单元测试
 - Go 后端构建
 - 前端测试
-- Vue TypeScript 检查和生产构建
+- 前端类型检查和生产构建
 
 后端已经内置默认充电桩请求模板，不需要额外准备抓包目录。
 
 ## 部署同步
+
+### 服务器构建环境
+
+`deploy-git` 在服务器上构建前后端，服务器需要以下工具（缺失时远程脚本会在拉取前直接报错提示）：
+
+- **Node 22 + pnpm 11**（前端构建，与本地和 CI 同版本）：
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
+```
+
+```bash
+sudo npm install -g pnpm@11
+```
+
+- **Go**（后端构建）：已安装 Go ≥ 1.21 时会按 `go.mod` 自动获取所需工具链；否则按 [go.dev/doc/install](https://go.dev/doc/install) 安装最新版。
+- **sqlite3**（备份定时器需要）：`sudo apt install -y sqlite3`。
 
 服务器初次配置完成后，推荐通过 GitHub 同步代码、远端构建并重启服务：
 

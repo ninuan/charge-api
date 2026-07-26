@@ -41,3 +41,13 @@ if [[ "$dry_run_output" != *"bash scripts/check_frontend_sources.sh"* ]]; then
   echo "dry-run should print the remote frontend source check"
   exit 1
 fi
+
+if [[ "$dry_run_output" != *"command -v"* ]]; then
+  echo "dry-run should include the remote toolchain preflight"
+  exit 1
+fi
+
+if [[ "$dry_run_output" != *"process.versions.node"* ]]; then
+  echo "dry-run should include the remote node version guard"
+  exit 1
+fi

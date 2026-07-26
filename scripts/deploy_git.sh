@@ -132,6 +132,16 @@ log "Pull, build and restart on remote server"
 read -r -d '' remote_script <<REMOTE || true
 set -Eeuo pipefail
 cd $remote_path_quoted
+for tool in git go node pnpm curl; do
+  if ! command -v "\$tool" >/dev/null 2>&1; then
+    echo "服务器缺少 \$tool，请先按 README「部署同步 - 服务器构建环境」安装后重试" >&2
+    exit 1
+  fi
+done
+if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 9) ? 0 : 1)'; then
+  echo "服务器 Node 版本过低（\$(node --version)），Next 16 需要 >= 20.9，建议安装 Node 22" >&2
+  exit 1
+fi
 git pull --ff-only $remote_quoted $branch_quoted
 bash scripts/check_frontend_sources.sh
 cd frontend
