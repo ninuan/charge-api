@@ -222,6 +222,22 @@ sudo npm install -g pnpm@11
 make deploy-git DEPLOY_HOST=root@<服务器IP>
 ```
 
+如果服务器位于中国大陆，访问 npm 官方源不稳定，可在本次部署中改用国内镜像；该设置只传给本次远端 `pnpm install`，不会修改服务器的全局 pnpm 配置：
+
+```bash
+NPM_REGISTRY=https://registry.npmmirror.com \
+make deploy-git DEPLOY_HOST=root@<服务器IP>
+```
+
+部署脚本默认把 pnpm 单请求超时设为 120 秒、重试 5 次，并限制为 8 个并发请求。网络仍较慢时可继续覆盖：
+
+```bash
+NPM_REGISTRY=https://registry.npmmirror.com \
+PNPM_FETCH_TIMEOUT=180000 \
+PNPM_FETCH_RETRIES=8 \
+make deploy-git DEPLOY_HOST=root@<服务器IP>
+```
+
 `deploy-git` 会先确认本地没有未提交改动，然后执行：
 
 ```bash
@@ -259,7 +275,7 @@ SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@<服务器IP> DEPLOY_ARGS=--dry-ru
 
 ```bash
 git pull --ff-only origin main
-cd frontend && pnpm install --frozen-lockfile && pnpm run build:static
+cd frontend && pnpm install --frozen-lockfile --prefer-offline && pnpm run build:static
 cd ../backend && go build -o charge-server ./cmd/server
 sudo systemctl restart charge-api
 curl http://127.0.0.1:8080/healthz

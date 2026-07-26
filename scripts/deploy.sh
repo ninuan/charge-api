@@ -9,6 +9,10 @@ SERVICE_NAME="${SERVICE_NAME:-charge-api}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/healthz}"
 SSH_OPTS="${SSH_OPTS:-}"
 SKIP_CHECK="${SKIP_CHECK:-0}"
+NPM_REGISTRY="${NPM_REGISTRY:-}"
+PNPM_FETCH_TIMEOUT="${PNPM_FETCH_TIMEOUT:-120000}"
+PNPM_FETCH_RETRIES="${PNPM_FETCH_RETRIES:-5}"
+PNPM_NETWORK_CONCURRENCY="${PNPM_NETWORK_CONCURRENCY:-8}"
 DRY_RUN=0
 
 usage() {
@@ -25,6 +29,13 @@ Environment:
   HEALTH_URL     Remote health check URL. Default: http://127.0.0.1:8080/healthz.
   SSH_OPTS       Extra ssh options, for example "-p 2222".
   SKIP_CHECK     Set to 1 to skip local make check.
+  NPM_REGISTRY   Optional npm registry for this deployment, for example https://registry.npmmirror.com.
+  PNPM_FETCH_TIMEOUT
+                HTTP request timeout in milliseconds. Default: 120000.
+  PNPM_FETCH_RETRIES
+                Registry request retries. Default: 5.
+  PNPM_NETWORK_CONCURRENCY
+                Concurrent registry requests. Default: 8.
 
 Options:
   --dry-run      Print rsync/ssh actions without executing them.
@@ -104,6 +115,10 @@ else
 fi
 
 remote_path_quoted="$(printf '%q' "$DEPLOY_PATH")"
+npm_registry_quoted="$(printf '%q' "$NPM_REGISTRY")"
+pnpm_fetch_timeout_quoted="$(printf '%q' "$PNPM_FETCH_TIMEOUT")"
+pnpm_fetch_retries_quoted="$(printf '%q' "$PNPM_FETCH_RETRIES")"
+pnpm_network_concurrency_quoted="$(printf '%q' "$PNPM_NETWORK_CONCURRENCY")"
 
 log "Create remote directory"
 run_ssh "mkdir -p $remote_path_quoted"
@@ -151,9 +166,22 @@ log "Build and restart on remote server"
 read -r -d '' remote_script <<REMOTE || true
 set -Eeuo pipefail
 cd $remote_path_quoted
+npm_registry=$npm_registry_quoted
+pnpm_fetch_timeout=$pnpm_fetch_timeout_quoted
+pnpm_fetch_retries=$pnpm_fetch_retries_quoted
+pnpm_network_concurrency=$pnpm_network_concurrency_quoted
 bash scripts/check_frontend_sources.sh
 cd frontend
-pnpm install --frozen-lockfile
+pnpm_config_args=(
+  "--config.fetch-timeout=\$pnpm_fetch_timeout"
+  "--config.fetch-retries=\$pnpm_fetch_retries"
+  "--config.network-concurrency=\$pnpm_network_concurrency"
+)
+if [[ -n "\$npm_registry" ]]; then
+  pnpm_config_args+=("--config.registry=\$npm_registry")
+fi
+echo "Install frontend dependencies (timeout: \${pnpm_fetch_timeout}ms, retries: \$pnpm_fetch_retries, concurrency: \$pnpm_network_concurrency)"
+pnpm "\${pnpm_config_args[@]}" install --frozen-lockfile --prefer-offline --reporter=append-only
 pnpm run build:static
 cd ../backend
 go build -o charge-server.new ./cmd/server

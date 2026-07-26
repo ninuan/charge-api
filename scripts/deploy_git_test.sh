@@ -6,8 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_SCRIPT="$ROOT_DIR/scripts/deploy_git.sh"
 
 help_output="$("$DEPLOY_SCRIPT" --help)"
-if [[ "$help_output" != *"DEPLOY_HOST"* ]] || [[ "$help_output" != *"DEPLOY_BRANCH"* ]]; then
-  echo "deploy-git help should document DEPLOY_HOST and DEPLOY_BRANCH"
+if [[ "$help_output" != *"DEPLOY_HOST"* ]] || [[ "$help_output" != *"DEPLOY_BRANCH"* ]] || [[ "$help_output" != *"NPM_REGISTRY"* ]]; then
+  echo "deploy-git help should document DEPLOY_HOST, DEPLOY_BRANCH, and NPM_REGISTRY"
   exit 1
 fi
 
@@ -26,7 +26,7 @@ if [[ "$missing_host_output" != *"DEPLOY_HOST"* ]]; then
   exit 1
 fi
 
-dry_run_output="$(DEPLOY_HOST=root@example.invalid SKIP_CHECK=1 DEPLOY_BRANCH=main "$DEPLOY_SCRIPT" --dry-run)"
+dry_run_output="$(DEPLOY_HOST=root@example.invalid SKIP_CHECK=1 DEPLOY_BRANCH=main NPM_REGISTRY=https://registry.npmmirror.com "$DEPLOY_SCRIPT" --dry-run)"
 if [[ "$dry_run_output" != *"push origin main"* ]]; then
   echo "dry-run should print the local git push command"
   exit 1
@@ -49,5 +49,15 @@ fi
 
 if [[ "$dry_run_output" != *"process.versions.node"* ]]; then
   echo "dry-run should include the remote node version guard"
+  exit 1
+fi
+
+if [[ "$dry_run_output" != *"npm_registry=https://registry.npmmirror.com"* ]] || [[ "$dry_run_output" != *"--config.registry=\$npm_registry"* ]]; then
+  echo "dry-run should pass NPM_REGISTRY only to the remote pnpm install"
+  exit 1
+fi
+
+if [[ "$dry_run_output" != *"pnpm_fetch_timeout=120000"* ]] || [[ "$dry_run_output" != *"pnpm_fetch_retries=5"* ]] || [[ "$dry_run_output" != *"--config.fetch-timeout=\$pnpm_fetch_timeout"* ]] || [[ "$dry_run_output" != *"--config.fetch-retries=\$pnpm_fetch_retries"* ]]; then
+  echo "dry-run should use resilient pnpm fetch settings"
   exit 1
 fi
