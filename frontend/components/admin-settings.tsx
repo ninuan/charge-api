@@ -55,7 +55,7 @@ export function AdminSettings({
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="shadow-none">
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="text-base">注册策略</CardTitle>
           <p className="text-xs text-muted-foreground">
@@ -128,7 +128,7 @@ export function AdminSettings({
       </Card>
       <div className="grid content-start gap-4">
         <AppearanceSettings />
-        <Card className="shadow-none">
+        <Card className="shadow-xs">
           <CardHeader className="flex-row items-start justify-between">
             <div>
               <CardTitle className="text-base">邀请码</CardTitle>

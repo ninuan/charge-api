@@ -57,7 +57,8 @@ function portMeta(port: Port) {
   return {
     label: "空闲",
     icon: CheckCircle2Icon,
-    className: "border-border bg-muted/60 text-foreground",
+    className:
+      "border-success/25 bg-success/10 text-success-foreground dark:bg-success/15",
   }
 }
 
@@ -100,7 +101,7 @@ function PileCardComponent({
 
   return (
     <>
-      <Card className="overflow-hidden shadow-none">
+      <Card className="overflow-hidden shadow-xs transition-shadow hover:shadow-sm">
         <CardHeader className="flex flex-col gap-4 border-b p-5 sm:flex-row sm:items-start sm:justify-between lg:p-6">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -212,13 +213,16 @@ function PileCardComponent({
             id={cardId}
             className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5 lg:p-6"
           >
-            {displayedPorts.map((port) => {
+            {displayedPorts.map((port, index) => {
               const meta = portMeta(port)
               const Icon = meta.icon
               return (
+                // key 带上状态：SSE 推送某个端口状态跃迁时，仅该卡片重挂载并
+                // 重放入场动画，等于一次"状态变化闪现"；首屏则按索引错峰浮现。
                 <section
-                  key={port.id}
-                  className={`rounded-lg border p-4 ${meta.className}`}
+                  key={`${port.id}-${port.status}`}
+                  style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
+                  className={`rounded-lg border p-4 transition-[transform,box-shadow] hover:shadow-sm motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:fill-mode-backwards motion-safe:duration-500 motion-safe:hover:-translate-y-0.5 ${meta.className}`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-lg font-semibold tabular-nums">

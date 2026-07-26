@@ -110,7 +110,7 @@ export function AdminUsers({ page, query, load }: AdminUsersProps) {
             summary.dashboard.offlinePorts > 0
 
           return (
-            <Card key={summary.user.id} className="shadow-none">
+            <Card key={summary.user.id} className="shadow-xs">
               <CardContent className="flex flex-col gap-4 p-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
@@ -191,7 +191,7 @@ export function AdminUsers({ page, query, load }: AdminUsersProps) {
           )
         })}
         {page && !page.items.length && (
-          <Card className="border-dashed shadow-none">
+          <Card className="border-dashed shadow-xs">
             <CardContent className="p-10 text-center text-sm text-muted-foreground">
               没有匹配的用户。可以重置筛选后重新查看。
             </CardContent>

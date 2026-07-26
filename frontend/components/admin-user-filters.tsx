@@ -72,7 +72,7 @@ export function AdminUserFilters({
 
   return (
     <section
-      className="rounded-xl border bg-card p-4 shadow-none"
+      className="rounded-xl border bg-card p-4 shadow-xs"
       aria-label="用户筛选"
     >
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">

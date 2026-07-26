@@ -17,5 +17,5 @@ export function AppearanceSettings() {
   // light/dark，用它判断会让"跟随系统"永远显示未选中。
   const { theme, setTheme } = useTheme()
 
-  return <Card className="shadow-none"><CardHeader><CardTitle className="text-base">界面外观</CardTitle><p className="text-xs text-muted-foreground">选择适合当前环境的显示模式，跟随系统会随设备外观自动切换。</p></CardHeader><CardContent className="flex flex-wrap gap-2">{modes.map(({ value, label, aria, icon: Icon }) => <Button key={value} aria-label={aria} aria-pressed={theme === value} variant={theme === value ? "default" : "outline"} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</CardContent></Card>
+  return <Card className="shadow-xs"><CardHeader><CardTitle className="text-base">界面外观</CardTitle><p className="text-xs text-muted-foreground">选择适合当前环境的显示模式，跟随系统会随设备外观自动切换。</p></CardHeader><CardContent className="flex flex-wrap gap-2">{modes.map(({ value, label, aria, icon: Icon }) => <Button key={value} aria-label={aria} aria-pressed={theme === value} variant={theme === value ? "default" : "outline"} onClick={() => setTheme(value)}><Icon />{label}</Button>)}</CardContent></Card>
 }

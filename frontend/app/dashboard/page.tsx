@@ -212,7 +212,17 @@ export default function DashboardPage() {
       description="端口占用、刷新状态与筛选结果一处查看；仅在主动刷新时请求远端接口。"
       actions={
         <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center [&_button]:w-full md:[&_button]:w-auto">
-          <span className="hidden text-xs text-muted-foreground lg:inline">
+          <span className="hidden items-center gap-1.5 text-xs text-muted-foreground lg:inline-flex">
+            <span
+              aria-hidden
+              className={`size-1.5 rounded-full ${
+                streamState === "connected"
+                  ? "bg-success motion-safe:animate-pulse"
+                  : streamState === "error"
+                    ? "bg-destructive motion-safe:animate-pulse"
+                    : "bg-muted-foreground/40"
+              }`}
+            />
             实时连接：{streamLabel}
           </span>
           <UsageGuideDialog />
@@ -229,10 +239,11 @@ export default function DashboardPage() {
         </div>
       }
     >
-      <Card className="shadow-none" aria-label="运营摘要">
+      <Card className="shadow-xs" aria-label="运营摘要">
         <CardContent className="grid divide-y p-0 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
           <MetricCard
             compact
+            tone="primary"
             label="充电桩"
             value={snapshot.statistics.pileCount}
             detail="当前账户添加的设备"
@@ -247,6 +258,7 @@ export default function DashboardPage() {
           />
           <MetricCard
             compact
+            tone="warning"
             label="正在使用"
             value={snapshot.statistics.inUsePortCount}
             detail="当前正在充电的端口"
@@ -254,6 +266,7 @@ export default function DashboardPage() {
           />
           <MetricCard
             compact
+            tone="destructive"
             label="异常端口"
             value={snapshot.statistics.offlinePorts}
             detail="离线或暂时不可访问"
@@ -261,7 +274,7 @@ export default function DashboardPage() {
           />
         </CardContent>
       </Card>
-      <Card className="mt-3 shadow-none">
+      <Card className="mt-3 shadow-xs">
         <CardContent className="grid gap-2 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <div>
@@ -317,19 +330,25 @@ export default function DashboardPage() {
             <Skeleton className="h-64 w-full" />
           </div>
         ) : (
-          entries.map((entry) => (
-            <PileCard
+          entries.map((entry, index) => (
+            // 首屏按索引错峰浮现；fill-mode-backwards 让延迟期间保持不可见。
+            <div
               key={entry.pile.id}
-              pile={entry.pile}
-              visiblePortIds={entry.portIds}
-              filtering={hasActiveFilter}
-              onRemove={handleRemove}
-              onUpdate={handleUpdate}
-            />
+              className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:fill-mode-backwards motion-safe:duration-500"
+              style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
+            >
+              <PileCard
+                pile={entry.pile}
+                visiblePortIds={entry.portIds}
+                filtering={hasActiveFilter}
+                onRemove={handleRemove}
+                onUpdate={handleUpdate}
+              />
+            </div>
           ))
         )}
         {!loading && entries.length === 0 && (
-          <Card className="border-dashed shadow-none">
+          <Card className="border-dashed shadow-xs">
             <CardContent className="py-16 text-center">
               <PlugZapIcon className="mx-auto size-8 text-muted-foreground" />
               <h2 className="mt-4 text-lg font-semibold">

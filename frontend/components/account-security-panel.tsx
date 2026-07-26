@@ -72,7 +72,7 @@ export function AccountSecurityPanel() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <Card className="shadow-none">
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <KeyRoundIcon className="size-4" />
@@ -113,7 +113,7 @@ export function AccountSecurityPanel() {
           </form>
         </CardContent>
       </Card>
-      <Card className="shadow-none">
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <LaptopIcon className="size-4" />

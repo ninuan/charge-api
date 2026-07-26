@@ -42,10 +42,11 @@ export function AdminOverview({ stats, health, onUsers }: AdminOverviewProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card className="shadow-none" aria-label="运营指标">
+      <Card className="shadow-xs" aria-label="运营指标">
         <CardContent className="grid divide-y p-0 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-5">
           <MetricCard
             compact
+            tone="warning"
             label="待处理问题"
             value={overview ? overview.openIssues : null}
             detail="需要关注的异常"
@@ -53,6 +54,7 @@ export function AdminOverview({ stats, health, onUsers }: AdminOverviewProps) {
           />
           <MetricCard
             compact
+            tone="success"
             label="远端成功率"
             value={overview ? Math.round(overview.remoteSuccessRate) : null}
             detail="近期远端请求成功率（%）"
@@ -60,6 +62,7 @@ export function AdminOverview({ stats, health, onUsers }: AdminOverviewProps) {
           />
           <MetricCard
             compact
+            tone="primary"
             label="活跃用户"
             value={overview ? overview.activeUsers : null}
             detail="近期访问过的账户"
@@ -74,6 +77,7 @@ export function AdminOverview({ stats, health, onUsers }: AdminOverviewProps) {
           />
           <MetricCard
             compact
+            tone="destructive"
             label="离线端口"
             value={overview ? overview.offlinePorts : null}
             detail="需要复查设备状态"
@@ -81,7 +85,7 @@ export function AdminOverview({ stats, health, onUsers }: AdminOverviewProps) {
           />
         </CardContent>
       </Card>
-      <Card className="shadow-none">
+      <Card className="shadow-xs">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">服务健康</CardTitle>
           <p className="text-xs text-muted-foreground">
@@ -119,7 +123,7 @@ export function AdminOverview({ stats, health, onUsers }: AdminOverviewProps) {
           ))}
         </CardContent>
       </Card>
-      <Card className="shadow-none">
+      <Card className="shadow-xs">
         <CardHeader className="flex-row items-center justify-between pb-3">
           <div>
             <CardTitle className="text-base">最近异常</CardTitle>
