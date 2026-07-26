@@ -3,7 +3,6 @@ frontend/node_modules
 frontend/dist
 frontend/**/*.tsbuildinfo
 .pnpm-store/
-20260601_202646/
 charge_state.json
 initial-admin-password.txt
 *.migrated
@@ -24,23 +23,11 @@ charge.env
 *.sqlite3-*
 *.key
 *.log
-logs/*.log
-
-# Python artifacts from previous versions
-__pycache__/
-*.py[cod]
-*$py.class
-.Python
-.venv/
-env/
-venv/
-ENV/
 
 # Build and cache directories
 build/
 dist/
 .cache/
-.pytest_cache/
 
 # IDE and OS files
 .vscode/

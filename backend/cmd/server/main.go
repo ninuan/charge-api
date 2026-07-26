@@ -54,8 +54,10 @@ func main() {
 		// 需要对外时用 -listen 显式指定（部署文档即如此）。
 		listenAddr    = flag.String("listen", "127.0.0.1:8080", "http listen address")
 		captureDir    = flag.String("capture", "", "optional capture directory; built-in request template is used when empty")
-		databasePath  = flag.String("database", "../charge_state.db", "SQLite database path")
-		legacyState   = flag.String("state", "../charge_state.json", "legacy JSON state file imported when the database is empty")
+		// 默认状态与 dev.sh/make dev 同源（.local/ 已忽略提交，由 make reset-local 管理），
+		// 避免手工裸跑在仓库根散落状态文件；生产环境仍由 systemd 显式传参。
+		databasePath  = flag.String("database", "../.local/charge_state.db", "SQLite database path")
+		legacyState   = flag.String("state", "../.local/charge_state.json", "legacy JSON state file imported when the database is empty")
 		adminPassword = flag.String("admin-password", "", "initial admin password, falls back to CHARGE_ADMIN_PASSWORD")
 	)
 	flag.Parse()
