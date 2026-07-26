@@ -58,7 +58,13 @@ if [[ -z "$latest" ]]; then
   exit 1
 fi
 
-perms="$(stat -f '%Lp' "$latest" 2>/dev/null || stat -c '%a' "$latest")"
+# GNU stat 用 -c，BSD/macOS 用 -f；注意 GNU 的 -f 是"文件系统信息"且不报错，
+# 因此必须先探测 -c 是否可用，不能反过来回退。
+if stat -c '%a' "$latest" >/dev/null 2>&1; then
+  perms="$(stat -c '%a' "$latest")"
+else
+  perms="$(stat -f '%Lp' "$latest")"
+fi
 if [[ "$perms" != "600" ]]; then
   echo "备份文件权限应为 600，实际 $perms"
   exit 1
