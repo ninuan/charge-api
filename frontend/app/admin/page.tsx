@@ -12,6 +12,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import { AdminHealthStatus } from "@/components/admin-health-status"
 import { AppShell } from "@/components/app-shell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -48,23 +49,39 @@ import type {
 } from "@/lib/types"
 
 // 三个标签页组件按需加载：停留在总览时无需下载用户/设置页的代码。
-const tabFallback = () => (
-  <div className="grid gap-3">
-    <Skeleton className="h-32 w-full" />
-    <Skeleton className="h-64 w-full" />
+const overviewFallback = () => (
+  <div className="grid gap-4">
+    <Skeleton className="h-28 w-full" />
+    <Skeleton className="h-44 w-full" />
+    <Skeleton className="h-44 w-full" />
+  </div>
+)
+const usersFallback = () => (
+  <div className="grid gap-4">
+    <Skeleton className="h-32 w-full md:h-28" />
+    <Skeleton className="h-64 w-full md:h-80" />
+  </div>
+)
+const settingsFallback = () => (
+  <div className="grid gap-4 lg:grid-cols-2">
+    <Skeleton className="h-[32rem] w-full" />
+    <div className="grid content-start gap-4">
+      <Skeleton className="h-40 w-full" />
+      <Skeleton className="h-64 w-full" />
+    </div>
   </div>
 )
 const AdminOverview = dynamic(
   () => import("@/components/admin-overview").then((m) => m.AdminOverview),
-  { ssr: false, loading: tabFallback }
+  { ssr: false, loading: overviewFallback }
 )
 const AdminUsers = dynamic(
   () => import("@/components/admin-users").then((m) => m.AdminUsers),
-  { ssr: false, loading: tabFallback }
+  { ssr: false, loading: usersFallback }
 )
 const AdminSettings = dynamic(
   () => import("@/components/admin-settings").then((m) => m.AdminSettings),
-  { ssr: false, loading: tabFallback }
+  { ssr: false, loading: settingsFallback }
 )
 
 type Tab = "overview" | "users" | "settings"
@@ -81,7 +98,7 @@ const emptyQuery: AdminUserListQuery = {
 const titles = {
   overview: [
     "运营总览",
-    "将待处理问题、服务健康和最近异常集中在一个紧凑看板中。",
+    "将待处理问题、运行趋势和最近异常集中在一个紧凑看板中。",
   ],
   users: ["用户管理", "按账户状态、扫码凭据和设备健康度定位需要处理的账户。"],
   settings: ["系统设置", "管理注册策略、新账户默认权限和长期邀请码。"],
@@ -128,12 +145,7 @@ function AdminPageContent() {
     router.replace(next === "overview" ? "/admin" : `/admin?tab=${next}`)
 
   async function loadOverview() {
-    const [nextStats, nextHealth] = await Promise.all([
-      adminApi.stats(),
-      adminApi.health(),
-    ])
-    setStats(nextStats)
-    setHealth(nextHealth)
+    setStats(await adminApi.stats())
   }
 
   async function loadUsers(nextQuery = query) {
@@ -154,9 +166,16 @@ function AdminPageContent() {
   async function load() {
     setLoading(true)
     try {
-      if (tab === "overview") await loadOverview()
-      if (tab === "users") await loadUsers()
-      if (tab === "settings") await loadSettings()
+      const tabLoad =
+        tab === "overview"
+          ? loadOverview()
+          : tab === "users"
+            ? loadUsers()
+            : loadSettings()
+      await Promise.all([
+        adminApi.health().then((nextHealth) => setHealth(nextHealth)),
+        tabLoad,
+      ])
     } catch (reason) {
       toast.error((reason as Error).message)
     } finally {
@@ -198,6 +217,7 @@ function AdminPageContent() {
       description={titles[tab][1]}
       actions={
         <div className="grid grid-cols-2 gap-2 md:flex [&_button]:w-full md:[&_button]:w-auto">
+          <AdminHealthStatus health={health} />
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger
               render={
@@ -278,6 +298,7 @@ function AdminPageContent() {
             </DialogContent>
           </Dialog>
           <Button
+            className="col-span-2 md:col-span-1"
             variant="outline"
             disabled={loading}
             onClick={() => void load()}
@@ -305,14 +326,15 @@ function AdminPageContent() {
         </TabsList>
       </Tabs>
       {tab === "overview" && (
-        <AdminOverview
-          stats={stats}
-          health={health}
-          onUsers={() => setTab("users")}
-        />
+        <AdminOverview stats={stats} onUsers={() => setTab("users")} />
       )}
       {tab === "users" && (
-        <AdminUsers page={userPage} query={query} load={loadUsers} />
+        <AdminUsers
+          page={userPage}
+          query={query}
+          load={loadUsers}
+          currentUserId={currentUser?.id}
+        />
       )}
       {tab === "settings" &&
         (settings ? (
@@ -323,7 +345,7 @@ function AdminPageContent() {
             reload={loadSettings}
           />
         ) : (
-          tabFallback()
+          settingsFallback()
         ))}
     </AppShell>
   )

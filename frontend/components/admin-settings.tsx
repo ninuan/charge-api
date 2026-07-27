@@ -3,7 +3,14 @@ import { toast } from "sonner"
 
 import { AppearanceSettings } from "@/components/appearance-settings"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Field,
@@ -58,9 +65,9 @@ export function AdminSettings({
       <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="text-base">注册策略</CardTitle>
-          <p className="text-xs text-muted-foreground">
+          <CardDescription className="text-xs">
             这些规则只影响之后创建或注册的账户。
-          </p>
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={save}>
@@ -129,25 +136,26 @@ export function AdminSettings({
       <div className="grid content-start gap-4">
         <AppearanceSettings />
         <Card className="shadow-xs">
-          <CardHeader className="flex-row items-start justify-between">
-            <div>
-              <CardTitle className="text-base">邀请码</CardTitle>
-              <p className="mt-1 text-xs text-muted-foreground">
-                邀请码仅在关闭公共注册并启用邀请码要求时生效。
-              </p>
-            </div>
-            <Button
-              size="sm"
-              onClick={() =>
-                void adminApi
-                  .createInvite()
-                  .then(() => reload(1))
-                  .catch((reason) => toast.error(reason.message))
-              }
-            >
-              <PlusIcon />
-              生成邀请码
-            </Button>
+          <CardHeader>
+            <CardTitle className="text-base">邀请码</CardTitle>
+            <CardDescription className="text-xs">
+              邀请码仅在关闭公共注册并启用邀请码要求时生效。
+            </CardDescription>
+            <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:mt-2 max-sm:w-full max-sm:justify-self-stretch">
+              <Button
+                size="sm"
+                className="max-sm:w-full"
+                onClick={() =>
+                  void adminApi
+                    .createInvite()
+                    .then(() => reload(1))
+                    .catch((reason) => toast.error(reason.message))
+                }
+              >
+                <PlusIcon />
+                生成邀请码
+              </Button>
+            </CardAction>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {invitePage?.items.map((invite) => (

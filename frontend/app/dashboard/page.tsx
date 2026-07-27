@@ -292,13 +292,13 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-[minmax(15rem,1fr)_10rem] lg:w-[32rem]">
-            <label className="relative block h-8">
+            <label className="relative block">
               <span className="sr-only">搜索充电桩或端口号</span>
               <SearchIcon className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="pl-10"
+                className="pl-10 md:pl-10"
                 placeholder="名称、桩号、地址或端口号"
               />
             </label>
@@ -321,6 +321,14 @@ export default function DashboardPage() {
               </SelectContent>
             </Select>
           </div>
+          <Button
+            className="mt-1 w-full md:hidden"
+            disabled={refreshing}
+            onClick={() => void refresh()}
+          >
+            <RefreshCwIcon className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "刷新中…" : "主动刷新设备状态"}
+          </Button>
         </CardContent>
       </Card>
       <section className="mt-4 flex flex-col gap-4" aria-label="充电桩列表">
@@ -380,16 +388,6 @@ export default function DashboardPage() {
           </Card>
         )}
       </section>
-      <div className="sticky bottom-3 mt-5 md:hidden">
-        <Button
-          className="w-full shadow-lg"
-          disabled={refreshing}
-          onClick={() => void refresh()}
-        >
-          <RefreshCwIcon className={refreshing ? "animate-spin" : ""} />
-          {refreshing ? "刷新中…" : "主动刷新设备状态"}
-        </Button>
-      </div>
     </AppShell>
   )
 }

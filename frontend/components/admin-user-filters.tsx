@@ -1,5 +1,6 @@
 "use client"
 
+import { ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -14,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { AdminUserListQuery } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const accountOptions = [
   { value: "all", label: "全部账户" },
@@ -44,6 +46,12 @@ export function AdminUserFilters({
   onApply: (query: AdminUserListQuery) => void
 }) {
   const [draft, setDraft] = useState(query)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const advancedCount = [
+    draft.account !== "all",
+    draft.credential !== "all",
+    draft.health !== "all",
+  ].filter(Boolean).length
 
   function update<Key extends keyof AdminUserListQuery>(
     key: Key,
@@ -75,10 +83,10 @@ export function AdminUserFilters({
       className="rounded-xl border bg-card p-4 shadow-xs"
       aria-label="用户筛选"
     >
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">筛选用户</h2>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          <p className="mt-1 hidden text-xs leading-5 text-muted-foreground sm:block">
             组合账户状态、扫码凭据和设备健康度，快速定位需要处理的账户。
           </p>
         </div>
@@ -87,7 +95,7 @@ export function AdminUserFilters({
         </Button>
       </div>
       <form
-        className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(12rem,1fr)_10rem_11rem_9rem_auto]"
+        className="mt-3 grid gap-3 md:grid-cols-[minmax(12rem,1fr)_10rem_11rem_9rem_auto]"
         onSubmit={apply}
       >
         <Field>
@@ -100,87 +108,116 @@ export function AdminUserFilters({
             placeholder="用户名"
           />
         </Field>
-        <Field>
-          <FieldLabel htmlFor="user-account">账户状态</FieldLabel>
-          <Select
-            items={accountOptions}
-            value={draft.account}
-            onValueChange={(value) =>
-              update("account", value as AdminUserListQuery["account"])
-            }
-          >
-            <SelectTrigger
-              id="user-account"
-              aria-label="账户状态"
-              className="w-full"
+        <Button
+          type="button"
+          variant="outline"
+          className="justify-between md:hidden"
+          aria-expanded={advancedOpen}
+          aria-controls="advanced-user-filters"
+          onClick={() => setAdvancedOpen((current) => !current)}
+        >
+          <span className="flex items-center gap-2">
+            <SlidersHorizontalIcon />
+            高级筛选
+            {advancedCount > 0 && (
+              <span className="rounded-full bg-primary px-1.5 py-0.5 text-[0.6875rem] leading-none text-primary-foreground">
+                {advancedCount}
+              </span>
+            )}
+          </span>
+          <ChevronDownIcon
+            className={cn("transition-transform", advancedOpen && "rotate-180")}
+          />
+        </Button>
+        <div
+          id="advanced-user-filters"
+          className={cn(
+            "col-span-full grid gap-3 sm:grid-cols-3 md:contents",
+            !advancedOpen && "hidden md:contents"
+          )}
+        >
+          <Field>
+            <FieldLabel htmlFor="user-account">账户状态</FieldLabel>
+            <Select
+              items={accountOptions}
+              value={draft.account}
+              onValueChange={(value) =>
+                update("account", value as AdminUserListQuery["account"])
+              }
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {accountOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="user-credential">凭据状态</FieldLabel>
-          <Select
-            items={credentialOptions}
-            value={draft.credential}
-            onValueChange={(value) =>
-              update("credential", value as AdminUserListQuery["credential"])
-            }
-          >
-            <SelectTrigger
-              id="user-credential"
-              aria-label="凭据状态"
-              className="w-full"
+              <SelectTrigger
+                id="user-account"
+                aria-label="账户状态"
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {accountOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="user-credential">凭据状态</FieldLabel>
+            <Select
+              items={credentialOptions}
+              value={draft.credential}
+              onValueChange={(value) =>
+                update("credential", value as AdminUserListQuery["credential"])
+              }
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {credentialOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="user-health">设备健康</FieldLabel>
-          <Select
-            items={healthOptions}
-            value={draft.health}
-            onValueChange={(value) =>
-              update("health", value as AdminUserListQuery["health"])
-            }
-          >
-            <SelectTrigger
-              id="user-health"
-              aria-label="设备健康"
-              className="w-full"
+              <SelectTrigger
+                id="user-credential"
+                aria-label="凭据状态"
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {credentialOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="user-health">设备健康</FieldLabel>
+            <Select
+              items={healthOptions}
+              value={draft.health}
+              onValueChange={(value) =>
+                update("health", value as AdminUserListQuery["health"])
+              }
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {healthOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
+              <SelectTrigger
+                id="user-health"
+                aria-label="设备健康"
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {healthOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
         <Button className="self-end" type="submit">
           应用筛选
         </Button>
