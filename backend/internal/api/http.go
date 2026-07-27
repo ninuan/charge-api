@@ -444,6 +444,26 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/api/piles/order" {
+		if r.Method != http.MethodPut {
+			methodNotAllowed(w)
+			return
+		}
+		var req struct {
+			IDs []string `json:"ids"`
+		}
+		if !decodeJSON(w, r, pileBodyLimit, &req) {
+			return
+		}
+		snapshot, err := s.manager.ReorderPiles(user.ID, req.IDs)
+		if err != nil {
+			writePublicOperationError(w, http.StatusBadRequest, "reorder piles", "调整充电桩顺序失败，请刷新后重试。", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+		return
+	}
+
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) != 3 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

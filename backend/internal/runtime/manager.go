@@ -1096,6 +1096,21 @@ func (m *Manager) UpdatePile(userID, id, name, address string, sortOrder int) (m
 	return pile, m.Save()
 }
 
+func (m *Manager) ReorderPiles(userID string, ids []string) (model.DashboardSnapshot, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return model.DashboardSnapshot{}, err
+	}
+	runtime.recordRequest()
+	m.recordMetric(userID, "request")
+	snapshot, err := runtime.store.ReorderPiles(ids)
+	if err != nil {
+		runtime.recordFailure(false)
+		return model.DashboardSnapshot{}, err
+	}
+	return snapshot, m.Save()
+}
+
 func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, error) {
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {

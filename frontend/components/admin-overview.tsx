@@ -121,9 +121,10 @@ export function AdminOverview({ stats, onUsers }: AdminOverviewProps) {
   return (
     <div className="flex flex-col gap-4">
       <Card className="shadow-xs" aria-label="运营指标">
-        <CardContent className="grid divide-y p-0 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-5">
+        <CardContent className="grid grid-cols-2 p-0 xl:grid-cols-5">
           <MetricCard
             compact
+            className="col-span-2 border-b xl:col-span-1 xl:border-r xl:border-b-0"
             tone="warning"
             label="待处理问题"
             value={overview ? overview.openIssues : null}
@@ -132,6 +133,7 @@ export function AdminOverview({ stats, onUsers }: AdminOverviewProps) {
           />
           <MetricCard
             compact
+            className="border-r border-b xl:border-b-0"
             tone="success"
             label="远端成功率"
             value={overview ? Math.round(overview.remoteSuccessRate) : null}
@@ -141,6 +143,7 @@ export function AdminOverview({ stats, onUsers }: AdminOverviewProps) {
           />
           <MetricCard
             compact
+            className="border-b xl:border-r xl:border-b-0"
             tone="primary"
             label="活跃用户"
             value={overview ? overview.activeUsers : null}
@@ -149,6 +152,7 @@ export function AdminOverview({ stats, onUsers }: AdminOverviewProps) {
           />
           <MetricCard
             compact
+            className="border-r"
             label="管理设备"
             value={overview ? overview.managedDevices : null}
             detail="普通用户绑定设备"

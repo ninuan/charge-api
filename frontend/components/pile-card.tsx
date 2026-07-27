@@ -1,6 +1,8 @@
 "use client"
 
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   BatteryChargingIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -38,6 +40,10 @@ type Props = {
     id: string,
     payload: { name: string; address: string; sortOrder: number }
   ) => void
+  canMoveUp: boolean
+  canMoveDown: boolean
+  reordering: boolean
+  onMove: (id: string, direction: "up" | "down") => void | Promise<void>
 }
 
 function portMeta(port: Port) {
@@ -68,6 +74,10 @@ function PileCardComponent({
   filtering,
   onRemove,
   onUpdate,
+  canMoveUp,
+  canMoveDown,
+  reordering,
+  onMove,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -75,7 +85,6 @@ function PileCardComponent({
   const [edit, setEdit] = useState({
     name: pile.name,
     address: pile.address,
-    sortOrder: pile.sortOrder ?? 0,
   })
   const displayedPorts = useMemo(
     () =>
@@ -94,7 +103,6 @@ function PileCardComponent({
     setEdit({
       name: pile.name,
       address: pile.address,
-      sortOrder: pile.sortOrder ?? 0,
     })
     setEditOpen(true)
   }
@@ -176,6 +184,24 @@ function PileCardComponent({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="上移充电桩"
+                disabled={!canMoveUp || reordering}
+                onClick={() => onMove(pile.id, "up")}
+              >
+                <ArrowUpIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="下移充电桩"
+                disabled={!canMoveDown || reordering}
+                onClick={() => onMove(pile.id, "down")}
+              >
+                <ArrowDownIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 aria-label={collapsed ? "展开充电口" : "收起充电口"}
                 aria-expanded={!collapsed}
                 aria-controls={cardId}
@@ -222,7 +248,7 @@ function PileCardComponent({
                 <section
                   key={`${port.id}-${port.status}`}
                   style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
-                  className={`rounded-lg border p-4 transition-[transform,box-shadow] hover:shadow-sm motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:fill-mode-backwards motion-safe:duration-500 motion-safe:hover:-translate-y-0.5 ${meta.className}`}
+                  className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm motion-safe:animate-in motion-safe:duration-200 motion-safe:fill-mode-backwards motion-safe:fade-in ${meta.className}`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-lg font-semibold tabular-nums">
@@ -240,8 +266,10 @@ function PileCardComponent({
                         </p>
                         <p>剩余 {port.remainingText ?? "--"}</p>
                       </>
+                    ) : port.status === "idle" ? (
+                      <p>等待使用</p>
                     ) : (
-                      <p>等待连接</p>
+                      <p>设备暂不可访问</p>
                     )}
                   </div>
                 </section>
@@ -280,14 +308,17 @@ function PileCardComponent({
           <DialogHeader>
             <DialogTitle>编辑设备资料</DialogTitle>
             <DialogDescription>
-              名称、地址和排序只影响你的个人看板。
+              名称和地址只影响你的个人看板；顺序可直接在设备卡片上调整。
             </DialogDescription>
           </DialogHeader>
           <form
             onSubmit={(event) => {
               event.preventDefault()
               setEditOpen(false)
-              onUpdate(pile.id, edit)
+              onUpdate(pile.id, {
+                ...edit,
+                sortOrder: pile.sortOrder ?? 0,
+              })
             }}
           >
             <FieldGroup>
@@ -317,20 +348,6 @@ function PileCardComponent({
                   }
                 />
               </Field>
-              <Field>
-                <FieldLabel htmlFor={`order-${pile.id}`}>排序值</FieldLabel>
-                <Input
-                  id={`order-${pile.id}`}
-                  type="number"
-                  value={edit.sortOrder}
-                  onChange={(event) =>
-                    setEdit((current) => ({
-                      ...current,
-                      sortOrder: Number(event.target.value),
-                    }))
-                  }
-                />
-              </Field>
               <DialogFooter>
                 <Button
                   type="button"
@@ -351,7 +368,8 @@ function PileCardComponent({
 
 function samePortIds(a: number[], b: number[]) {
   return (
-    a === b || (a.length === b.length && a.every((id, index) => id === b[index]))
+    a === b ||
+    (a.length === b.length && a.every((id, index) => id === b[index]))
   )
 }
 
@@ -363,6 +381,10 @@ export const PileCard = memo(
     prev.filtering === next.filtering &&
     prev.onRemove === next.onRemove &&
     prev.onUpdate === next.onUpdate &&
+    prev.onMove === next.onMove &&
+    prev.canMoveUp === next.canMoveUp &&
+    prev.canMoveDown === next.canMoveDown &&
+    prev.reordering === next.reordering &&
     samePortIds(prev.visiblePortIds, next.visiblePortIds) &&
     (prev.pile === next.pile ||
       JSON.stringify(prev.pile) === JSON.stringify(next.pile))

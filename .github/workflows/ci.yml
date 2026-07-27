@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -41,3 +41,9 @@ jobs:
       # Go 测试/构建、类型检查与生产构建。
       - name: Run checks
         run: bash scripts/check.sh
+
+      - name: Install Playwright browser
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: pnpm --dir frontend test:e2e

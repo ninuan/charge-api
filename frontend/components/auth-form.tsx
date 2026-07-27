@@ -197,7 +197,9 @@ export function AuthForm({
                   void loadConfig()
                 }}
               >
-                <RefreshCwIcon className={configLoading ? "animate-spin" : ""} />
+                <RefreshCwIcon
+                  className={configLoading ? "animate-spin" : ""}
+                />
                 重新加载
               </Button>
             </AlertDescription>
@@ -282,6 +284,9 @@ export function AuthForm({
                 onClick={() => void loadCaptcha()}
               >
                 {captchaImage ? (
+                  // The captcha is a short-lived data URL returned by the API;
+                  // Next Image cannot optimize or cache it.
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={captchaImage}
                     alt="注册验证码，点击可刷新"

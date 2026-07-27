@@ -240,6 +240,36 @@ func (s *DashboardStore) UpdatePile(id, name, address string, sortOrder int) (mo
 	return pile, true
 }
 
+func (s *DashboardStore) ReorderPiles(ids []string) (model.DashboardSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(ids) != len(s.piles) {
+		return model.DashboardSnapshot{}, fmt.Errorf("pile order must include every pile")
+	}
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			return model.DashboardSnapshot{}, fmt.Errorf("pile order contains duplicate id")
+		}
+		if _, ok := s.piles[id]; !ok {
+			return model.DashboardSnapshot{}, fmt.Errorf("pile order contains unknown id")
+		}
+		seen[id] = struct{}{}
+	}
+
+	now := time.Now()
+	for index, id := range ids {
+		pile := s.piles[id]
+		pile.SortOrder = index
+		pile.Source = "custom"
+		pile.UpdatedAt = now
+		s.piles[id] = pile
+	}
+	s.publishLocked()
+	return s.snapshotLocked(), nil
+}
+
 func normalizePorts(existing []model.Port, openNum int, online bool, now time.Time) []model.Port {
 	m := make(map[int]model.Port, len(existing))
 	for _, p := range existing {

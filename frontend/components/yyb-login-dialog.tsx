@@ -1,5 +1,7 @@
 "use client"
 
+/* eslint-disable @next/next/no-img-element -- The sidecar QR is a short-lived data/remote URL that must remain byte-exact. */
+
 import { CheckCircle2Icon, Link2OffIcon, LoaderCircleIcon, QrCodeIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"

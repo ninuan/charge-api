@@ -56,7 +56,8 @@ type DashboardContextValue = {
     id: string,
     payload: { name: string; address: string; sortOrder: number }
   ) => Promise<void>
-  refreshFromCapture: () => Promise<void>
+  reorderPiles: (ids: string[]) => Promise<void>
+  refreshFromCapture: () => Promise<DashboardSnapshot>
   updateCookie: (cookie: string) => Promise<void>
   connectStream: () => void
   disconnectStream: () => void
@@ -162,14 +163,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [syncAfterMutation]
   )
 
-  const refreshFromCapture = useCallback(async () => {
-    applySnapshot(
-      await request<DashboardSnapshot>(
-        "/api/refresh",
-        { method: "POST", timeoutMs: remoteOperationTimeoutMs },
-        "暂时无法刷新设备状态，请稍后重试。"
+  const reorderPiles = useCallback(
+    async (ids: string[]) => {
+      const next = await request<DashboardSnapshot>(
+        "/api/piles/order",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        },
+        "调整充电桩顺序失败，请稍后重试。"
       )
+      applySnapshot(next)
+    },
+    [applySnapshot]
+  )
+
+  const refreshFromCapture = useCallback(async () => {
+    const next = await request<DashboardSnapshot>(
+      "/api/refresh",
+      { method: "POST", timeoutMs: remoteOperationTimeoutMs },
+      "暂时无法刷新设备状态，请稍后重试。"
     )
+    applySnapshot(next)
+    return next
   }, [applySnapshot])
 
   const updateCookie = useCallback(
@@ -212,7 +229,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const connectStream = useCallback(() => {
     streamWantedRef.current = true
     // 后台标签页先不建流，等回到前台再连，避免隐藏页持续解析推送。
-    if (typeof document !== "undefined" && document.visibilityState === "hidden")
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    )
       return
     openStream()
   }, [openStream])
@@ -238,7 +258,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       if (streamWantedRef.current) openStream()
     }
     document.addEventListener("visibilitychange", handleVisibility)
-    return () => document.removeEventListener("visibilitychange", handleVisibility)
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility)
   }, [openStream])
 
   const value = useMemo(
@@ -252,6 +273,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       addPile,
       deletePile,
       updatePile,
+      reorderPiles,
       refreshFromCapture,
       updateCookie,
       connectStream,
@@ -265,6 +287,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       disconnectStream,
       fetchSnapshot,
       loading,
+      reorderPiles,
       refreshFromCapture,
       reset,
       snapshot,

@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 
 type MetricTone = "default" | "primary" | "success" | "warning" | "destructive"
 
@@ -22,6 +23,7 @@ export function MetricCard({
   detail,
   icon: Icon,
   tone = "default",
+  className,
 }: {
   compact?: boolean
   label: string
@@ -30,12 +32,17 @@ export function MetricCard({
   detail: string
   icon: LucideIcon
   tone?: MetricTone
+  className?: string
 }) {
   // value 为 null 表示数据还没回来：显示骨架占位，而不是误导性的 0。
   const summary = (
     <div
       aria-label={`${label} 指标`}
-      className={`flex items-start justify-between gap-3 ${compact ? "p-3" : "p-4"}`}
+      className={cn(
+        "flex items-start justify-between gap-3",
+        compact ? "p-3" : "p-4",
+        className
+      )}
     >
       <div>
         <p className="text-sm text-muted-foreground">{label}</p>
@@ -45,6 +52,7 @@ export function MetricCard({
           />
         ) : (
           <p
+            key={value}
             className={`font-semibold tabular-nums motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in ${compact ? "mt-1 text-xl" : "mt-2 text-2xl"}`}
           >
             {value}

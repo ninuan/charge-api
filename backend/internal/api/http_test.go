@@ -41,6 +41,43 @@ func TestAdminCannotUseDashboardAPI(t *testing.T) {
 	}
 }
 
+func TestUserCanSubmitPileOrder(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	user, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "order-user", Password: "password123", Role: model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	session, err := sessions.Create(user.ID)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/piles/order",
+		strings.NewReader(`{"ids":[]}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("reorder status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var snapshot model.DashboardSnapshot
+	if err := json.NewDecoder(recorder.Body).Decode(&snapshot); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snapshot.Piles) != 0 {
+		t.Fatalf("unexpected piles: %+v", snapshot.Piles)
+	}
+}
+
 func TestDevForceAuthExpiredIsConsumedOnce(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	if server.consumeDevForceAuthExpired() {

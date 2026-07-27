@@ -41,6 +41,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/lib/auth-context"
 import { filterPiles, type PortFilter } from "@/lib/dashboard-filters"
 import { useDashboard } from "@/lib/dashboard-context"
+import {
+  parseDashboardQuery,
+  serializeDashboardQuery,
+} from "@/lib/dashboard-query"
 
 // 三个对话框只在点击后才需要，从首包拆出；占位按钮与真实触发按钮
 // 同样式同尺寸，chunk 加载完成前后不产生布局跳动。
@@ -112,12 +116,45 @@ export default function DashboardPage() {
     refreshFromCapture,
     deletePile,
     updatePile,
+    reorderPiles,
   } = useDashboard()
   const [refreshing, setRefreshing] = useState(false)
+  const [reordering, setReordering] = useState(false)
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<PortFilter>("all")
+  const [queryReady, setQueryReady] = useState(false)
   // 输入框即时回显，筛选计算滞后一拍，键入时不再同步重渲染整个卡片列表。
   const deferredSearch = useDeferredValue(search)
+
+  useEffect(() => {
+    let active = true
+    function restoreQuery() {
+      const query = parseDashboardQuery(window.location.search)
+      setSearch(query.search)
+      setFilter(query.filter)
+    }
+
+    window.addEventListener("popstate", restoreQuery)
+    queueMicrotask(() => {
+      if (!active) return
+      restoreQuery()
+      setQueryReady(true)
+    })
+    return () => {
+      active = false
+      window.removeEventListener("popstate", restoreQuery)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!queryReady) return
+    const query = serializeDashboardQuery(
+      { search, filter },
+      window.location.search
+    )
+    const nextURL = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`
+    window.history.replaceState(window.history.state, "", nextURL)
+  }, [filter, queryReady, search])
 
   const handleError = useCallback(
     (reason: unknown) => {
@@ -175,6 +212,27 @@ export default function DashboardPage() {
     [handleError, updatePile]
   )
 
+  const handleMove = useCallback(
+    async (id: string, direction: "up" | "down") => {
+      const ids = snapshot.piles.map((pile) => pile.id)
+      const currentIndex = ids.indexOf(id)
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= ids.length) return
+
+      ;[ids[currentIndex], ids[nextIndex]] = [ids[nextIndex], ids[currentIndex]]
+      setReordering(true)
+      try {
+        await reorderPiles(ids)
+        toast.success("充电桩顺序已调整")
+      } catch (reason) {
+        handleError(reason)
+      } finally {
+        setReordering(false)
+      }
+    },
+    [handleError, reorderPiles, snapshot.piles]
+  )
+
   const entries = useMemo(
     () => filterPiles(snapshot.piles, deferredSearch, filter),
     [filter, deferredSearch, snapshot.piles]
@@ -196,8 +254,8 @@ export default function DashboardPage() {
   async function refresh() {
     setRefreshing(true)
     try {
-      await refreshFromCapture()
-      toast.success(snapshot.refresh.message || "设备状态已刷新")
+      const next = await refreshFromCapture()
+      toast.success(next.refresh.message || "设备状态已刷新")
     } catch (reason) {
       handleError(reason)
     } finally {
@@ -217,10 +275,12 @@ export default function DashboardPage() {
               aria-hidden
               className={`size-1.5 rounded-full ${
                 streamState === "connected"
-                  ? "bg-success motion-safe:animate-pulse"
+                  ? "bg-success"
                   : streamState === "error"
                     ? "bg-destructive motion-safe:animate-pulse"
-                    : "bg-muted-foreground/40"
+                    : streamState === "connecting"
+                      ? "bg-warning motion-safe:animate-pulse"
+                      : "bg-muted-foreground/40"
               }`}
             />
             实时连接：{streamLabel}
@@ -240,9 +300,10 @@ export default function DashboardPage() {
       }
     >
       <Card className="shadow-xs" aria-label="运营摘要">
-        <CardContent className="grid divide-y p-0 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+        <CardContent className="grid grid-cols-2 p-0 xl:grid-cols-4">
           <MetricCard
             compact
+            className="border-r border-b xl:border-b-0"
             tone="primary"
             label="充电桩"
             value={snapshot.statistics.pileCount}
@@ -251,6 +312,7 @@ export default function DashboardPage() {
           />
           <MetricCard
             compact
+            className="border-b xl:border-r xl:border-b-0"
             label="全部端口"
             value={snapshot.statistics.portCount}
             detail="所有设备端口总和"
@@ -258,6 +320,7 @@ export default function DashboardPage() {
           />
           <MetricCard
             compact
+            className="border-r"
             tone="warning"
             label="正在使用"
             value={snapshot.statistics.inUsePortCount}
@@ -274,7 +337,7 @@ export default function DashboardPage() {
           />
         </CardContent>
       </Card>
-      <Card className="mt-3 shadow-xs">
+      <Card className="mt-3 shadow-xs md:sticky md:top-20 md:z-30">
         <CardContent className="grid gap-2 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <div>
@@ -331,7 +394,11 @@ export default function DashboardPage() {
           </Button>
         </CardContent>
       </Card>
-      <section className="mt-4 flex flex-col gap-4" aria-label="充电桩列表">
+      <section
+        className="mt-4 flex flex-col gap-4"
+        aria-label="充电桩列表"
+        aria-busy={reordering}
+      >
         {loading ? (
           <div className="grid gap-4">
             <Skeleton className="h-64 w-full" />
@@ -342,8 +409,8 @@ export default function DashboardPage() {
             // 首屏按索引错峰浮现；fill-mode-backwards 让延迟期间保持不可见。
             <div
               key={entry.pile.id}
-              className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:fill-mode-backwards motion-safe:duration-500"
-              style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
+              className="motion-safe:animate-in motion-safe:duration-200 motion-safe:fill-mode-backwards motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
+              style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
             >
               <PileCard
                 pile={entry.pile}
@@ -351,6 +418,10 @@ export default function DashboardPage() {
                 filtering={hasActiveFilter}
                 onRemove={handleRemove}
                 onUpdate={handleUpdate}
+                canMoveUp={snapshot.piles[0]?.id !== entry.pile.id}
+                canMoveDown={snapshot.piles.at(-1)?.id !== entry.pile.id}
+                reordering={reordering}
+                onMove={handleMove}
               />
             </div>
           ))
