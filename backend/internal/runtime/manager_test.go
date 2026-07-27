@@ -50,6 +50,76 @@ func TestUpdateUserKeepsAtLeastOneEnabledAdmin(t *testing.T) {
 	}
 }
 
+func TestResetUserPasswordRequiresChangeOnNextLogin(t *testing.T) {
+	manager := &Manager{
+		repository: testRepository(t),
+		users:      map[string]model.User{},
+		runtimes:   map[string]*UserRuntime{},
+		settings: model.RegistrationSettings{
+			DefaultDeviceLimit:    defaultDeviceLimit,
+			DefaultRefreshEnabled: true,
+		},
+	}
+	user, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "reset-user",
+		Password: "password123",
+		Role:     model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	temporaryPassword, err := manager.ResetUserPassword(user.ID)
+	if err != nil {
+		t.Fatalf("ResetUserPassword: %v", err)
+	}
+	if len(temporaryPassword) < 8 || temporaryPassword == "password123" {
+		t.Fatal("temporary password did not satisfy reset requirements")
+	}
+	if _, err := manager.Authenticate(user.Username, "password123"); err == nil {
+		t.Fatal("old password remains valid after reset")
+	}
+	current, err := manager.Authenticate(user.Username, temporaryPassword)
+	if err != nil {
+		t.Fatalf("Authenticate with temporary password: %v", err)
+	}
+	if !current.MustChangePassword {
+		t.Fatal("temporary-password login did not require a password change")
+	}
+	state, ok, err := manager.repository.Load()
+	if err != nil {
+		t.Fatalf("Load persisted reset state: %v", err)
+	}
+	if !ok {
+		t.Fatal("reset state was not persisted")
+	}
+	persistedMustChange := false
+	for _, persistedUser := range state.Users {
+		if persistedUser.ID == user.ID {
+			persistedMustChange = persistedUser.MustChangePassword
+			break
+		}
+	}
+	if !persistedMustChange {
+		t.Fatal("persisted user did not retain the password-change requirement")
+	}
+
+	changed, err := manager.ChangePassword(user.ID, temporaryPassword, "replacement-password-123")
+	if err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if changed.MustChangePassword {
+		t.Fatal("password-change requirement was not cleared")
+	}
+	current, err = manager.Authenticate(user.Username, "replacement-password-123")
+	if err != nil {
+		t.Fatalf("Authenticate with replacement password: %v", err)
+	}
+	if current.MustChangePassword {
+		t.Fatal("replacement-password login still requires another password change")
+	}
+}
+
 func TestConcurrentSaveProducesValidState(t *testing.T) {
 	repository := testRepository(t)
 	manager := &Manager{

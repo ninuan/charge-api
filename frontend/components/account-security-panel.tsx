@@ -72,7 +72,7 @@ export function AccountSecurityPanel() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <Card className="shadow-xs">
+      <Card id="change-password" className="scroll-mt-24 shadow-xs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <KeyRoundIcon className="size-4" />
@@ -129,10 +129,18 @@ export function AccountSecurityPanel() {
               <div key={session.id} className="rounded-lg border p-3">
                 <p className="flex items-center gap-2 text-sm font-medium">
                   <LaptopIcon className="size-4" />
-                  {session.current ? "当前会话" : "其他会话"}
+                  {session.browser || "未知浏览器"} ·
+                  {session.deviceType || "未知设备"}
+                  {session.current && (
+                    <span className="text-primary">当前</span>
+                  )}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  登录于 {new Date(session.createdAt).toLocaleString("zh-CN")}
+                  {session.os || "未知系统"} · {session.ipLabel || "未知网络"} ·
+                  最近活动{" "}
+                  {new Date(
+                    session.lastActiveAt || session.createdAt
+                  ).toLocaleString("zh-CN")}
                 </p>
               </div>
             ))}

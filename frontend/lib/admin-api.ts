@@ -1,12 +1,17 @@
 import type {
   AdminHealth,
   AdminStats,
+  AdminUserDetail,
   AdminUserListQuery,
   AdminUserPage,
+  AuditPage,
   CurrentUser,
   InviteCode,
   InviteCodePage,
+  OperationsStatus,
   RegistrationSettings,
+  SystemException,
+  TemporaryPasswordResponse,
   UserRole,
 } from "@/lib/types"
 import { request } from "@/lib/http"
@@ -33,6 +38,58 @@ export const adminApi = {
       {},
       "加载用户列表失败"
     ),
+  userDetail: (id: string) =>
+    request<AdminUserDetail>(
+      `/api/admin/users/${id}/detail`,
+      {},
+      "加载用户详情失败"
+    ),
+  refreshUser: (id: string) =>
+    request<void>(
+      `/api/admin/users/${id}/refresh`,
+      { method: "POST" },
+      "刷新用户设备失败"
+    ),
+  resetUserPassword: (id: string) =>
+    request<TemporaryPasswordResponse>(
+      `/api/admin/users/${id}/reset-password`,
+      { method: "POST" },
+      "重置用户密码失败"
+    ),
+  incidents: (filters?: { status?: string; type?: string; level?: string }) =>
+    request<SystemException[]>(
+      `/api/admin/incidents?${new URLSearchParams({
+        status: filters?.status ?? "",
+        type: filters?.type ?? "",
+        level: filters?.level ?? "",
+      })}`,
+      {},
+      "加载异常列表失败"
+    ),
+  updateIncident: (
+    id: string,
+    payload: { status: SystemException["status"]; note: string }
+  ) =>
+    request<SystemException>(
+      `/api/admin/incidents/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "更新异常状态失败"
+    ),
+  audit: (page = 1, pageSize = 20) =>
+    request<AuditPage>(
+      `/api/admin/audit?${new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      })}`,
+      {},
+      "加载管理日志失败"
+    ),
+  operations: () =>
+    request<OperationsStatus>("/api/admin/operations", {}, "加载运维信息失败"),
   createUser: (payload: {
     username: string
     password: string

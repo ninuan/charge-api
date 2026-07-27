@@ -249,6 +249,114 @@ func TestAdminUsersListsFilteredPageInsteadOfEveryAccount(t *testing.T) {
 	}
 }
 
+func TestAdminUserDetailAndDangerousActionAudit(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	adminSession, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create admin session: %v", err)
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	createRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/users",
+		strings.NewReader(`{"username":"detail-user","password":"password123","role":"user"}`),
+	)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	createRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var created model.CurrentUser
+	if err := json.NewDecoder(createRecorder.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created user: %v", err)
+	}
+	if _, err := sessions.Create(created.ID, auth.SessionClientInfo{
+		Browser: "Safari", OS: "iOS", DeviceType: "手机",
+		IPLabel: "192.168.*.*",
+	}); err != nil {
+		t.Fatalf("Create target session: %v", err)
+	}
+
+	detailRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/api/admin/users/"+created.ID+"/detail",
+		nil,
+	)
+	detailRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	detailRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(detailRecorder, detailRequest)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("detail status = %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	var detail model.AdminUserDetail
+	if err := json.NewDecoder(detailRecorder.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail.Summary.User.Username != "detail-user" ||
+		len(detail.Sessions) != 1 || detail.Sessions[0].IPLabel != "192.168.*.*" {
+		t.Fatalf("unexpected detail: %+v", detail)
+	}
+
+	auditRequest := httptest.NewRequest(http.MethodGet, "/api/admin/audit", nil)
+	auditRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	auditRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(auditRecorder, auditRequest)
+	if auditRecorder.Code != http.StatusOK {
+		t.Fatalf("audit status = %d: %s", auditRecorder.Code, auditRecorder.Body.String())
+	}
+	var audit model.AuditPage
+	if err := json.NewDecoder(auditRecorder.Body).Decode(&audit); err != nil {
+		t.Fatalf("decode audit: %v", err)
+	}
+	if audit.Total != 1 || audit.Items[0].Action != "user.create" ||
+		audit.Items[0].TargetLabel != "detail-user" {
+		t.Fatalf("unexpected audit: %+v", audit)
+	}
+}
+
+func TestAdminIncidentCanBeAcknowledgedWithNote(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	admin := findUser(t, manager, "admin")
+	adminSession, err := sessions.Create(admin.ID)
+	if err != nil {
+		t.Fatalf("Create admin session: %v", err)
+	}
+	now := time.Now()
+	if err := manager.RecordSystemIncident(model.SystemException{
+		ID: "operations-backup", Username: "系统", Type: "backup",
+		Level: "warning", Message: "最近备份失败", Time: now,
+	}); err != nil {
+		t.Fatalf("RecordSystemIncident: %v", err)
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	request := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/incidents/operations-backup",
+		strings.NewReader(`{"status":"acknowledged","note":"已安排重新备份"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("incident status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var issue model.SystemException
+	if err := json.NewDecoder(recorder.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode incident: %v", err)
+	}
+	if issue.Status != "acknowledged" || issue.Note != "已安排重新备份" ||
+		issue.HandledBy != "admin" || issue.HandledAt == nil {
+		t.Fatalf("unexpected incident: %+v", issue)
+	}
+}
+
 func TestWriteAddPileErrorReturnsFriendlyMessageWhenYYBBindingIsMissing(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
@@ -369,7 +477,7 @@ func TestAuthLockRecordsOneSanitizedSecurityDiagnostic(t *testing.T) {
 	}
 }
 
-func TestAdminUpdateRevokesTargetUserSessions(t *testing.T) {
+func TestAdminResetPasswordGeneratesTemporaryPasswordAndRevokesSessions(t *testing.T) {
 	server, manager, sessions := newTestServer(t)
 	admin := findUser(t, manager, "admin")
 	user, err := manager.CreateUser(model.UserCreateRequest{
@@ -389,18 +497,33 @@ func TestAdminUpdateRevokesTargetUserSessions(t *testing.T) {
 		t.Fatalf("Create user session: %v", err)
 	}
 
-	body := strings.NewReader(`{"password":"new-password-123"}`)
-	request := httptest.NewRequest(http.MethodPatch, "/api/admin/users/"+user.ID, body)
-	request.Header.Set("Content-Type", "application/json")
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/users/"+user.ID+"/reset-password", nil)
 	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
 	recorder := httptest.NewRecorder()
 	server.handleAdminUserActions(recorder, request)
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("update returned %d: %s", recorder.Code, recorder.Body.String())
+		t.Fatalf("reset returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("temporary password response is cacheable: %q", recorder.Header().Get("Cache-Control"))
+	}
+	var payload model.TemporaryPasswordResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode temporary password: %v", err)
+	}
+	if len(payload.TemporaryPassword) < 8 {
+		t.Fatal("temporary password is unexpectedly short")
 	}
 	if _, ok := sessions.Get(userSession.Token); ok {
 		t.Fatal("target user's previous session remains valid")
+	}
+	current, err := manager.Authenticate(user.Username, payload.TemporaryPassword)
+	if err != nil {
+		t.Fatalf("Authenticate with temporary password: %v", err)
+	}
+	if !current.MustChangePassword {
+		t.Fatal("temporary-password login did not require a password change")
 	}
 }
 

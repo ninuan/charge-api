@@ -36,7 +36,7 @@ type AuthContextValue = {
   changePassword: (
     currentPassword: string,
     newPassword: string
-  ) => Promise<void>
+  ) => Promise<CurrentUser>
   acknowledgeUsageGuide: () => Promise<CurrentUser>
   fetchSessions: () => Promise<SessionView[]>
   logoutOtherSessions: () => Promise<void>
@@ -133,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
-      await requestJSON<unknown>(
+      const user = await requestJSON<CurrentUser>(
         "/api/auth/password",
         {
           method: "POST",
@@ -142,6 +142,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
         "修改密码失败"
       )
+      setCurrentUser(user)
+      return user
     },
     []
   )

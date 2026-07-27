@@ -7,108 +7,144 @@
 /* 普通 @theme（非 inline）才会把变量写进 :root，var() 引用因此能在运行时解析。
    项目没有接入 next/font，字体栈直接在这里定型，并显式带上中文回退。 */
 @theme {
-    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
-        sans-serif;
-    --font-heading: var(--font-sans);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-heading: var(--font-sans);
 }
 
 @theme inline {
-    --color-success: var(--success);
-    --color-success-foreground: var(--success-foreground);
-    --color-warning: var(--warning);
-    --color-warning-foreground: var(--warning-foreground);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 :root {
-    /* 品牌色（电光青绿）：主按钮/焦点环/背景微染同一色相 */
-    --background: oklch(0.988 0.004 168);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.56 0.12 168);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.966 0.005 168);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.955 0.014 168);
-    --accent-foreground: oklch(0.28 0.045 168);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.92 0.006 168);
-    --input: oklch(0.92 0.006 168);
-    --ring: oklch(0.65 0.1 168);
-    /* 业务状态语义色：success=空闲/正常，warning=充电中/占用。 */
-    --success: oklch(0.627 0.194 149.214);
-    --success-foreground: oklch(0.266 0.065 152.934);
-    --warning: oklch(0.769 0.188 70.08);
-    --warning-foreground: oklch(0.279 0.077 45.635);
-    --radius: 0.625rem;
+  /* 品牌色（电光青绿）：主按钮/焦点环/背景微染同一色相 */
+  --background: oklch(0.988 0.004 168);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.56 0.12 168);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.966 0.005 168);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.955 0.014 168);
+  --accent-foreground: oklch(0.28 0.045 168);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.006 168);
+  --input: oklch(0.92 0.006 168);
+  --ring: oklch(0.65 0.1 168);
+  /* 业务状态语义色：success=空闲/正常，warning=充电中/占用。 */
+  --success: oklch(0.627 0.194 149.214);
+  --success-foreground: oklch(0.266 0.065 152.934);
+  --warning: oklch(0.769 0.188 70.08);
+  --warning-foreground: oklch(0.279 0.077 45.635);
+  --radius: 0.625rem;
 }
 
 .dark {
-    --background: oklch(0.148 0.008 168);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0.01 168);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0.01 168);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.74 0.13 168);
-    --primary-foreground: oklch(0.17 0.04 168);
-    --secondary: oklch(0.269 0.008 168);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0.008 168);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.28 0.02 168);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.6 0.1 168);
-    --success: oklch(0.723 0.192 149.579);
-    --success-foreground: oklch(0.982 0.018 155.826);
-    --warning: oklch(0.769 0.188 70.08);
-    --warning-foreground: oklch(0.987 0.022 95.277);
+  --background: oklch(0.148 0.008 168);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0.01 168);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0.01 168);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.74 0.13 168);
+  --primary-foreground: oklch(0.17 0.04 168);
+  --secondary: oklch(0.269 0.008 168);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0.008 168);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.28 0.02 168);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.6 0.1 168);
+  --success: oklch(0.723 0.192 149.579);
+  --success-foreground: oklch(0.982 0.018 155.826);
+  --warning: oklch(0.769 0.188 70.08);
+  --warning-foreground: oklch(0.987 0.022 95.277);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
-  button:not(:disabled), [role="button"]:not(:disabled) {
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
     cursor: pointer;
-    }
+  }
   html {
     @apply font-sans;
-    }
+  }
+}
+
+@keyframes health-recovered {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--success) 35%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 10px color-mix(in oklab, var(--success) 12%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 18px transparent;
+  }
+}
+
+@keyframes port-state-glow {
+  0% {
+    opacity: 0.72;
+    box-shadow: 0 0 0 0 currentColor;
+    transform: translateY(2px);
+  }
+  55% {
+    opacity: 1;
+    box-shadow: 0 0 0 4px color-mix(in oklab, currentColor 12%, transparent);
+  }
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 8px transparent;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="health-recovered"] {
+    animation: none !important;
+  }
 }

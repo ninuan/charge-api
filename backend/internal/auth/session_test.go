@@ -90,3 +90,32 @@ func TestPersistentSessionSurvivesManagerRestartWithoutStoringRawToken(t *testin
 		}
 	}
 }
+
+func TestPersistentSessionKeepsNormalizedClientMetadata(t *testing.T) {
+	store, err := persistence.OpenSQLite(
+		t.TempDir()+"/state.db",
+		bytes.Repeat([]byte{0x67}, persistence.CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+	manager := NewPersistentSessionManager(time.Hour, store)
+	defer manager.Close()
+	session, err := manager.Create("user-1", SessionClientInfo{
+		Browser: "Chrome", OS: "macOS", DeviceType: "电脑",
+		IPLabel: "10.0.*.*",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	views, err := manager.List("user-1", session.Token)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(views) != 1 || !views[0].Current ||
+		views[0].Browser != "Chrome" || views[0].IPLabel != "10.0.*.*" ||
+		views[0].LastActiveAt.IsZero() {
+		t.Fatalf("unexpected session view: %+v", views)
+	}
+}

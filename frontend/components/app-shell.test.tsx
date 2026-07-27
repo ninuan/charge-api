@@ -6,7 +6,10 @@ import { AppShell } from "@/components/app-shell"
 
 const { authState } = vi.hoisted(() => ({
   authState: {
-    currentUser: { username: "alice" } as { username: string } | null,
+    currentUser: { username: "alice" } as {
+      username: string
+      mustChangePassword?: boolean
+    } | null,
     isAdmin: false,
     ready: true,
     logout: vi.fn(),
@@ -57,6 +60,26 @@ describe("AppShell", () => {
     )
   })
 
+  it("prompts a user logged in with a temporary password to change it", () => {
+    authState.currentUser = {
+      username: "alice",
+      mustChangePassword: true,
+    }
+    authState.isAdmin = false
+    authState.ready = true
+
+    render(
+      <AppShell title="看板" description="说明">
+        <p>主要内容</p>
+      </AppShell>
+    )
+
+    expect(
+      screen.getByText("当前使用的是管理员生成的临时密码")
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "修改密码" })).toBeVisible()
+  })
+
   it("uses a bounded, scrollable account drawer on narrow screens", async () => {
     authState.currentUser = { username: "alice" }
     authState.isAdmin = false
@@ -85,5 +108,10 @@ describe("AppShell", () => {
     expect(
       within(drawer as HTMLElement).getByRole("button", { name: "使用说明" })
     ).toBeVisible()
+    expect(within(drawer as HTMLElement).getByText("当前页面")).toBeVisible()
+    expect(within(drawer as HTMLElement).getByText("账户操作")).toBeVisible()
+    expect(
+      within(drawer as HTMLElement).getByRole("button", { name: "退出登录" })
+    ).toHaveClass("text-destructive")
   })
 })

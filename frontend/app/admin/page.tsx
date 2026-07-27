@@ -2,6 +2,7 @@
 
 import {
   ActivityIcon,
+  DatabaseIcon,
   PlusIcon,
   RefreshCwIcon,
   Settings2Icon,
@@ -83,8 +84,12 @@ const AdminSettings = dynamic(
   () => import("@/components/admin-settings").then((m) => m.AdminSettings),
   { ssr: false, loading: settingsFallback }
 )
+const AdminOperations = dynamic(
+  () => import("@/components/admin-operations").then((m) => m.AdminOperations),
+  { ssr: false, loading: overviewFallback }
+)
 
-type Tab = "overview" | "users" | "settings"
+type Tab = "overview" | "users" | "settings" | "operations"
 
 const emptyQuery: AdminUserListQuery = {
   page: 1,
@@ -102,6 +107,7 @@ const titles = {
   ],
   users: ["用户管理", "按账户状态、扫码凭据和设备健康度定位需要处理的账户。"],
   settings: ["系统设置", "管理注册策略、新账户默认权限和长期邀请码。"],
+  operations: ["运维与审计", "检查数据库、备份和管理操作记录。"],
 } as const
 
 const roleOptions = [
@@ -123,7 +129,7 @@ function AdminPageContent() {
   const { currentUser, fetchMe } = useAuth()
   const currentTab = searchParams.get("tab")
   const tab = (
-    ["overview", "users", "settings"].includes(currentTab ?? "")
+    ["overview", "users", "settings", "operations"].includes(currentTab ?? "")
       ? currentTab
       : "overview"
   ) as Tab
@@ -135,6 +141,7 @@ function AdminPageContent() {
   const [invitePage, setInvitePage] = useState<InviteCodePage | null>(null)
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [form, setForm] = useState({
     username: "",
     password: "",
@@ -171,7 +178,9 @@ function AdminPageContent() {
           ? loadOverview()
           : tab === "users"
             ? loadUsers()
-            : loadSettings()
+            : tab === "settings"
+              ? loadSettings()
+              : Promise.resolve()
       await Promise.all([
         adminApi.health().then((nextHealth) => setHealth(nextHealth)),
         tabLoad,
@@ -217,7 +226,12 @@ function AdminPageContent() {
       description={titles[tab][1]}
       actions={
         <div className="grid grid-cols-2 gap-2 md:flex [&_button]:w-full md:[&_button]:w-auto">
-          <AdminHealthStatus health={health} />
+          <AdminHealthStatus
+            health={health}
+            onRecheck={async () => {
+              setHealth(await adminApi.health())
+            }}
+          />
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger
               render={
@@ -310,23 +324,37 @@ function AdminPageContent() {
       }
     >
       <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
-        <TabsList className="mb-4">
-          <TabsTrigger value="overview">
+        <TabsList className="mb-4 w-full justify-start overflow-x-auto md:w-fit">
+          <TabsTrigger value="overview" aria-label="运营总览">
             <ActivityIcon />
-            运营总览
+            <span className="sm:hidden">总览</span>
+            <span className="hidden sm:inline">运营总览</span>
           </TabsTrigger>
-          <TabsTrigger value="users">
+          <TabsTrigger value="users" aria-label="用户管理">
             <UsersIcon />
-            用户管理
+            <span className="sm:hidden">用户</span>
+            <span className="hidden sm:inline">用户管理</span>
           </TabsTrigger>
-          <TabsTrigger value="settings">
+          <TabsTrigger value="settings" aria-label="系统设置">
             <Settings2Icon />
-            系统设置
+            <span className="sm:hidden">设置</span>
+            <span className="hidden sm:inline">系统设置</span>
+          </TabsTrigger>
+          <TabsTrigger value="operations" aria-label="运维审计">
+            <DatabaseIcon />
+            <span className="sm:hidden">运维</span>
+            <span className="hidden sm:inline">运维审计</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
       {tab === "overview" && (
-        <AdminOverview stats={stats} onUsers={() => setTab("users")} />
+        <AdminOverview
+          stats={stats}
+          onUser={(id) => {
+            setSelectedUserId(id)
+            setTab("users")
+          }}
+        />
       )}
       {tab === "users" && (
         <AdminUsers
@@ -334,6 +362,8 @@ function AdminPageContent() {
           query={query}
           load={loadUsers}
           currentUserId={currentUser?.id}
+          selectedUserId={selectedUserId}
+          onSelectedUserChange={setSelectedUserId}
         />
       )}
       {tab === "settings" &&
@@ -347,6 +377,7 @@ function AdminPageContent() {
         ) : (
           settingsFallback()
         ))}
+      {tab === "operations" && <AdminOperations />}
     </AppShell>
   )
 }

@@ -1,4 +1,7 @@
+"use client"
+
 import type { LucideIcon } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -13,6 +16,44 @@ const toneClasses: Record<MetricTone, string> = {
   success: "bg-success/15 text-success-foreground",
   warning: "bg-warning/15 text-warning-foreground",
   destructive: "bg-destructive/10 text-destructive",
+}
+
+function AnimatedMetricValue({ value }: { value: number }) {
+  const previousValue = useRef(value)
+  const [displayValue, setDisplayValue] = useState(value)
+
+  useEffect(() => {
+    const startValue = previousValue.current
+    previousValue.current = value
+
+    if (startValue === value) return
+
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      const reducedMotionFrame = requestAnimationFrame(() =>
+        setDisplayValue(value)
+      )
+      return () => cancelAnimationFrame(reducedMotionFrame)
+    }
+
+    const startedAt = performance.now()
+    const duration = 220
+    let frame = 0
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplayValue(
+        Math.round(startValue + (value - startValue) * eased)
+      )
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [value])
+
+  return displayValue
 }
 
 export function MetricCard({
@@ -52,10 +93,9 @@ export function MetricCard({
           />
         ) : (
           <p
-            key={value}
-            className={`font-semibold tabular-nums motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in ${compact ? "mt-1 text-xl" : "mt-2 text-2xl"}`}
+            className={`font-semibold tabular-nums ${compact ? "mt-1 text-xl" : "mt-2 text-2xl"}`}
           >
-            {value}
+            <AnimatedMetricValue value={value} />
             {suffix && <span className="ml-0.5 text-[0.65em]">{suffix}</span>}
           </p>
         )}

@@ -248,7 +248,7 @@ function PileCardComponent({
                 <section
                   key={`${port.id}-${port.status}`}
                   style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
-                  className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm motion-safe:animate-in motion-safe:duration-200 motion-safe:fill-mode-backwards motion-safe:fade-in ${meta.className}`}
+                  className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm motion-safe:animate-[port-state-glow_240ms_ease-out] motion-safe:fill-mode-backwards ${meta.className}`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-lg font-semibold tabular-nums">
@@ -373,6 +373,41 @@ function samePortIds(a: number[], b: number[]) {
   )
 }
 
+function samePile(a: Pile, b: Pile) {
+  return (
+    a === b ||
+    (a.id === b.id &&
+      a.number === b.number &&
+      a.name === b.name &&
+      a.status === b.status &&
+      a.address === b.address &&
+      a.openNum === b.openNum &&
+      a.online === b.online &&
+      a.createdAt === b.createdAt &&
+      a.updatedAt === b.updatedAt &&
+      a.source === b.source &&
+      a.sortOrder === b.sortOrder &&
+      samePortIds(a.usedPortIds, b.usedPortIds) &&
+      a.ports.length === b.ports.length &&
+      a.ports.every((port, index) => {
+        const other = b.ports[index]
+        return (
+          other !== undefined &&
+          port.id === other.id &&
+          port.status === other.status &&
+          port.powerKw === other.powerKw &&
+          port.energyKwh === other.energyKwh &&
+          port.updatedAt === other.updatedAt &&
+          port.startedAt === other.startedAt &&
+          port.sessionMin === other.sessionMin &&
+          port.usedSeconds === other.usedSeconds &&
+          port.usedText === other.usedText &&
+          port.remainingText === other.remainingText
+        )
+      }))
+  )
+}
+
 // SSE 每帧都会重建全部 pile 对象、筛选每次都会新建 portIds 数组，
 // 引用比较永远不相等；按内容比较才能让未变化的卡片跳过重渲染。
 export const PileCard = memo(
@@ -386,6 +421,5 @@ export const PileCard = memo(
     prev.canMoveDown === next.canMoveDown &&
     prev.reordering === next.reordering &&
     samePortIds(prev.visiblePortIds, next.visiblePortIds) &&
-    (prev.pile === next.pile ||
-      JSON.stringify(prev.pile) === JSON.stringify(next.pile))
+    samePile(prev.pile, next.pile)
 )

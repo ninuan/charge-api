@@ -39,7 +39,7 @@ describe("AdminOverview", () => {
   afterEach(cleanup)
 
   it("shows explicit metric units and accessible trend ranges", () => {
-    render(<AdminOverview stats={stats} onUsers={vi.fn()} />)
+    render(<AdminOverview stats={stats} onUser={vi.fn()} />)
 
     expect(screen.getByLabelText("远端成功率 指标")).toHaveTextContent("100%")
     expect(

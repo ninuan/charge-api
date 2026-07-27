@@ -64,7 +64,9 @@ const snapshot = {
   },
 }
 
-test("administrator signs in and filters the user list", async ({ page }) => {
+test("administrator handles a user and verifies the audit trail", async ({
+  page,
+}) => {
   await page.goto("/login")
   await page.getByLabel("用户名").fill("admin")
   await page.locator("#password").fill("localadmin123")
@@ -72,22 +74,70 @@ test("administrator signs in and filters the user list", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/admin\/?$/)
   await expect(page.getByRole("heading", { name: "运营总览" })).toBeVisible()
+  await page.getByRole("button", { name: "创建用户" }).click()
+  await page.locator("#new-username").fill("e2e-user")
+  await page.locator("#new-password").fill("password123")
+  await page.getByRole("button", { name: "确认创建" }).click()
+  await expect(page.getByText("用户已创建")).toBeVisible()
+
   await page.getByRole("tab", { name: "用户管理" }).click()
   await expect(page).toHaveURL(/\/admin\/?\?tab=users$/)
   await expect(page.getByRole("heading", { name: "筛选用户" })).toBeVisible()
-  await page.getByPlaceholder("用户名").fill("admin")
+  await page.getByPlaceholder("用户名").fill("e2e-user")
   await page.getByRole("button", { name: "应用筛选" }).click()
   await expect(
-    page.getByLabel("用户目录").getByText("admin", { exact: true })
+    page.getByLabel("用户目录").getByText("e2e-user", { exact: true })
   ).toBeVisible()
+  await page
+    .getByLabel("用户目录")
+    .getByRole("button", { name: "管理用户 e2e-user" })
+    .click()
+  await expect(page.getByRole("heading", { name: /e2e-user/ })).toBeVisible()
+  await expect(page.getByText("当前登录会话")).toBeVisible()
+  await page.getByRole("button", { name: "停用账户" }).click()
+  await expect(page.getByText("用户已停用")).toBeVisible()
+  await page.getByRole("button", { name: "启用账户" }).click()
+  await expect(page.getByText("用户已启用")).toBeVisible()
+  await page.getByRole("button", { name: "重置密码" }).click()
+  await page.getByRole("button", { name: "生成临时密码" }).click()
+  await expect(
+    page.getByRole("heading", { name: "临时密码已生成" })
+  ).toBeVisible()
+  await expect(page.locator("code")).not.toBeEmpty()
+  await page.getByRole("button", { name: "我已保存" }).click()
+  await page
+    .locator("[data-slot=sheet-content]")
+    .getByRole("button", { name: "关闭" })
+    .click()
 
   await page.screenshot({
-    path: "/tmp/charge-1.4.12-admin-users.png",
+    path: "/tmp/charge-1.4.13-admin-users.png",
+    fullPage: false,
+  })
+
+  await page.getByRole("tab", { name: "系统设置" }).click()
+  await page.getByRole("button", { name: "保存设置" }).click()
+  await expect(page.getByText("系统设置已保存")).toBeVisible()
+  await page.getByRole("tab", { name: "运维审计" }).click()
+  await expect(page.getByText("数据与备份")).toBeVisible()
+  await expect(page.getByText("管理操作日志")).toBeVisible()
+  await expect(page.getByText(/修改账户状态/).first()).toBeVisible()
+  await expect(page.getByText(/重置密码/).first()).toBeVisible()
+  await expect(page.getByText(/修改系统设置/).first()).toBeVisible()
+  await page.screenshot({
+    path: "/tmp/charge-1.4.13-admin-operations.png",
     fullPage: false,
   })
 
   await page.setViewportSize({ width: 375, height: 812 })
   await page.getByRole("tab", { name: "运营总览" }).click()
+  await expect(page.getByRole("tab", { name: "运营总览" })).toHaveAttribute(
+    "data-active",
+    ""
+  )
+  await expect(page.getByRole("tab", { name: "运维审计" })).not.toHaveAttribute(
+    "data-active"
+  )
   await expect(page.getByRole("heading", { name: "运营总览" })).toBeVisible()
   const issueMetric = await page.getByLabel("待处理问题 指标").boundingBox()
   const successMetric = await page.getByLabel("远端成功率 指标").boundingBox()
@@ -96,7 +146,37 @@ test("administrator signs in and filters the user list", async ({ page }) => {
   expect(successMetric?.y).toBe(activeMetric?.y)
 
   await page.screenshot({
-    path: "/tmp/charge-1.4.12-admin-mobile.png",
+    path: "/tmp/charge-1.4.13-admin-mobile.png",
+    fullPage: false,
+  })
+
+  await page.getByRole("button", { name: "打开菜单" }).click()
+  const mobileMenu = page.locator("[data-slot=sheet-content]")
+  await expect(mobileMenu.getByText("当前页面")).toBeVisible()
+  await expect(mobileMenu.getByText("账户操作")).toBeVisible()
+  await expect(
+    mobileMenu.getByRole("button", { name: "创建用户" })
+  ).toBeVisible()
+  await expect(
+    mobileMenu.getByRole("button", { name: "刷新数据" })
+  ).toBeVisible()
+  await page.waitForTimeout(250)
+  const mobileMenuBox = await mobileMenu.boundingBox()
+  expect(mobileMenuBox?.x).toBeGreaterThanOrEqual(0)
+  expect((mobileMenuBox?.x ?? 0) + (mobileMenuBox?.width ?? 0)).toBeLessThanOrEqual(
+    376
+  )
+  const refreshBox = await mobileMenu
+    .getByRole("button", { name: "刷新数据" })
+    .boundingBox()
+  const logoutBox = await mobileMenu
+    .getByRole("button", { name: "退出登录" })
+    .boundingBox()
+  expect(logoutBox?.y).toBeGreaterThan(
+    (refreshBox?.y ?? 0) + (refreshBox?.height ?? 0) + 16
+  )
+  await page.screenshot({
+    path: "/tmp/charge-1.4.13-admin-mobile-menu.png",
     fullPage: false,
   })
 })
@@ -147,11 +227,13 @@ test("dashboard restores URL filters and keeps the mobile controls clear", async
   expect(thirdMetric?.y).toBeGreaterThan(firstMetric?.y ?? 0)
 
   await search.fill("松园")
-  await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe("松园")
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("q"))
+    .toBe("松园")
   await expect(page.getByText("03", { exact: true })).toBeVisible()
 
   await page.screenshot({
-    path: "/tmp/charge-1.4.12-dashboard-mobile.png",
+    path: "/tmp/charge-1.4.13-dashboard-mobile.png",
     fullPage: false,
   })
 })

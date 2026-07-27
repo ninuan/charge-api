@@ -9,6 +9,8 @@ import {
   ServerIcon,
   TriangleAlertIcon,
 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -82,12 +84,46 @@ function healthSummary(health: AdminHealth | null) {
   }
   return {
     label: "全部正常",
-    dotClassName: "bg-success motion-safe:animate-pulse",
+    dotClassName: "bg-success",
   }
 }
 
-export function AdminHealthStatus({ health }: { health: AdminHealth | null }) {
+export function AdminHealthStatus({
+  health,
+  onRecheck,
+}: {
+  health: AdminHealth | null
+  onRecheck?: () => Promise<void>
+}) {
   const summary = healthSummary(health)
+  const previousHealthy = useRef<boolean | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [recovered, setRecovered] = useState(false)
+
+  useEffect(() => {
+    const allHealthy =
+      Boolean(health) &&
+      services.every(({ key }) => health?.[key].state === "healthy")
+    if (allHealthy && previousHealthy.current === false) {
+      setRecovered(true)
+      const timer = window.setTimeout(() => setRecovered(false), 700)
+      previousHealthy.current = true
+      return () => window.clearTimeout(timer)
+    }
+    previousHealthy.current = allHealthy
+  }, [health])
+
+  async function recheck() {
+    setChecking(true)
+    try {
+      await onRecheck?.()
+      toast.success("服务状态已重新检查")
+    } catch (reason) {
+      toast.error((reason as Error).message)
+    } finally {
+      setChecking(false)
+    }
+  }
 
   return (
     <Dialog>
@@ -111,7 +147,13 @@ export function AdminHealthStatus({ health }: { health: AdminHealth | null }) {
           {summary.label}
         </span>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent
+        className={
+          recovered
+            ? "motion-safe:animate-[health-recovered_700ms_ease-out]"
+            : undefined
+        }
+      >
         <DialogHeader>
           <DialogTitle>服务健康</DialogTitle>
           <DialogDescription>
@@ -147,6 +189,29 @@ export function AdminHealthStatus({ health }: { health: AdminHealth | null }) {
                   <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                     {service?.message ?? "正在检查服务状态"}
                   </p>
+                  {service && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      24 小时可用率{" "}
+                      <span className="tabular-nums">
+                        {(service.availability24Hours ?? 0).toFixed(1)}%
+                      </span>
+                      {" · "}
+                      连续失败 {service.consecutiveFailures ?? 0} 次
+                    </p>
+                  )}
+                  {service?.lastRecoveredAt && (
+                    <p className="mt-1 text-xs text-success-foreground">
+                      最近恢复于{" "}
+                      {new Date(service.lastRecoveredAt).toLocaleString(
+                        "zh-CN"
+                      )}
+                    </p>
+                  )}
+                  {service?.recoveryAdvice && (
+                    <p className="mt-1 rounded-md bg-warning/10 p-2 text-xs leading-5 text-warning-foreground">
+                      {service.recoveryAdvice}
+                    </p>
+                  )}
                 </div>
                 <Badge
                   variant="secondary"
@@ -163,6 +228,16 @@ export function AdminHealthStatus({ health }: { health: AdminHealth | null }) {
             )
           })}
         </div>
+        <Button
+          variant="outline"
+          disabled={checking}
+          onClick={() => void recheck()}
+        >
+          <LoaderCircleIcon
+            className={checking ? "motion-safe:animate-spin" : undefined}
+          />
+          {checking ? "正在重新检查…" : "重新检查"}
+        </Button>
       </DialogContent>
     </Dialog>
   )

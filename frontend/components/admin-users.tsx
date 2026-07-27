@@ -1,23 +1,13 @@
-import { Trash2Icon } from "lucide-react"
-import { useState } from "react"
-import { toast } from "sonner"
+import { MoreHorizontalIcon } from "lucide-react"
 
+import { AdminUserDetailSheet } from "@/components/admin-user-detail-sheet"
 import { AdminUserDiagnostics } from "@/components/admin-user-diagnostics"
 import { AdminUserFilters } from "@/components/admin-user-filters"
 import { AdminUserRefreshTiming } from "@/components/admin-user-refresh-timing"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { adminApi } from "@/lib/admin-api"
 import type {
   AdminUserSummary,
   AdminUserListQuery,
@@ -75,6 +65,8 @@ type AdminUsersProps = {
   query: AdminUserListQuery
   load: (query?: AdminUserListQuery) => Promise<void>
   currentUserId?: string
+  selectedUserId: string | null
+  onSelectedUserChange: (id: string | null) => void
 }
 
 export function AdminUsers({
@@ -82,42 +74,10 @@ export function AdminUsers({
   query,
   load,
   currentUserId,
+  selectedUserId,
+  onSelectedUserChange,
 }: AdminUsersProps) {
-  // 开关与目标分离：关闭时保留 deleteTarget，退出动画期间标题不会闪空。
-  const [deleteTarget, setDeleteTarget] = useState<{
-    id: string
-    username: string
-  } | null>(null)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-
-  async function update(
-    id: string,
-    payload: Parameters<typeof adminApi.updateUser>[1]
-  ) {
-    try {
-      await adminApi.updateUser(id, payload)
-      toast.success("用户已更新")
-      await load()
-    } catch (reason) {
-      toast.error((reason as Error).message)
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return
-    setDeleting(true)
-    try {
-      await adminApi.removeUser(deleteTarget.id)
-      toast.success(`用户 ${deleteTarget.username} 已删除`)
-      setDeleteOpen(false)
-      await load()
-    } catch (reason) {
-      toast.error((reason as Error).message)
-    } finally {
-      setDeleting(false)
-    }
-  }
+  const contentKey = `${query.page}-${query.search}-${query.account}-${query.credential}-${query.health}`
 
   function renderStatus(summary: AdminUserSummary) {
     const risk = hasRisk(summary)
@@ -136,56 +96,19 @@ export function AdminUsers({
   }
 
   function renderActions(summary: AdminUserSummary) {
-    const isCurrent = summary.user.id === currentUserId
-
-    if (isCurrent) {
-      return <p className="text-xs text-muted-foreground">当前账户受保护</p>
-    }
-
     return (
-      <div className="flex flex-wrap gap-2 md:justify-end">
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label={`${summary.user.enabled ? "停用" : "启用"}用户 ${summary.user.username}`}
-          onClick={() =>
-            void update(summary.user.id, {
-              enabled: !summary.user.enabled,
-            })
-          }
-        >
-          {summary.user.enabled ? "停用" : "启用"}
-        </Button>
-        {summary.user.role === "user" && (
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label={`${summary.user.refreshEnabled ? "关闭" : "开启"}用户 ${summary.user.username} 的设备刷新`}
-            onClick={() =>
-              void update(summary.user.id, {
-                refreshEnabled: !summary.user.refreshEnabled,
-              })
-            }
-          >
-            {summary.user.refreshEnabled ? "关闭刷新" : "开启刷新"}
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="destructive"
-          aria-label={`删除用户 ${summary.user.username}`}
-          onClick={() => {
-            setDeleteTarget({
-              id: summary.user.id,
-              username: summary.user.username,
-            })
-            setDeleteOpen(true)
-          }}
-        >
-          <Trash2Icon />
-          删除
-        </Button>
-      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        aria-label={`管理用户 ${summary.user.username}`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onSelectedUserChange(summary.user.id)
+        }}
+      >
+        <MoreHorizontalIcon />
+        管理
+      </Button>
     )
   }
 
@@ -200,7 +123,10 @@ export function AdminUsers({
           风险账户包含凭据异常、刷新失败、离线端口或已停用账户。
         </p>
       </div>
-      <div className="grid gap-3 md:hidden">
+      <div
+        key={`mobile-${contentKey}`}
+        className="grid gap-3 motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in md:hidden"
+      >
         {!page && (
           <>
             <Skeleton className="h-36 w-full" />
@@ -212,7 +138,19 @@ export function AdminUsers({
           const isCurrent = summary.user.id === currentUserId
 
           return (
-            <Card key={summary.user.id} className="shadow-xs">
+            <Card
+              key={summary.user.id}
+              className="cursor-pointer shadow-xs transition-colors duration-150 hover:bg-muted/25"
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelectedUserChange(summary.user.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault()
+                  onSelectedUserChange(summary.user.id)
+                }
+              }}
+            >
               <CardContent className="flex flex-col gap-4 p-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
@@ -253,7 +191,10 @@ export function AdminUsers({
           </Card>
         )}
       </div>
-      <Card className="hidden shadow-xs md:block">
+      <Card
+        key={`table-${contentKey}`}
+        className="hidden shadow-xs motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in md:block"
+      >
         <CardContent className="p-0">
           <Table aria-label="用户目录">
             <TableHeader>
@@ -278,7 +219,18 @@ export function AdminUsers({
                 const isCurrent = summary.user.id === currentUserId
 
                 return (
-                  <TableRow key={summary.user.id}>
+                  <TableRow
+                    key={summary.user.id}
+                    className="cursor-pointer transition-colors duration-150"
+                    tabIndex={0}
+                    onClick={() => onSelectedUserChange(summary.user.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        onSelectedUserChange(summary.user.id)
+                      }
+                    }}
+                  >
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">
@@ -369,38 +321,15 @@ export function AdminUsers({
           </div>
         </div>
       )}
-      <Dialog
-        open={deleteOpen}
+      <AdminUserDetailSheet
+        userId={selectedUserId}
+        open={Boolean(selectedUserId)}
+        currentUserId={currentUserId}
         onOpenChange={(next) => {
-          if (!next && !deleting) setDeleteOpen(false)
+          if (!next) onSelectedUserChange(null)
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除用户“{deleteTarget?.username}”？</DialogTitle>
-            <DialogDescription>
-              该账户及其绑定的扫码凭据、已添加的充电桩记录都会被移除，操作无法撤销。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={deleting}
-              onClick={() => setDeleteOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleting}
-              onClick={() => void confirmDelete()}
-            >
-              <Trash2Icon />
-              {deleting ? "正在删除…" : "确认删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onChanged={() => load()}
+      />
     </div>
   )
 }

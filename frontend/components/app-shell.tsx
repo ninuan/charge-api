@@ -3,6 +3,7 @@
 import {
   LogOutIcon,
   MenuIcon,
+  KeyRoundIcon,
   ShieldCheckIcon,
   UserRoundIcon,
 } from "lucide-react"
@@ -11,6 +12,12 @@ import { useRouter } from "next/navigation"
 import { type ReactNode, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import {
   Sheet,
   SheetContent,
@@ -150,17 +157,27 @@ export function AppShell({
               className="w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-5"
             >
               <SheetTitle className="pr-8">账户与操作</SheetTitle>
-              <div className="mt-6 grid gap-4">
+              <div className="mt-6 grid gap-5">
                 {identity}
-                <div className="grid gap-2">{actions}</div>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => void handleLogout()}
-                >
-                  <LogOutIcon />
-                  退出登录
-                </Button>
+                <section className="grid gap-2 border-b pb-5">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    当前页面
+                  </p>
+                  <div className="grid gap-2">{actions}</div>
+                </section>
+                <section className="grid gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    账户操作
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="w-full border-destructive/25 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => void handleLogout()}
+                  >
+                    <LogOutIcon />
+                    退出登录
+                  </Button>
+                </section>
               </div>
             </SheetContent>
           </Sheet>
@@ -170,6 +187,25 @@ export function AppShell({
         id="main-content"
         className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-6"
       >
+        {currentUser?.mustChangePassword && (
+          <Alert className="mb-4 border-warning/40 bg-warning/10 pr-28">
+            <KeyRoundIcon />
+            <AlertTitle>当前使用的是管理员生成的临时密码</AlertTitle>
+            <AlertDescription>
+              请立即修改为只有你本人知道的新密码。完成修改前，每次登录都会显示此提醒。
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                size="sm"
+                onClick={() =>
+                  router.push(isAdmin ? "/admin" : "/account#change-password")
+                }
+              >
+                修改密码
+              </Button>
+            </AlertAction>
+          </Alert>
+        )}
         {heading}
         {children}
       </main>

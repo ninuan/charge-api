@@ -14,11 +14,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 5
+const schemaVersion = 7
 
 type Store struct {
 	db     *sql.DB
 	cipher *secretCipher
+	path   string
 }
 
 func OpenSQLite(path string, cookieKey []byte) (*Store, error) {
@@ -35,7 +36,7 @@ func OpenSQLite(path string, cookieKey []byte) (*Store, error) {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db, cipher: cipher}
+	store := &Store{db: db, cipher: cipher, path: path}
 	if err := store.initialize(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -107,6 +108,44 @@ func (s *Store) initialize() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS metrics_created_at_idx ON metrics(created_at)`,
 		`CREATE INDEX IF NOT EXISTS metrics_user_time_idx ON metrics(user_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			actor_id TEXT NOT NULL,
+			actor TEXT NOT NULL,
+			action TEXT NOT NULL,
+			target_type TEXT NOT NULL,
+			target_id TEXT NOT NULL,
+			target_label TEXT NOT NULL,
+			result TEXT NOT NULL,
+			message TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS admin_audit_created_at_idx ON admin_audit_logs(created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS admin_incidents (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			username TEXT NOT NULL,
+			device_id TEXT NOT NULL DEFAULT '',
+			type TEXT NOT NULL,
+			level TEXT NOT NULL,
+			message TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'open',
+			note TEXT NOT NULL DEFAULT '',
+			occurrences INTEGER NOT NULL DEFAULT 1,
+			handled_by TEXT NOT NULL DEFAULT '',
+			handled_at INTEGER,
+			first_seen_at INTEGER NOT NULL,
+			last_seen_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS admin_incidents_status_time_idx ON admin_incidents(status, last_seen_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS service_health_checks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			service TEXT NOT NULL,
+			state TEXT NOT NULL,
+			message TEXT NOT NULL,
+			checked_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS service_health_service_time_idx ON service_health_checks(service, checked_at DESC)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {
@@ -122,6 +161,9 @@ func (s *Store) initialize() error {
 	if err := s.ensureColumn("users", "usage_guide_ack_at", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("user_states", "yyb_binding_nonce", "BLOB"); err != nil {
 		return err
 	}
@@ -130,6 +172,17 @@ func (s *Store) initialize() error {
 	}
 	if err := s.ensureColumn("user_states", "recovery_diagnostics_json", "BLOB NOT NULL DEFAULT '[]'"); err != nil {
 		return err
+	}
+	for column, definition := range map[string]string{
+		"browser":        "TEXT NOT NULL DEFAULT ''",
+		"os":             "TEXT NOT NULL DEFAULT ''",
+		"device_type":    "TEXT NOT NULL DEFAULT ''",
+		"ip_label":       "TEXT NOT NULL DEFAULT ''",
+		"last_active_at": "INTEGER NOT NULL DEFAULT 0",
+	} {
+		if err := s.ensureColumn("sessions", column, definition); err != nil {
+			return err
+		}
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO metadata(key, value) VALUES('schema_version', ?)
@@ -167,10 +220,15 @@ func (s *Store) ensureColumn(table, column, definition string) error {
 }
 
 type SessionRecord struct {
-	TokenHash []byte
-	UserID    string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	TokenHash    []byte
+	UserID       string
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	LastActiveAt time.Time
+	Browser      string
+	OS           string
+	DeviceType   string
+	IPLabel      string
 }
 
 func (s *Store) SaveSession(record SessionRecord, maxPerUser int) error {
@@ -183,17 +241,30 @@ func (s *Store) SaveSession(record SessionRecord, maxPerUser int) error {
 	}()
 
 	if _, err := tx.Exec(`
-		INSERT INTO sessions(token_hash, user_id, created_at, expires_at)
-		VALUES(?, ?, ?, ?)
+		INSERT INTO sessions(
+			token_hash, user_id, created_at, expires_at, last_active_at,
+			browser, os, device_type, ip_label
+		)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(token_hash) DO UPDATE SET
 			user_id = excluded.user_id,
 			created_at = excluded.created_at,
-			expires_at = excluded.expires_at
+			expires_at = excluded.expires_at,
+			last_active_at = excluded.last_active_at,
+			browser = excluded.browser,
+			os = excluded.os,
+			device_type = excluded.device_type,
+			ip_label = excluded.ip_label
 	`,
 		record.TokenHash,
 		record.UserID,
 		record.CreatedAt.UnixNano(),
 		record.ExpiresAt.UnixNano(),
+		record.LastActiveAt.UnixNano(),
+		record.Browser,
+		record.OS,
+		record.DeviceType,
+		record.IPLabel,
 	); err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}
@@ -218,11 +289,15 @@ func (s *Store) SaveSession(record SessionRecord, maxPerUser int) error {
 
 func (s *Store) LoadSession(tokenHash []byte) (SessionRecord, bool, error) {
 	var record SessionRecord
-	var createdAt, expiresAt int64
+	var createdAt, expiresAt, lastActiveAt int64
 	err := s.db.QueryRow(`
-		SELECT token_hash, user_id, created_at, expires_at
+		SELECT token_hash, user_id, created_at, expires_at, last_active_at,
+		       browser, os, device_type, ip_label
 		FROM sessions WHERE token_hash = ?
-	`, tokenHash).Scan(&record.TokenHash, &record.UserID, &createdAt, &expiresAt)
+	`, tokenHash).Scan(
+		&record.TokenHash, &record.UserID, &createdAt, &expiresAt, &lastActiveAt,
+		&record.Browser, &record.OS, &record.DeviceType, &record.IPLabel,
+	)
 	if err == sql.ErrNoRows {
 		return SessionRecord{}, false, nil
 	}
@@ -231,6 +306,10 @@ func (s *Store) LoadSession(tokenHash []byte) (SessionRecord, bool, error) {
 	}
 	record.CreatedAt = time.Unix(0, createdAt)
 	record.ExpiresAt = time.Unix(0, expiresAt)
+	if lastActiveAt == 0 {
+		lastActiveAt = createdAt
+	}
+	record.LastActiveAt = time.Unix(0, lastActiveAt)
 	return record, true, nil
 }
 
@@ -259,7 +338,11 @@ func (s *Store) DeleteExpiredSessions(now time.Time) error {
 }
 
 func (s *Store) ListUserSessions(userID string) ([]SessionRecord, error) {
-	rows, err := s.db.Query(`SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE user_id=? ORDER BY created_at DESC`, userID)
+	rows, err := s.db.Query(`
+		SELECT token_hash, user_id, created_at, expires_at, last_active_at,
+		       browser, os, device_type, ip_label
+		FROM sessions WHERE user_id=? ORDER BY last_active_at DESC
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -267,15 +350,34 @@ func (s *Store) ListUserSessions(userID string) ([]SessionRecord, error) {
 	var result []SessionRecord
 	for rows.Next() {
 		var record SessionRecord
-		var createdAt, expiresAt int64
-		if err := rows.Scan(&record.TokenHash, &record.UserID, &createdAt, &expiresAt); err != nil {
+		var createdAt, expiresAt, lastActiveAt int64
+		if err := rows.Scan(
+			&record.TokenHash, &record.UserID, &createdAt, &expiresAt, &lastActiveAt,
+			&record.Browser, &record.OS, &record.DeviceType, &record.IPLabel,
+		); err != nil {
 			return nil, err
 		}
 		record.CreatedAt = time.Unix(0, createdAt)
 		record.ExpiresAt = time.Unix(0, expiresAt)
+		if lastActiveAt == 0 {
+			lastActiveAt = createdAt
+		}
+		record.LastActiveAt = time.Unix(0, lastActiveAt)
 		result = append(result, record)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) TouchSession(tokenHash []byte, at time.Time) error {
+	_, err := s.db.Exec(
+		`UPDATE sessions SET last_active_at=? WHERE token_hash=?`,
+		at.UnixNano(),
+		tokenHash,
+	)
+	if err != nil {
+		return fmt.Errorf("touch session: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) DeleteOtherSessions(userID string, currentHash []byte) error {
@@ -286,7 +388,7 @@ func (s *Store) DeleteOtherSessions(userID string, currentHash []byte) error {
 func (s *Store) Load() (State, bool, error) {
 	rows, err := s.db.Query(`
 		SELECT id, username, password_hash, role, enabled, created_at, updated_at,
-		       device_limit, refresh_enabled, usage_guide_ack_at
+		       device_limit, refresh_enabled, must_change_password, usage_guide_ack_at
 		FROM users ORDER BY username
 	`)
 	if err != nil {
@@ -301,7 +403,7 @@ func (s *Store) Load() (State, bool, error) {
 	for rows.Next() {
 		var user model.User
 		var role string
-		var enabled, refreshEnabled int
+		var enabled, refreshEnabled, mustChangePassword int
 		var createdAt string
 		var updatedAt string
 		var usageGuideAckAt sql.NullString
@@ -315,6 +417,7 @@ func (s *Store) Load() (State, bool, error) {
 			&updatedAt,
 			&user.DeviceLimit,
 			&refreshEnabled,
+			&mustChangePassword,
 			&usageGuideAckAt,
 		); err != nil {
 			return State{}, false, fmt.Errorf("scan user: %w", err)
@@ -322,6 +425,7 @@ func (s *Store) Load() (State, bool, error) {
 		user.Role = model.UserRole(role)
 		user.Enabled = enabled != 0
 		user.RefreshEnabled = refreshEnabled != 0
+		user.MustChangePassword = mustChangePassword != 0
 		user.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
 			return State{}, false, fmt.Errorf("parse user created_at: %w", err)
@@ -485,12 +589,13 @@ func (s *Store) Save(state State) error {
 		if _, err := tx.Exec(`
 			INSERT INTO users(
 				id, username, password_hash, role, enabled, created_at, updated_at,
-				device_limit, refresh_enabled, usage_guide_ack_at
-			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				device_limit, refresh_enabled, must_change_password, usage_guide_ack_at
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				username=excluded.username, password_hash=excluded.password_hash,
 				role=excluded.role, enabled=excluded.enabled, updated_at=excluded.updated_at,
 				device_limit=excluded.device_limit, refresh_enabled=excluded.refresh_enabled,
+				must_change_password=excluded.must_change_password,
 				usage_guide_ack_at=excluded.usage_guide_ack_at
 		`,
 			user.ID,
@@ -502,6 +607,7 @@ func (s *Store) Save(state State) error {
 			user.UpdatedAt.Format(time.RFC3339Nano),
 			user.DeviceLimit,
 			user.RefreshEnabled,
+			user.MustChangePassword,
 			formatOptionalTime(user.UsageGuideAckAt),
 		); err != nil {
 			return fmt.Errorf("insert user %s: %w", user.ID, err)

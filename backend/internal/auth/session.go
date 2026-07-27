@@ -17,10 +17,22 @@ import (
 const defaultMaxSessionsPerUser = 5
 
 type Session struct {
-	Token     string
-	UserID    string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Token        string
+	UserID       string
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	LastActiveAt time.Time
+	Browser      string
+	OS           string
+	DeviceType   string
+	IPLabel      string
+}
+
+type SessionClientInfo struct {
+	Browser    string
+	OS         string
+	DeviceType string
+	IPLabel    string
 }
 
 type SessionManager struct {
@@ -62,18 +74,30 @@ func (m *SessionManager) Close() {
 	})
 }
 
-func (m *SessionManager) Create(userID string) (Session, error) {
+func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Session, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return Session{}, fmt.Errorf("generate session token: %w", err)
 	}
 
 	now := time.Now()
+	client := SessionClientInfo{
+		Browser: "未知浏览器", OS: "未知系统",
+		DeviceType: "未知设备", IPLabel: "未知网络",
+	}
+	if len(clients) > 0 {
+		client = clients[0]
+	}
 	session := Session{
-		Token:     base64.RawURLEncoding.EncodeToString(tokenBytes),
-		UserID:    userID,
-		CreatedAt: now,
-		ExpiresAt: now.Add(m.ttl),
+		Token:        base64.RawURLEncoding.EncodeToString(tokenBytes),
+		UserID:       userID,
+		CreatedAt:    now,
+		ExpiresAt:    now.Add(m.ttl),
+		LastActiveAt: now,
+		Browser:      client.Browser,
+		OS:           client.OS,
+		DeviceType:   client.DeviceType,
+		IPLabel:      client.IPLabel,
 	}
 
 	m.mu.Lock()
@@ -83,10 +107,15 @@ func (m *SessionManager) Create(userID string) (Session, error) {
 	m.limitUserSessionsLocked(userID)
 	if m.store != nil {
 		if err := m.store.SaveSession(persistence.SessionRecord{
-			TokenHash: hashSessionToken(session.Token),
-			UserID:    session.UserID,
-			CreatedAt: session.CreatedAt,
-			ExpiresAt: session.ExpiresAt,
+			TokenHash:    hashSessionToken(session.Token),
+			UserID:       session.UserID,
+			CreatedAt:    session.CreatedAt,
+			ExpiresAt:    session.ExpiresAt,
+			LastActiveAt: session.LastActiveAt,
+			Browser:      session.Browser,
+			OS:           session.OS,
+			DeviceType:   session.DeviceType,
+			IPLabel:      session.IPLabel,
 		}, m.maxSessionsPerUser); err != nil {
 			delete(m.sessions, session.Token)
 			return Session{}, err
@@ -108,10 +137,15 @@ func (m *SessionManager) Get(token string) (Session, bool) {
 			return Session{}, false
 		}
 		session = Session{
-			Token:     token,
-			UserID:    record.UserID,
-			CreatedAt: record.CreatedAt,
-			ExpiresAt: record.ExpiresAt,
+			Token:        token,
+			UserID:       record.UserID,
+			CreatedAt:    record.CreatedAt,
+			ExpiresAt:    record.ExpiresAt,
+			LastActiveAt: record.LastActiveAt,
+			Browser:      record.Browser,
+			OS:           record.OS,
+			DeviceType:   record.DeviceType,
+			IPLabel:      record.IPLabel,
 		}
 		m.sessions[token] = session
 	}
@@ -124,6 +158,24 @@ func (m *SessionManager) Get(token string) (Session, bool) {
 		return Session{}, false
 	}
 	return session, true
+}
+
+func (m *SessionManager) Touch(token string) {
+	now := time.Now()
+	m.mu.Lock()
+	session, ok := m.sessions[token]
+	if ok && now.Sub(session.LastActiveAt) < time.Minute {
+		m.mu.Unlock()
+		return
+	}
+	if ok {
+		session.LastActiveAt = now
+		m.sessions[token] = session
+	}
+	m.mu.Unlock()
+	if m.store != nil {
+		_ = m.store.TouchSession(hashSessionToken(token), now)
+	}
 }
 
 func (m *SessionManager) Delete(token string) {
@@ -163,7 +215,12 @@ func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView,
 			result = append(result, model.SessionView{
 				ID:        base64.RawURLEncoding.EncodeToString(record.TokenHash[:8]),
 				CreatedAt: record.CreatedAt, ExpiresAt: record.ExpiresAt,
-				Current: bytes.Equal(record.TokenHash, currentHash),
+				LastActiveAt: record.LastActiveAt,
+				Browser:      record.Browser,
+				OS:           record.OS,
+				DeviceType:   record.DeviceType,
+				IPLabel:      record.IPLabel,
+				Current:      bytes.Equal(record.TokenHash, currentHash),
 			})
 		}
 		return result, nil
@@ -176,7 +233,13 @@ func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView,
 			continue
 		}
 		hash := hashSessionToken(token)
-		result = append(result, model.SessionView{ID: base64.RawURLEncoding.EncodeToString(hash[:8]), CreatedAt: session.CreatedAt, ExpiresAt: session.ExpiresAt, Current: token == currentToken})
+		result = append(result, model.SessionView{
+			ID:        base64.RawURLEncoding.EncodeToString(hash[:8]),
+			CreatedAt: session.CreatedAt, ExpiresAt: session.ExpiresAt,
+			LastActiveAt: session.LastActiveAt, Browser: session.Browser,
+			OS: session.OS, DeviceType: session.DeviceType, IPLabel: session.IPLabel,
+			Current: token == currentToken,
+		})
 	}
 	return result, nil
 }

@@ -87,6 +87,8 @@ describe("AdminUsers", () => {
           totalPages: 1,
         }}
         load={vi.fn().mockResolvedValue(undefined)}
+        selectedUserId={null}
+        onSelectedUserChange={vi.fn()}
       />
     )
 
@@ -96,13 +98,10 @@ describe("AdminUsers", () => {
     expect(screen.getAllByText("待添加设备")).toHaveLength(2)
     expect(screen.queryByText("需要关注")).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "停用用户 admin" })
-    ).not.toBeInTheDocument()
+      screen.getAllByRole("button", { name: "管理用户 admin" })
+    ).toHaveLength(2)
     expect(
-      screen.queryByRole("button", { name: "删除用户 admin" })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getAllByRole("button", { name: "停用用户 new-user" })
+      screen.getAllByRole("button", { name: "管理用户 new-user" })
     ).toHaveLength(2)
   })
 })

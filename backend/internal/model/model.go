@@ -96,27 +96,29 @@ const (
 )
 
 type User struct {
-	ID              string     `json:"id"`
-	Username        string     `json:"username"`
-	PasswordHash    string     `json:"passwordHash,omitempty"`
-	Role            UserRole   `json:"role"`
-	Enabled         bool       `json:"enabled"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-	DeviceLimit     int        `json:"deviceLimit"`
-	RefreshEnabled  bool       `json:"refreshEnabled"`
-	UsageGuideAckAt *time.Time `json:"usageGuideAckAt,omitempty"`
+	ID                 string     `json:"id"`
+	Username           string     `json:"username"`
+	PasswordHash       string     `json:"passwordHash,omitempty"`
+	Role               UserRole   `json:"role"`
+	Enabled            bool       `json:"enabled"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+	DeviceLimit        int        `json:"deviceLimit"`
+	RefreshEnabled     bool       `json:"refreshEnabled"`
+	MustChangePassword bool       `json:"mustChangePassword"`
+	UsageGuideAckAt    *time.Time `json:"usageGuideAckAt,omitempty"`
 }
 
 type CurrentUser struct {
-	ID              string     `json:"id"`
-	Username        string     `json:"username"`
-	Role            UserRole   `json:"role"`
-	Enabled         bool       `json:"enabled"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	DeviceLimit     int        `json:"deviceLimit"`
-	RefreshEnabled  bool       `json:"refreshEnabled"`
-	UsageGuideAckAt *time.Time `json:"usageGuideAckAt,omitempty"`
+	ID                 string     `json:"id"`
+	Username           string     `json:"username"`
+	Role               UserRole   `json:"role"`
+	Enabled            bool       `json:"enabled"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	DeviceLimit        int        `json:"deviceLimit"`
+	RefreshEnabled     bool       `json:"refreshEnabled"`
+	MustChangePassword bool       `json:"mustChangePassword"`
+	UsageGuideAckAt    *time.Time `json:"usageGuideAckAt,omitempty"`
 }
 
 type LoginRequest struct {
@@ -138,7 +140,6 @@ type UserCreateRequest struct {
 }
 
 type UserUpdateRequest struct {
-	Password       *string   `json:"password,omitempty"`
 	Role           *UserRole `json:"role,omitempty"`
 	Enabled        *bool     `json:"enabled,omitempty"`
 	DeviceLimit    *int      `json:"deviceLimit,omitempty"`
@@ -148,6 +149,10 @@ type UserUpdateRequest struct {
 type PasswordChangeRequest struct {
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
+}
+
+type TemporaryPasswordResponse struct {
+	TemporaryPassword string `json:"temporaryPassword"`
 }
 
 type RegistrationSettings struct {
@@ -176,10 +181,15 @@ type InviteCodePage struct {
 }
 
 type SessionView struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	Current   bool      `json:"current"`
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"createdAt"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+	LastActiveAt time.Time `json:"lastActiveAt"`
+	Browser      string    `json:"browser"`
+	OS           string    `json:"os"`
+	DeviceType   string    `json:"deviceType"`
+	IPLabel      string    `json:"ipLabel"`
+	Current      bool      `json:"current"`
 }
 
 type MetricPoint struct {
@@ -218,8 +228,12 @@ const (
 )
 
 type ServiceHealth struct {
-	State   HealthState `json:"state"`
-	Message string      `json:"message"`
+	State               HealthState `json:"state"`
+	Message             string      `json:"message"`
+	RecoveryAdvice      string      `json:"recoveryAdvice,omitempty"`
+	LastRecoveredAt     *time.Time  `json:"lastRecoveredAt,omitempty"`
+	Availability24Hours float64     `json:"availability24Hours"`
+	ConsecutiveFailures int         `json:"consecutiveFailures"`
 }
 
 type AdminHealth struct {
@@ -230,14 +244,58 @@ type AdminHealth struct {
 }
 
 type SystemException struct {
-	ID       string    `json:"id"`
-	UserID   string    `json:"userId"`
-	Username string    `json:"username"`
-	DeviceID string    `json:"deviceId,omitempty"`
-	Type     string    `json:"type"`
-	Level    string    `json:"level"`
-	Message  string    `json:"message"`
-	Time     time.Time `json:"time"`
+	ID          string     `json:"id"`
+	UserID      string     `json:"userId"`
+	Username    string     `json:"username"`
+	DeviceID    string     `json:"deviceId,omitempty"`
+	Type        string     `json:"type"`
+	Level       string     `json:"level"`
+	Message     string     `json:"message"`
+	Status      string     `json:"status"`
+	Note        string     `json:"note,omitempty"`
+	Occurrences int        `json:"occurrences"`
+	HandledBy   string     `json:"handledBy,omitempty"`
+	HandledAt   *time.Time `json:"handledAt,omitempty"`
+	FirstSeenAt time.Time  `json:"firstSeenAt"`
+	Time        time.Time  `json:"time"`
+}
+
+type IncidentUpdateRequest struct {
+	Status string `json:"status"`
+	Note   string `json:"note"`
+}
+
+type AuditEntry struct {
+	ID          int64     `json:"id"`
+	ActorID     string    `json:"actorId"`
+	Actor       string    `json:"actor"`
+	Action      string    `json:"action"`
+	TargetType  string    `json:"targetType"`
+	TargetID    string    `json:"targetId"`
+	TargetLabel string    `json:"targetLabel"`
+	Result      string    `json:"result"`
+	Message     string    `json:"message,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type AuditPage struct {
+	Items      []AuditEntry `json:"items"`
+	Page       int          `json:"page"`
+	PageSize   int          `json:"pageSize"`
+	Total      int          `json:"total"`
+	TotalPages int          `json:"totalPages"`
+}
+
+type OperationsStatus struct {
+	DatabaseSizeBytes   int64      `json:"databaseSizeBytes"`
+	MetricRows          int64      `json:"metricRows"`
+	MetricRetentionDays int        `json:"metricRetentionDays"`
+	IntegrityResult     string     `json:"integrityResult"`
+	CheckedAt           time.Time  `json:"checkedAt"`
+	LastBackupAt        *time.Time `json:"lastBackupAt,omitempty"`
+	LastBackupSizeBytes int64      `json:"lastBackupSizeBytes,omitempty"`
+	BackupState         string     `json:"backupState"`
+	BackupMessage       string     `json:"backupMessage"`
 }
 
 type TrafficStats struct {
@@ -293,6 +351,12 @@ type AdminUserSummary struct {
 	SnapshotUpdatedAt   time.Time            `json:"snapshotUpdatedAt"`
 	LastRefresh         RefreshInfo          `json:"lastRefresh"`
 	RecoveryDiagnostics []RecoveryDiagnostic `json:"recoveryDiagnostics"`
+}
+
+type AdminUserDetail struct {
+	Summary  AdminUserSummary `json:"summary"`
+	Piles    []Pile           `json:"piles"`
+	Sessions []SessionView    `json:"sessions"`
 }
 
 type AdminUserListQuery struct {

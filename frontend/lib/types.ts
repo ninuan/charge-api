@@ -68,7 +68,12 @@ export interface CurrentUser {
   createdAt: string
   deviceLimit: number
   refreshEnabled: boolean
+  mustChangePassword?: boolean
   usageGuideAckAt?: string
+}
+
+export interface TemporaryPasswordResponse {
+  temporaryPassword: string
 }
 
 export interface TrafficStats {
@@ -173,6 +178,11 @@ export interface SessionView {
   id: string
   createdAt: string
   expiresAt: string
+  lastActiveAt: string
+  browser: string
+  os: string
+  deviceType: string
+  ipLabel: string
   current: boolean
 }
 
@@ -200,6 +210,10 @@ export type HealthState = "healthy" | "degraded" | "unavailable"
 export interface ServiceHealth {
   state: HealthState
   message: string
+  recoveryAdvice?: string
+  lastRecoveredAt?: string
+  availability24Hours?: number
+  consecutiveFailures?: number
 }
 
 export interface AdminHealth {
@@ -217,7 +231,52 @@ export interface SystemException {
   type: string
   level: string
   message: string
+  status: "open" | "acknowledged" | "resolved"
+  note?: string
+  occurrences: number
+  handledBy?: string
+  handledAt?: string
+  firstSeenAt: string
   time: string
+}
+
+export interface AdminUserDetail {
+  summary: AdminUserSummary
+  piles: Pile[]
+  sessions: SessionView[]
+}
+
+export interface AuditEntry {
+  id: number
+  actorId: string
+  actor: string
+  action: string
+  targetType: string
+  targetId: string
+  targetLabel: string
+  result: "success" | "failure"
+  message?: string
+  createdAt: string
+}
+
+export interface AuditPage {
+  items: AuditEntry[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
+export interface OperationsStatus {
+  databaseSizeBytes: number
+  metricRows: number
+  metricRetentionDays: number
+  integrityResult: string
+  checkedAt: string
+  lastBackupAt?: string
+  lastBackupSizeBytes?: number
+  backupState: "healthy" | "degraded" | "unavailable"
+  backupMessage: string
 }
 
 export interface AdminStats {

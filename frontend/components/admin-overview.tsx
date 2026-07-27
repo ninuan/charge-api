@@ -1,17 +1,15 @@
 import {
   ActivityIcon,
   BarChart3Icon,
-  CircleAlertIcon,
   ShieldCheckIcon,
   UsersIcon,
+  CircleAlertIcon,
 } from "lucide-react"
 
+import { AdminIncidentPanel } from "@/components/admin-incident-panel"
 import { MetricCard } from "@/components/metric-card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -20,24 +18,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AdminStats, MetricPoint } from "@/lib/types"
 
-function issueTypeLabel(type: string) {
-  return (
-    (
-      {
-        credential: "凭据",
-        cookie_expired: "凭据失效",
-        refresh: "刷新",
-        stale: "数据滞后",
-        offline: "离线端口",
-        operation: "用户操作",
-      } as Record<string, string>
-    )[type] ?? "系统"
-  )
-}
-
 type AdminOverviewProps = {
   stats: AdminStats | null
-  onUsers: () => void
+  onUser: (id: string) => void
 }
 
 function TrendPanel({
@@ -100,7 +83,7 @@ function TrendPanel({
   )
 }
 
-export function AdminOverview({ stats, onUsers }: AdminOverviewProps) {
+export function AdminOverview({ stats, onUser }: AdminOverviewProps) {
   const overview = stats?.overview
   const hourlyRemote = stats?.hourly.reduce(
     (total, point) => total + point.remote,
@@ -206,72 +189,7 @@ export function AdminOverview({ stats, onUsers }: AdminOverviewProps) {
           )}
         </CardContent>
       </Card>
-      <Card className="shadow-xs">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            最近异常
-            {stats ? (
-              <Badge
-                variant={stats.exceptions.length ? "destructive" : "secondary"}
-              >
-                {stats.exceptions.length} 条
-              </Badge>
-            ) : null}
-          </CardTitle>
-          <CardDescription className="text-xs">
-            管理员诊断已脱敏，不含登录凭据、会话或上游地址。
-          </CardDescription>
-          <CardAction>
-            <Button variant="outline" size="sm" onClick={onUsers}>
-              筛选用户
-            </Button>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {!stats ? (
-            <>
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-            </>
-          ) : stats.exceptions?.length ? (
-            stats.exceptions.slice(0, 6).map((issue) => (
-              <div
-                key={issue.id}
-                className="flex flex-col gap-1 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium">
-                      {issue.username} · {issueTypeLabel(issue.type)}
-                    </p>
-                    <Badge
-                      variant={
-                        issue.level === "critical" ? "destructive" : "secondary"
-                      }
-                      className={
-                        issue.level === "critical"
-                          ? undefined
-                          : "bg-warning/15 text-warning-foreground"
-                      }
-                    >
-                      {issue.level === "critical" ? "紧急" : "提醒"}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {issue.message}
-                    {issue.deviceId ? ` · 设备尾号 ${issue.deviceId}` : ""}
-                  </p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(issue.time).toLocaleString("zh-CN")}
-                </p>
-              </div>
-            ))
-          ) : (
-            <p className="py-4 text-sm text-muted-foreground">暂无近期异常。</p>
-          )}
-        </CardContent>
-      </Card>
+      <AdminIncidentPanel initialIssues={stats?.exceptions} onUser={onUser} />
     </div>
   )
 }
