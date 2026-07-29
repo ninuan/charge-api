@@ -82,4 +82,38 @@ describe("PileCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "下移充电桩" }))
     expect(onMove).toHaveBeenCalledWith("pile-1", "down")
   })
+
+  it("only highlights a port after its status actually changes", () => {
+    const props = {
+      visiblePortIds: [1, 2],
+      filtering: false,
+      canMoveUp: false,
+      canMoveDown: true,
+      reordering: false,
+      onMove: vi.fn(),
+      onRemove: vi.fn(),
+      onUpdate: vi.fn(),
+    }
+    const { rerender } = render(<PileCard pile={pile} {...props} />)
+    const firstPort = screen.getByLabelText("1 号充电口")
+    expect(firstPort).toHaveClass("port-card-enter")
+    expect(firstPort).not.toHaveClass("port-state-changed")
+
+    rerender(
+      <PileCard
+        {...props}
+        pile={{
+          ...pile,
+          ports: pile.ports.map((port) =>
+            port.id === 1 ? { ...port, status: "in_use" as const } : port
+          ),
+        }}
+      />
+    )
+
+    expect(firstPort).toHaveClass("port-state-changed")
+    expect(screen.getByLabelText("2 号充电口")).not.toHaveClass(
+      "port-state-changed"
+    )
+  })
 })

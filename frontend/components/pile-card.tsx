@@ -14,7 +14,7 @@ import {
   WifiOffIcon,
   ZapIcon,
 } from "lucide-react"
-import { memo, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -66,6 +66,80 @@ function portMeta(port: Port) {
     className:
       "border-success/25 bg-success/10 text-success-foreground dark:bg-success/15",
   }
+}
+
+function PortStatusCard({ port }: { port: Port }) {
+  const cardRef = useRef<HTMLElement>(null)
+  const mounted = useRef(false)
+  const previousStatus = useRef(port.status)
+  const meta = portMeta(port)
+  const Icon = meta.icon
+  const setCardRef = useCallback((card: HTMLElement | null) => {
+    cardRef.current = card
+    if (!card || mounted.current) return
+    mounted.current = true
+    if (
+      typeof window.matchMedia !== "function" ||
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      card.classList.add("port-card-enter")
+    }
+  }, [])
+
+  useEffect(() => {
+    if (previousStatus.current === port.status) return
+    previousStatus.current = port.status
+
+    const card = cardRef.current
+    if (
+      !card ||
+      (typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+    )
+      return
+
+    card.classList.remove("port-card-enter", "port-state-changed")
+    void card.offsetWidth
+    card.classList.add("port-state-changed")
+  }, [port.status])
+
+  return (
+    <section
+      ref={setCardRef}
+      aria-label={`${port.id} 号充电口`}
+      className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm ${meta.className}`}
+      onAnimationEnd={(event) => {
+        if (event.target !== event.currentTarget) return
+        event.currentTarget.classList.remove(
+          "port-card-enter",
+          "port-state-changed"
+        )
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-lg font-semibold tabular-nums">
+          {String(port.id).padStart(2, "0")}
+        </span>
+        <Icon className="size-4" />
+      </div>
+      <p className="mt-5 text-sm font-semibold">{meta.label}</p>
+      <div className="mt-2 min-h-9 space-y-1 text-xs leading-4 opacity-80">
+        {port.status === "in_use" ? (
+          <>
+            <p className="flex items-center gap-1">
+              <Clock3Icon className="size-3" />
+              已用 {port.usedText ?? "--"}
+            </p>
+            <p>剩余 {port.remainingText ?? "--"}</p>
+          </>
+        ) : port.status === "idle" ? (
+          <p>等待使用</p>
+        ) : (
+          <p>设备暂不可访问</p>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function PileCardComponent({
@@ -239,42 +313,9 @@ function PileCardComponent({
             id={cardId}
             className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5 lg:p-6"
           >
-            {displayedPorts.map((port, index) => {
-              const meta = portMeta(port)
-              const Icon = meta.icon
-              return (
-                // key 带上状态：SSE 推送某个端口状态跃迁时，仅该卡片重挂载并
-                // 重放入场动画，等于一次"状态变化闪现"；首屏则按索引错峰浮现。
-                <section
-                  key={`${port.id}-${port.status}`}
-                  style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
-                  className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm motion-safe:animate-[port-state-glow_240ms_ease-out] motion-safe:fill-mode-backwards ${meta.className}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-lg font-semibold tabular-nums">
-                      {String(port.id).padStart(2, "0")}
-                    </span>
-                    <Icon className="size-4" />
-                  </div>
-                  <p className="mt-5 text-sm font-semibold">{meta.label}</p>
-                  <div className="mt-2 min-h-9 space-y-1 text-xs leading-4 opacity-80">
-                    {port.status === "in_use" ? (
-                      <>
-                        <p className="flex items-center gap-1">
-                          <Clock3Icon className="size-3" />
-                          已用 {port.usedText ?? "--"}
-                        </p>
-                        <p>剩余 {port.remainingText ?? "--"}</p>
-                      </>
-                    ) : port.status === "idle" ? (
-                      <p>等待使用</p>
-                    ) : (
-                      <p>设备暂不可访问</p>
-                    )}
-                  </div>
-                </section>
-              )
-            })}
+            {displayedPorts.map((port) => (
+              <PortStatusCard key={port.id} port={port} />
+            ))}
           </CardContent>
         )}
       </Card>

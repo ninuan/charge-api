@@ -120,6 +120,7 @@ export default function DashboardPage() {
   } = useDashboard()
   const [refreshing, setRefreshing] = useState(false)
   const [reordering, setReordering] = useState(false)
+  const [initialLoadFinished, setInitialLoadFinished] = useState(false)
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<PortFilter>("all")
   const [queryReady, setQueryReady] = useState(false)
@@ -180,6 +181,8 @@ export default function DashboardPage() {
         if (active) connectStream()
       } catch (reason) {
         handleError(reason)
+      } finally {
+        if (active) setInitialLoadFinished(true)
       }
     }
     void load()
@@ -242,6 +245,7 @@ export default function DashboardPage() {
     0
   )
   const hasActiveFilter = Boolean(deferredSearch.trim()) || filter !== "all"
+  const showingInitialSkeleton = loading || !initialLoadFinished
   const streamLabel =
     streamState === "connected"
       ? "已连接"
@@ -399,34 +403,31 @@ export default function DashboardPage() {
         aria-label="充电桩列表"
         aria-busy={reordering}
       >
-        {loading ? (
+        {showingInitialSkeleton ? (
           <div className="grid gap-4">
             <Skeleton className="h-64 w-full" />
             <Skeleton className="h-64 w-full" />
           </div>
         ) : (
-          entries.map((entry, index) => (
-            // 首屏按索引错峰浮现；fill-mode-backwards 让延迟期间保持不可见。
-            <div
-              key={entry.pile.id}
-              className="motion-safe:animate-in motion-safe:duration-200 motion-safe:fill-mode-backwards motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
-              style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
-            >
-              <PileCard
-                pile={entry.pile}
-                visiblePortIds={entry.portIds}
-                filtering={hasActiveFilter}
-                onRemove={handleRemove}
-                onUpdate={handleUpdate}
-                canMoveUp={snapshot.piles[0]?.id !== entry.pile.id}
-                canMoveDown={snapshot.piles.at(-1)?.id !== entry.pile.id}
-                reordering={reordering}
-                onMove={handleMove}
-              />
-            </div>
-          ))
+          <div className="grid gap-4">
+            {entries.map((entry) => (
+              <div key={entry.pile.id} className="pile-card-enter">
+                <PileCard
+                  pile={entry.pile}
+                  visiblePortIds={entry.portIds}
+                  filtering={hasActiveFilter}
+                  onRemove={handleRemove}
+                  onUpdate={handleUpdate}
+                  canMoveUp={snapshot.piles[0]?.id !== entry.pile.id}
+                  canMoveDown={snapshot.piles.at(-1)?.id !== entry.pile.id}
+                  reordering={reordering}
+                  onMove={handleMove}
+                />
+              </div>
+            ))}
+          </div>
         )}
-        {!loading && entries.length === 0 && (
+        {!showingInitialSkeleton && entries.length === 0 && (
           <Card className="border-dashed shadow-xs">
             <CardContent className="py-16 text-center">
               <PlugZapIcon className="mx-auto size-8 text-muted-foreground" />
