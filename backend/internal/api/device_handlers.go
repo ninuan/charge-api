@@ -115,6 +115,11 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if (len(parts) == 4 && parts[3] == "history") ||
+		(len(parts) == 6 && parts[3] == "ports" && parts[5] == "history") {
+		s.handlePileHistory(w, r, user, parts)
+		return
+	}
 	if len(parts) != 3 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return

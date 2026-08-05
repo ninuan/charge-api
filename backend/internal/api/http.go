@@ -44,7 +44,7 @@ type Server struct {
 	devMu               sync.Mutex
 	devForceAuthExpired bool
 	healthMu            sync.RWMutex
-	adminDegraded       string
+	healthDegradations  map[string]string
 }
 
 type yybSessionClient interface {
@@ -84,11 +84,12 @@ func NewServer(
 	authGuard *auth.AuthGuard,
 ) *Server {
 	return &Server{
-		manager:   manager,
-		sessions:  sessions,
-		turnstile: turnstile,
-		authGuard: authGuard,
-		captcha:   auth.NewCaptchaStore(),
+		manager:            manager,
+		sessions:           sessions,
+		turnstile:          turnstile,
+		authGuard:          authGuard,
+		captcha:            auth.NewCaptchaStore(),
+		healthDegradations: make(map[string]string),
 	}
 }
 

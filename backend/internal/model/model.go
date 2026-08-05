@@ -36,6 +36,97 @@ type PortStatusEvent struct {
 	Source        string      `json:"source"`
 }
 
+type HistoryWindow struct {
+	Range    string    `json:"range"`
+	Timezone string    `json:"timezone"`
+	Start    time.Time `json:"start"`
+	End      time.Time `json:"end"`
+}
+
+type PortHistoryMetrics struct {
+	ObservedSeconds       int64    `json:"observedSeconds"`
+	GapSeconds            int64    `json:"gapSeconds"`
+	IdleSeconds           int64    `json:"idleSeconds"`
+	InUseSeconds          int64    `json:"inUseSeconds"`
+	OfflineSeconds        int64    `json:"offlineSeconds"`
+	OccupancyPercent      *float64 `json:"occupancyPercent"`
+	CompletedSessions     int      `json:"completedSessions"`
+	AverageSessionSeconds *int64   `json:"averageSessionSeconds"`
+	SampleState           string   `json:"sampleState"`
+}
+
+type HistoryDailyPoint struct {
+	Date    string             `json:"date"`
+	Metrics PortHistoryMetrics `json:"metrics"`
+}
+
+type HistoryHeatmapCell struct {
+	Weekday          int      `json:"weekday"`
+	Hour             int      `json:"hour"`
+	IdleSeconds      int64    `json:"idleSeconds"`
+	InUseSeconds     int64    `json:"inUseSeconds"`
+	OfflineSeconds   int64    `json:"offlineSeconds"`
+	OccupancyPercent *float64 `json:"occupancyPercent"`
+	SampleDates      int      `json:"sampleDates"`
+	SampleSufficient bool     `json:"sampleSufficient"`
+}
+
+type HistoryHourInsight struct {
+	Weekday          int     `json:"weekday"`
+	Hour             int     `json:"hour"`
+	OccupancyPercent float64 `json:"occupancyPercent"`
+	SampleDates      int     `json:"sampleDates"`
+}
+
+type PortHistoryTimelineItem struct {
+	PortID        int         `json:"portId"`
+	FromStatus    *PortStatus `json:"fromStatus,omitempty"`
+	ToStatus      PortStatus  `json:"toStatus"`
+	ChangedAt     time.Time   `json:"changedAt"`
+	UsedSeconds   int         `json:"usedSeconds"`
+	RemainingText string      `json:"remainingText,omitempty"`
+}
+
+type HistoryDevice struct {
+	ID      string `json:"id"`
+	Number  string `json:"number"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+type PortHistorySummary struct {
+	PortID           int                `json:"portId"`
+	CurrentStatus    PortStatus         `json:"currentStatus"`
+	HistoryStartedAt *time.Time         `json:"historyStartedAt,omitempty"`
+	Metrics          PortHistoryMetrics `json:"metrics"`
+}
+
+type DeviceHistoryResponse struct {
+	Device           HistoryDevice        `json:"device"`
+	Window           HistoryWindow        `json:"window"`
+	Metrics          PortHistoryMetrics   `json:"metrics"`
+	Daily            []HistoryDailyPoint  `json:"daily"`
+	Heatmap          []HistoryHeatmapCell `json:"heatmap"`
+	Ports            []PortHistorySummary `json:"ports"`
+	BusiestHours     []HistoryHourInsight `json:"busiestHours"`
+	QuietSuggestion  *HistoryHourInsight  `json:"quietSuggestion,omitempty"`
+	HistoryStartedAt *time.Time           `json:"historyStartedAt,omitempty"`
+	HistoryNotice    string               `json:"historyNotice"`
+}
+
+type PortHistoryResponse struct {
+	Device            HistoryDevice             `json:"device"`
+	PortID            int                       `json:"portId"`
+	CurrentStatus     PortStatus                `json:"currentStatus"`
+	Window            HistoryWindow             `json:"window"`
+	Metrics           PortHistoryMetrics        `json:"metrics"`
+	Daily             []HistoryDailyPoint       `json:"daily"`
+	Timeline          []PortHistoryTimelineItem `json:"timeline"`
+	TimelineTruncated bool                      `json:"timelineTruncated"`
+	HistoryStartedAt  *time.Time                `json:"historyStartedAt,omitempty"`
+	HistoryNotice     string                    `json:"historyNotice"`
+}
+
 type Pile struct {
 	ID          string    `json:"id"`
 	Number      string    `json:"number"`

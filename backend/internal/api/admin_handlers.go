@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -120,15 +121,33 @@ func (s *Server) handleAdminOperations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setAdminDegraded(reason string) {
+	s.setHealthDegraded("admin", reason)
+}
+
+func (s *Server) setHealthDegraded(component, reason string) {
 	s.healthMu.Lock()
-	s.adminDegraded = reason
+	if s.healthDegradations == nil {
+		s.healthDegradations = make(map[string]string)
+	}
+	if strings.TrimSpace(reason) == "" {
+		delete(s.healthDegradations, component)
+	} else {
+		s.healthDegradations[component] = reason
+	}
 	s.healthMu.Unlock()
 }
 
 func (s *Server) adminDegradation() string {
 	s.healthMu.RLock()
 	defer s.healthMu.RUnlock()
-	return s.adminDegraded
+	reasons := make([]string, 0, len(s.healthDegradations))
+	for _, reason := range s.healthDegradations {
+		if reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}
+	sort.Strings(reasons)
+	return strings.Join(reasons, "；")
 }
 
 func (s *Server) recordAdminAudit(

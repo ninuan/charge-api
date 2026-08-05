@@ -307,6 +307,133 @@ func (s *Store) PortStatusEvents(query PortStatusEventQuery) ([]model.PortStatus
 	return result, rows.Err()
 }
 
+// PortStatusEventsForAnalysis returns the latest event before the requested
+// window for each selected port plus every event inside the window. The former
+// lets the analytics layer establish the state at the range boundary without
+// treating an unknown interval as idle.
+func (s *Store) PortStatusEventsForAnalysis(query PortStatusEventQuery, eventLimit int) ([]model.PortStatusEvent, bool, error) {
+	if strings.TrimSpace(query.UserID) == "" || strings.TrimSpace(query.DeviceID) == "" {
+		return nil, false, fmt.Errorf("port status analysis requires user and device")
+	}
+	if query.Since.IsZero() || query.Until.IsZero() || !query.Since.Before(query.Until) {
+		return nil, false, fmt.Errorf("port status analysis requires a valid time range")
+	}
+	if eventLimit <= 0 {
+		return nil, false, fmt.Errorf("port status analysis requires a positive event limit")
+	}
+
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin port status analysis transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	portClause := ""
+	beforeArgs := []any{query.UserID, query.DeviceID, query.Since.Unix()}
+	windowArgs := []any{query.UserID, query.DeviceID, query.Since.Unix(), query.Until.Unix()}
+	if query.PortID != nil {
+		portClause = " AND port_id = ?"
+		beforeArgs = append(beforeArgs, *query.PortID)
+		windowArgs = append(windowArgs, *query.PortID)
+	}
+
+	beforeRows, err := tx.Query(`
+		SELECT id, user_id, device_id, port_id, from_status, to_status,
+		       changed_at, used_seconds, remaining_text, source
+		FROM (
+			SELECT *, ROW_NUMBER() OVER (
+				PARTITION BY port_id ORDER BY changed_at DESC, id DESC
+			) AS position
+			FROM port_status_events
+			WHERE user_id = ? AND device_id = ? AND changed_at < ?`+portClause+`
+		)
+		WHERE position = 1
+		ORDER BY port_id
+	`, beforeArgs...)
+	if err != nil {
+		return nil, false, fmt.Errorf("query port status range baselines: %w", err)
+	}
+	events, err := scanPortStatusEvents(beforeRows, 0)
+	beforeRows.Close()
+	if err != nil {
+		return nil, false, err
+	}
+
+	windowArgs = append(windowArgs, eventLimit+1)
+	windowRows, err := tx.Query(`
+		SELECT id, user_id, device_id, port_id, from_status, to_status,
+		       changed_at, used_seconds, remaining_text, source
+		FROM port_status_events
+		WHERE user_id = ? AND device_id = ?
+		  AND changed_at >= ? AND changed_at < ?`+portClause+`
+		ORDER BY changed_at, id
+		LIMIT ?
+	`, windowArgs...)
+	if err != nil {
+		return nil, false, fmt.Errorf("query port status analysis range: %w", err)
+	}
+	windowEvents, err := scanPortStatusEvents(windowRows, eventLimit+1)
+	windowRows.Close()
+	if err != nil {
+		return nil, false, err
+	}
+	truncated := len(windowEvents) > eventLimit
+	if truncated {
+		windowEvents = windowEvents[:eventLimit]
+	}
+	events = append(events, windowEvents...)
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit port status analysis transaction: %w", err)
+	}
+	return events, truncated, nil
+}
+
+func (s *Store) PortStatusEventStarts(userID, deviceID string) (map[int]time.Time, error) {
+	rows, err := s.db.Query(`
+		SELECT port_id, MIN(changed_at)
+		FROM port_status_events
+		WHERE user_id = ? AND device_id = ?
+		GROUP BY port_id
+		ORDER BY port_id
+	`, userID, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("query port status event starts: %w", err)
+	}
+	defer rows.Close()
+	starts := make(map[int]time.Time)
+	for rows.Next() {
+		var portID int
+		var changedAt int64
+		if err := rows.Scan(&portID, &changedAt); err != nil {
+			return nil, fmt.Errorf("scan port status event start: %w", err)
+		}
+		starts[portID] = time.Unix(changedAt, 0).UTC()
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate port status event starts: %w", err)
+	}
+	return starts, nil
+}
+
+func scanPortStatusEvents(rows *sql.Rows, capacity int) ([]model.PortStatusEvent, error) {
+	if capacity < 0 {
+		capacity = 0
+	}
+	events := make([]model.PortStatusEvent, 0, capacity)
+	for rows.Next() {
+		event, err := scanPortStatusEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate port status events: %w", err)
+	}
+	return events, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

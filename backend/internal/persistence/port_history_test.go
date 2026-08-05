@@ -211,6 +211,68 @@ func TestRecordPortStatusTransitionsRejectsDuplicateBatchAtomically(t *testing.T
 	}
 }
 
+func TestPortStatusEventsForAnalysisIncludesBoundaryStateAndLimit(t *testing.T) {
+	store, err := OpenSQLite(
+		t.TempDir()+"/state.db",
+		bytes.Repeat([]byte{0x57}, CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	if err := store.Save(State{
+		Version: 3,
+		Users: []model.User{{
+			ID: "user-1", Username: "alice", PasswordHash: "hash",
+			Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		}},
+		UserStates: map[string]UserState{"user-1": {}},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	idle := model.PortIdle
+	inUse := model.PortInUse
+	if err := store.RecordPortStatusEvents([]model.PortStatusEvent{
+		{UserID: "user-1", DeviceID: "device-1", PortID: 1, ToStatus: model.PortIdle, ChangedAt: now.Add(-3 * time.Hour)},
+		{UserID: "user-1", DeviceID: "device-1", PortID: 1, FromStatus: &idle, ToStatus: model.PortInUse, ChangedAt: now.Add(-time.Hour)},
+		{UserID: "user-1", DeviceID: "device-1", PortID: 1, FromStatus: &inUse, ToStatus: model.PortIdle, ChangedAt: now},
+	}); err != nil {
+		t.Fatalf("RecordPortStatusEvents: %v", err)
+	}
+
+	portID := 1
+	events, truncated, err := store.PortStatusEventsForAnalysis(PortStatusEventQuery{
+		UserID: "user-1", DeviceID: "device-1", PortID: &portID,
+		Since: now.Add(-2 * time.Hour), Until: now.Add(time.Hour),
+	}, 10)
+	if err != nil {
+		t.Fatalf("PortStatusEventsForAnalysis: %v", err)
+	}
+	if truncated || len(events) != 3 || !events[0].ChangedAt.Equal(now.Add(-3*time.Hour)) {
+		t.Fatalf("analysis events did not include boundary state: truncated=%v events=%+v", truncated, events)
+	}
+
+	events, truncated, err = store.PortStatusEventsForAnalysis(PortStatusEventQuery{
+		UserID: "user-1", DeviceID: "device-1", PortID: &portID,
+		Since: now.Add(-2 * time.Hour), Until: now.Add(time.Hour),
+	}, 1)
+	if err != nil {
+		t.Fatalf("limited PortStatusEventsForAnalysis: %v", err)
+	}
+	if !truncated || len(events) != 2 {
+		t.Fatalf("limit result = truncated %v, %d events; want predecessor plus one ranged event", truncated, len(events))
+	}
+
+	starts, err := store.PortStatusEventStarts("user-1", "device-1")
+	if err != nil {
+		t.Fatalf("PortStatusEventStarts: %v", err)
+	}
+	if !starts[1].Equal(now.Add(-3 * time.Hour)) {
+		t.Fatalf("history start = %v", starts[1])
+	}
+}
+
 func TestRecordPortStatusEventsRejectsInvalidBatchAtomically(t *testing.T) {
 	store, err := OpenSQLite(
 		t.TempDir()+"/state.db",
