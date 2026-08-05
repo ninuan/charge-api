@@ -36,6 +36,8 @@ const (
 	stateVersion                = 3
 	defaultDeviceLimit          = 10
 	maxDevicesPerUser           = defaultDeviceLimit
+	defaultStatsRetentionDays   = 90
+	defaultHistoryRetentionDays = 90
 	maxRecoveryDiagnostics      = 20
 	diagnosticOperationRecovery = "credential_recovery"
 	diagnosticOperationAddPile  = "add_pile"
@@ -91,7 +93,8 @@ func NewManager(
 		settings: model.RegistrationSettings{
 			OpenRegistration: true, InviteRequired: true,
 			DefaultDeviceLimit: defaultDeviceLimit, DefaultRefreshEnabled: true,
-			StatsRetentionDays: 90,
+			StatsRetentionDays:       defaultStatsRetentionDays,
+			PortHistoryRetentionDays: defaultHistoryRetentionDays,
 		},
 	}
 
@@ -123,8 +126,10 @@ func NewManager(
 	}
 
 	if hasState && len(state.Users) > 0 {
+		settingsUpdated := false
 		if state.Settings.DefaultDeviceLimit > 0 {
-			m.settings = state.Settings
+			m.settings = normalizeRegistrationSettings(state.Settings)
+			settingsUpdated = m.settings != state.Settings
 		}
 		for _, invite := range state.Invites {
 			m.invites[invite.ID] = invite
@@ -153,7 +158,7 @@ func NewManager(
 			m.users[id] = user
 			wrappedLegacy = true
 		}
-		if m.migrated || wrappedLegacy {
+		if m.migrated || wrappedLegacy || settingsUpdated {
 			if err := m.Save(); err != nil {
 				return nil, err
 			}
@@ -162,6 +167,9 @@ func NewManager(
 			if err := persistence.ArchiveMigratedJSON(legacyJSONPath, state); err != nil {
 				return nil, err
 			}
+		}
+		if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
+			return nil, fmt.Errorf("run startup retention maintenance: %w", err)
 		}
 		return m, nil
 	}
@@ -201,6 +209,9 @@ func NewManager(
 		if err := persistence.ArchiveMigratedJSON(legacyJSONPath, state); err != nil {
 			return nil, err
 		}
+	}
+	if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
+		return nil, fmt.Errorf("run startup retention maintenance: %w", err)
 	}
 	return m, nil
 }

@@ -6,6 +6,7 @@ import {
   DatabaseIcon,
   FileClockIcon,
   HardDriveIcon,
+  HistoryIcon,
   ShieldCheckIcon,
   TriangleAlertIcon,
 } from "lucide-react"
@@ -45,6 +46,20 @@ function formatBytes(value?: number) {
   return `${current >= 10 || unit === 0 ? current.toFixed(0) : current.toFixed(1)} ${units[unit]}`
 }
 
+function formatHistoryPeriod(operations: OperationsStatus) {
+  const prefix = `保留 ${operations.portHistoryRetentionDays} 天`
+  if (!operations.portHistoryOldestAt || !operations.portHistoryNewestAt) {
+    return `${prefix} · 尚无状态记录`
+  }
+  const formatter = new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  return `${prefix} · ${formatter.format(new Date(operations.portHistoryOldestAt))} 至 ${formatter.format(new Date(operations.portHistoryNewestAt))}`
+}
+
 export function AdminOperations() {
   const [operations, setOperations] = useState<OperationsStatus | null>(null)
   const [audit, setAudit] = useState<AuditPage | null>(null)
@@ -71,6 +86,12 @@ export function AdminOperations() {
           value: `${operations.metricRows.toLocaleString("zh-CN")} 条`,
           detail: `保留 ${operations.metricRetentionDays} 天`,
           icon: HardDriveIcon,
+        },
+        {
+          label: "端口历史",
+          value: `${operations.portHistoryRows.toLocaleString("zh-CN")} 条`,
+          detail: formatHistoryPeriod(operations),
+          icon: HistoryIcon,
         },
         {
           label: "最近备份",
@@ -103,7 +124,7 @@ export function AdminOperations() {
             数据与备份
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {operations
             ? cards.map(({ label, value, detail, icon: Icon }) => (
                 <div key={label} className="rounded-xl border bg-muted/20 p-4">
@@ -119,11 +140,11 @@ export function AdminOperations() {
                   </p>
                 </div>
               ))
-            : Array.from({ length: 4 }, (_, index) => (
+            : Array.from({ length: 5 }, (_, index) => (
                 <Skeleton key={index} className="h-28 w-full" />
               ))}
-          {operations?.backupState !== "healthy" && (
-            <div className="sm:col-span-2 xl:col-span-4">
+          {operations && operations.backupState !== "healthy" && (
+            <div className="sm:col-span-2 xl:col-span-5">
               <p className="flex items-start gap-2 rounded-lg bg-warning/10 p-3 text-xs leading-5 text-warning-foreground">
                 <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
                 {operations?.backupMessage}

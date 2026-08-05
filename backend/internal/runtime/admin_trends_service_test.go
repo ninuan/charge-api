@@ -10,7 +10,7 @@ func TestRecordMetricCountWritesOneCountedRow(t *testing.T) {
 	manager := &Manager{repository: repository, runtimes: map[string]*UserRuntime{}}
 
 	manager.recordMetricCount("user-1", "request", 7)
-	operations, err := repository.OperationsStatus(90)
+	operations, err := repository.OperationsStatus(90, 90)
 	if err != nil {
 		t.Fatalf("OperationsStatus: %v", err)
 	}

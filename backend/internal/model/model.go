@@ -260,11 +260,12 @@ type TemporaryPasswordResponse struct {
 }
 
 type RegistrationSettings struct {
-	OpenRegistration      bool `json:"openRegistration"`
-	InviteRequired        bool `json:"inviteRequired"`
-	DefaultDeviceLimit    int  `json:"defaultDeviceLimit"`
-	DefaultRefreshEnabled bool `json:"defaultRefreshEnabled"`
-	StatsRetentionDays    int  `json:"statsRetentionDays"`
+	OpenRegistration         bool `json:"openRegistration"`
+	InviteRequired           bool `json:"inviteRequired"`
+	DefaultDeviceLimit       int  `json:"defaultDeviceLimit"`
+	DefaultRefreshEnabled    bool `json:"defaultRefreshEnabled"`
+	StatsRetentionDays       int  `json:"statsRetentionDays"`
+	PortHistoryRetentionDays int  `json:"portHistoryRetentionDays"`
 }
 
 type InviteCode struct {
@@ -428,15 +429,19 @@ type AuditPage struct {
 }
 
 type OperationsStatus struct {
-	DatabaseSizeBytes   int64      `json:"databaseSizeBytes"`
-	MetricRows          int64      `json:"metricRows"`
-	MetricRetentionDays int        `json:"metricRetentionDays"`
-	IntegrityResult     string     `json:"integrityResult"`
-	CheckedAt           time.Time  `json:"checkedAt"`
-	LastBackupAt        *time.Time `json:"lastBackupAt,omitempty"`
-	LastBackupSizeBytes int64      `json:"lastBackupSizeBytes,omitempty"`
-	BackupState         string     `json:"backupState"`
-	BackupMessage       string     `json:"backupMessage"`
+	DatabaseSizeBytes        int64      `json:"databaseSizeBytes"`
+	MetricRows               int64      `json:"metricRows"`
+	MetricRetentionDays      int        `json:"metricRetentionDays"`
+	PortHistoryRows          int64      `json:"portHistoryRows"`
+	PortHistoryRetentionDays int        `json:"portHistoryRetentionDays"`
+	PortHistoryOldestAt      *time.Time `json:"portHistoryOldestAt,omitempty"`
+	PortHistoryNewestAt      *time.Time `json:"portHistoryNewestAt,omitempty"`
+	IntegrityResult          string     `json:"integrityResult"`
+	CheckedAt                time.Time  `json:"checkedAt"`
+	LastBackupAt             *time.Time `json:"lastBackupAt,omitempty"`
+	LastBackupSizeBytes      int64      `json:"lastBackupSizeBytes,omitempty"`
+	BackupState              string     `json:"backupState"`
+	BackupMessage            string     `json:"backupMessage"`
 }
 
 type TrafficStats struct {

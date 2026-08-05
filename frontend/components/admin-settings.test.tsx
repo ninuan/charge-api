@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -24,6 +24,7 @@ const settings = {
   defaultRefreshEnabled: true,
   defaultDeviceLimit: 10,
   statsRetentionDays: 90,
+  portHistoryRetentionDays: 90,
 }
 
 const invitePage = {
@@ -87,6 +88,29 @@ describe("AdminSettings", () => {
     expect(setSettings).toHaveBeenCalledWith({
       ...settings,
       openRegistration: false,
+    })
+  })
+
+  it("updates the independent port history retention", () => {
+    const setSettings = vi.fn()
+
+    render(
+      <AdminSettings
+        settings={settings}
+        setSettings={setSettings}
+        invitePage={null}
+        reload={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const input = screen.getByLabelText("端口历史保留天数")
+    expect(input).toHaveAttribute("min", "1")
+    expect(input).toHaveAttribute("max", "365")
+    fireEvent.change(input, { target: { value: "120" } })
+
+    expect(setSettings).toHaveBeenLastCalledWith({
+      ...settings,
+      portHistoryRetentionDays: 120,
     })
   })
 })

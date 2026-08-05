@@ -325,3 +325,38 @@ func TestMetricSeriesSumsMetricCounts(t *testing.T) {
 		t.Fatal("expected zero metric count to fail")
 	}
 }
+
+func TestMetricRetentionPrunesMoreThanOneBatch(t *testing.T) {
+	store, err := OpenSQLite(
+		filepath.Join(t.TempDir(), "state.db"),
+		bytes.Repeat([]byte{0x58}, CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	for index := 0; index < retentionPruneBatchSize+7; index++ {
+		if err := store.RecordMetric("user-1", "request", now.Add(-48*time.Hour)); err != nil {
+			t.Fatalf("RecordMetric %d: %v", index, err)
+		}
+	}
+	if err := store.RecordMetric("user-1", "request", now); err != nil {
+		t.Fatalf("RecordMetric retained: %v", err)
+	}
+	deleted, err := store.PruneMetrics(now.Add(-24 * time.Hour))
+	if err != nil {
+		t.Fatalf("PruneMetrics: %v", err)
+	}
+	if deleted != retentionPruneBatchSize+7 {
+		t.Fatalf("deleted = %d, want %d", deleted, retentionPruneBatchSize+7)
+	}
+	status, err := store.OperationsStatus(90, 90)
+	if err != nil {
+		t.Fatalf("OperationsStatus: %v", err)
+	}
+	if status.MetricRows != 1 {
+		t.Fatalf("metric rows = %d, want 1", status.MetricRows)
+	}
+}

@@ -194,7 +194,7 @@ function DailyTrend({ data }: { data: DeviceHistoryResponse["daily"] }) {
                   <span
                     aria-hidden="true"
                     className={cn(
-                      "w-full rounded-md transition-[height,background-color] duration-300",
+                      "history-chart-bar w-full rounded-md transition-[height,background-color] duration-300",
                       occupancy === null
                         ? "h-1 bg-muted-foreground/20"
                         : "bg-primary"
@@ -228,7 +228,7 @@ function heatmapLabel(cell: HistoryHeatmapCell) {
   return `${weekdays[cell.weekday - 1]} ${String(cell.hour).padStart(2, "0")}:00，${formatPercent(cell.occupancyPercent)}，覆盖 ${cell.sampleDates} 天${cell.sampleSufficient ? "，样本充足" : "，样本不足"}`
 }
 
-function HistoryHeatmap({ cells }: { cells: HistoryHeatmapCell[] }) {
+export function HistoryHeatmap({ cells }: { cells: HistoryHeatmapCell[] }) {
   const [activeLabel, setActiveLabel] = useState<string | null>(null)
   const cellMap = useMemo(
     () => new Map(cells.map((cell) => [`${cell.weekday}-${cell.hour}`, cell])),
@@ -288,8 +288,9 @@ function HistoryHeatmap({ cells }: { cells: HistoryHeatmapCell[] }) {
                       {cell?.occupancyPercent !== null &&
                         cell?.occupancyPercent !== undefined && (
                           <span
+                            key={`${cell.weekday}-${cell.hour}-${cell.occupancyPercent}-${cell.sampleDates}-${cell.sampleSufficient}`}
                             aria-hidden="true"
-                            className="absolute inset-0 rounded-[3px] bg-primary transition-opacity duration-200"
+                            className="history-heatmap-cell absolute inset-0 rounded-[3px] bg-primary transition-opacity duration-200"
                             style={{
                               opacity: Math.max(
                                 0.14,

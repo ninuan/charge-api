@@ -90,12 +90,28 @@ func TestPortStatusEventsRoundTripAndMaintenance(t *testing.T) {
 	if pruned != 2 {
 		t.Fatalf("pruned = %d, want 2", pruned)
 	}
+	retained, err := store.PortStatusEvents(PortStatusEventQuery{
+		UserID: "user-1", DeviceID: "device-1",
+		Since: now.Add(45 * time.Minute), Until: now.Add(3 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("PortStatusEvents after prune: %v", err)
+	}
+	anchors := 0
+	for _, event := range retained {
+		if event.Source == "retention" && event.ChangedAt.Equal(now.Add(45*time.Minute)) {
+			anchors++
+		}
+	}
+	if len(retained) != 4 || anchors != 2 {
+		t.Fatalf("retained events = %+v, want two boundary anchors and two transitions", retained)
+	}
 	deleted, err := store.DeletePortStatusEvents("user-1", "device-1")
 	if err != nil {
 		t.Fatalf("DeletePortStatusEvents: %v", err)
 	}
-	if deleted != 2 {
-		t.Fatalf("deleted = %d, want 2", deleted)
+	if deleted != 4 {
+		t.Fatalf("deleted = %d, want 4", deleted)
 	}
 }
 

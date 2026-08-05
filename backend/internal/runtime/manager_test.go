@@ -503,6 +503,81 @@ func TestRegistrationPolicySupportsPublicAndInviteEntryPoints(t *testing.T) {
 	}
 }
 
+func TestNewManagerNormalizesRetentionAndPrunesExpiredData(t *testing.T) {
+	repository := testRepository(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	user := model.User{
+		ID: "user-retention", Username: "retention-user", PasswordHash: "hash",
+		Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		DeviceLimit: 10, RefreshEnabled: true,
+	}
+	if err := repository.Save(persistence.State{
+		Version:    3,
+		Users:      []model.User{user},
+		UserStates: map[string]persistence.UserState{user.ID: {}},
+		Settings: model.RegistrationSettings{
+			OpenRegistration: true, DefaultDeviceLimit: 10,
+			DefaultRefreshEnabled: true, StatsRetentionDays: 30,
+		},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	old := now.AddDate(0, 0, -100)
+	recent := now.AddDate(0, 0, -2)
+	if err := repository.RecordMetric("user-retention", "request", old); err != nil {
+		t.Fatalf("RecordMetric old: %v", err)
+	}
+	if err := repository.RecordMetric("user-retention", "request", recent); err != nil {
+		t.Fatalf("RecordMetric recent: %v", err)
+	}
+	if err := repository.RecordPortStatusEvents([]model.PortStatusEvent{
+		{UserID: user.ID, DeviceID: "device-1", PortID: 1, ToStatus: model.PortIdle, ChangedAt: old, Source: "remote"},
+		{UserID: user.ID, DeviceID: "device-1", PortID: 1, ToStatus: model.PortInUse, ChangedAt: recent, Source: "remote"},
+	}); err != nil {
+		t.Fatalf("RecordPortStatusEvents: %v", err)
+	}
+
+	manager, err := NewManager(
+		repository,
+		"",
+		parser.DefaultCaptureRequests(),
+		"admin-password-123",
+		30*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if got := manager.Settings().PortHistoryRetentionDays; got != defaultHistoryRetentionDays {
+		t.Fatalf("history retention = %d, want %d", got, defaultHistoryRetentionDays)
+	}
+	operations, err := manager.OperationsStatus()
+	if err != nil {
+		t.Fatalf("OperationsStatus: %v", err)
+	}
+	if operations.MetricRows != 1 || operations.PortHistoryRows != 2 {
+		t.Fatalf("startup retention did not prune expired rows: %+v", operations)
+	}
+
+	settings := manager.Settings()
+	settings.PortHistoryRetentionDays = 0
+	if err := manager.UpdateSettings(settings); err == nil {
+		t.Fatal("UpdateSettings accepted zero history retention")
+	}
+	settings.PortHistoryRetentionDays = 1
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	operations, err = manager.OperationsStatus()
+	if err != nil {
+		t.Fatalf("OperationsStatus after update: %v", err)
+	}
+	if operations.PortHistoryRows != 1 || operations.PortHistoryRetentionDays != 1 ||
+		operations.PortHistoryOldestAt == nil ||
+		operations.PortHistoryOldestAt.Before(time.Now().Add(-25*time.Hour)) {
+		t.Fatalf("updated retention was not applied: %+v", operations)
+	}
+}
+
 func TestCreateInviteGeneratesRandomCode(t *testing.T) {
 	manager, err := NewManager(
 		testRepository(t),

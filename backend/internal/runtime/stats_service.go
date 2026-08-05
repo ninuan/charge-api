@@ -11,7 +11,11 @@ import (
 )
 
 func (m *Manager) OperationsStatus() (model.OperationsStatus, error) {
-	return m.repository.OperationsStatus(m.Settings().StatsRetentionDays)
+	settings := normalizeRegistrationSettings(m.Settings())
+	return m.repository.OperationsStatus(
+		settings.StatsRetentionDays,
+		settings.PortHistoryRetentionDays,
+	)
 }
 
 func (m *Manager) RecordHealthCheck(
@@ -86,7 +90,11 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 			})
 		}
 	}
-	operations, operationsErr := m.repository.OperationsStatus(m.Settings().StatsRetentionDays)
+	settings := normalizeRegistrationSettings(m.Settings())
+	operations, operationsErr := m.repository.OperationsStatus(
+		settings.StatsRetentionDays,
+		settings.PortHistoryRetentionDays,
+	)
 	if operationsErr != nil {
 		exceptions = append(exceptions, model.SystemException{
 			ID: "operations-database", Username: "系统", Type: "database",

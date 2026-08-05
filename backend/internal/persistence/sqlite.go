@@ -755,9 +755,37 @@ func (s *Store) RecordMetricCount(userID, kind string, count int, at time.Time) 
 	return err
 }
 
-func (s *Store) PruneMetrics(before time.Time) error {
-	_, err := s.db.Exec(`DELETE FROM metrics WHERE created_at < ?`, before.Unix())
-	return err
+const retentionPruneBatchSize = 500
+
+func (s *Store) PruneMetrics(before time.Time) (int64, error) {
+	return s.pruneRowsInBatches("metrics", "created_at", before.Unix())
+}
+
+func (s *Store) pruneRowsInBatches(table, timeColumn string, before int64) (int64, error) {
+	var total int64
+	query := fmt.Sprintf(
+		`DELETE FROM %s WHERE id IN (
+			SELECT id FROM %s WHERE %s < ? ORDER BY %s, id LIMIT ?
+		)`,
+		table,
+		table,
+		timeColumn,
+		timeColumn,
+	)
+	for {
+		result, err := s.db.Exec(query, before, retentionPruneBatchSize)
+		if err != nil {
+			return total, fmt.Errorf("prune %s: %w", table, err)
+		}
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("count pruned %s rows: %w", table, err)
+		}
+		total += deleted
+		if deleted < retentionPruneBatchSize {
+			return total, nil
+		}
+	}
 }
 
 func (s *Store) MetricSeries(since time.Time, bucketSeconds int64) ([]model.MetricPoint, error) {

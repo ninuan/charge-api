@@ -2,7 +2,10 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { DeviceHistorySheet } from "@/components/device-history-sheet"
+import {
+  DeviceHistorySheet,
+  HistoryHeatmap,
+} from "@/components/device-history-sheet"
 import type {
   DeviceHistoryResponse,
   PortHistoryMetrics,
@@ -272,5 +275,27 @@ describe("DeviceHistorySheet", () => {
     ).toBeInTheDocument()
     expect(historyApi.port).toHaveBeenCalledTimes(2)
     expect(historyApi.device).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("HistoryHeatmap", () => {
+  it("remounts only cells whose data changed", () => {
+    const { rerender } = render(<HistoryHeatmap cells={heatmap} />)
+    const changedButton = screen.getByRole("button", { name: /周一 00:00/ })
+    const stableButton = screen.getByRole("button", { name: /周一 01:00/ })
+    const changedCell = changedButton.firstElementChild
+    const stableCell = stableButton.firstElementChild
+
+    rerender(
+      <HistoryHeatmap
+        cells={heatmap.map((cell, index) =>
+          index === 0 ? { ...cell, occupancyPercent: 64 } : cell
+        )}
+      />
+    )
+
+    expect(changedButton.firstElementChild).not.toBe(changedCell)
+    expect(stableButton.firstElementChild).toBe(stableCell)
+    expect(changedButton.firstElementChild).toHaveClass("history-heatmap-cell")
   })
 })

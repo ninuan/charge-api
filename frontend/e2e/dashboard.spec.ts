@@ -261,10 +261,13 @@ test("administrator handles a user and verifies the audit trail", async ({
   })
 
   await page.getByRole("tab", { name: "系统设置" }).click()
+  await page.getByLabel("端口历史保留天数").fill("120")
   await page.getByRole("button", { name: "保存设置" }).click()
   await expect(page.getByText("系统设置已保存")).toBeVisible()
   await page.getByRole("tab", { name: "运维审计" }).click()
   await expect(page.getByText("数据与备份")).toBeVisible()
+  await expect(page.getByText("端口历史")).toBeVisible()
+  await expect(page.getByText(/保留 120 天/)).toBeVisible()
   await expect(page.getByText("管理操作日志")).toBeVisible()
   await expect(page.getByText(/修改账户状态/).first()).toBeVisible()
   await expect(page.getByText(/重置密码/).first()).toBeVisible()
@@ -275,6 +278,16 @@ test("administrator handles a user and verifies the audit trail", async ({
   })
 
   await page.setViewportSize({ width: 375, height: 812 })
+  await expect(page.getByText("端口历史")).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth
+    )
+  ).toBe(true)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.0-retention-operations-mobile.png",
+    fullPage: false,
+  })
   await page.getByRole("tab", { name: "运营总览" }).click()
   await expect(page.getByRole("tab", { name: "运营总览" })).toHaveAttribute(
     "data-active",

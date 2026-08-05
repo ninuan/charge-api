@@ -18,6 +18,16 @@ func (m *Manager) Settings() model.RegistrationSettings {
 	return m.settings
 }
 
+func normalizeRegistrationSettings(settings model.RegistrationSettings) model.RegistrationSettings {
+	if settings.StatsRetentionDays == 0 {
+		settings.StatsRetentionDays = defaultStatsRetentionDays
+	}
+	if settings.PortHistoryRetentionDays == 0 {
+		settings.PortHistoryRetentionDays = defaultHistoryRetentionDays
+	}
+	return settings
+}
+
 func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	if settings.DefaultDeviceLimit < 1 || settings.DefaultDeviceLimit > 100 {
 		return fmt.Errorf("默认设备额度需要在 1 到 100 之间")
@@ -25,11 +35,40 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	if settings.StatsRetentionDays < 1 || settings.StatsRetentionDays > 365 {
 		return fmt.Errorf("统计保留天数需要在 1 到 365 之间")
 	}
+	if settings.PortHistoryRetentionDays < 1 || settings.PortHistoryRetentionDays > 365 {
+		return fmt.Errorf("端口历史保留天数需要在 1 到 365 之间")
+	}
 	m.mu.Lock()
+	previous := m.settings
 	m.settings = settings
 	m.mu.Unlock()
-	_ = m.repository.PruneMetrics(time.Now().AddDate(0, 0, -settings.StatsRetentionDays))
-	return m.Save()
+	if err := m.Save(); err != nil {
+		m.mu.Lock()
+		m.settings = previous
+		m.mu.Unlock()
+		return err
+	}
+	if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, error) {
+	settings := normalizeRegistrationSettings(m.Settings())
+	metricRows, err := m.repository.PruneMetrics(
+		now.UTC().AddDate(0, 0, -settings.StatsRetentionDays),
+	)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prune metrics: %w", err)
+	}
+	historyRows, err := m.repository.PrunePortStatusEvents(
+		now.UTC().AddDate(0, 0, -settings.PortHistoryRetentionDays),
+	)
+	if err != nil {
+		return metricRows, 0, fmt.Errorf("prune port history: %w", err)
+	}
+	return metricRows, historyRows, nil
 }
 
 func (m *Manager) InviteCodes() []model.InviteCode {

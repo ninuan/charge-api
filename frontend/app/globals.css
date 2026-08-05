@@ -182,6 +182,17 @@
   }
 }
 
+@keyframes history-heatmap-cell-change {
+  from {
+    transform: scale(0.72);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
+  }
+  to {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 .pile-card-enter {
   animation: pile-card-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -202,13 +213,25 @@
   animation: admin-trend-enter 220ms ease-out both;
 }
 
+.history-heatmap-cell {
+  animation: history-heatmap-cell-change 260ms ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   [class*="health-recovered"],
   .pile-card-enter,
   .port-card-enter,
   .port-state-changed,
   .history-panel-enter,
-  .admin-trend-enter {
+  .admin-trend-enter,
+  .history-heatmap-cell {
     animation: none !important;
+  }
+
+  .history-chart-bar,
+  .history-heatmap-cell,
+  .admin-trend-content,
+  .admin-trend-bar {
+    transition-duration: 0.01ms !important;
   }
 }

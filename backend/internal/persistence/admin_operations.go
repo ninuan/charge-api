@@ -259,12 +259,13 @@ func (s *Store) HealthSummary(service string, current model.ServiceHealth, now t
 	return current, nil
 }
 
-func (s *Store) OperationsStatus(retentionDays int) (model.OperationsStatus, error) {
+func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays int) (model.OperationsStatus, error) {
 	result := model.OperationsStatus{
-		MetricRetentionDays: retentionDays,
-		CheckedAt:           time.Now(),
-		BackupState:         "unavailable",
-		BackupMessage:       "尚未发现数据库备份；请检查定时备份任务。",
+		MetricRetentionDays:      metricRetentionDays,
+		PortHistoryRetentionDays: portHistoryRetentionDays,
+		CheckedAt:                time.Now(),
+		BackupState:              "unavailable",
+		BackupMessage:            "尚未发现数据库备份；请检查定时备份任务。",
 	}
 	info, err := os.Stat(s.path)
 	if err != nil {
@@ -273,6 +274,21 @@ func (s *Store) OperationsStatus(retentionDays int) (model.OperationsStatus, err
 	result.DatabaseSizeBytes = info.Size()
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM metrics`).Scan(&result.MetricRows); err != nil {
 		return result, fmt.Errorf("count metrics: %w", err)
+	}
+	var oldestHistory, newestHistory sql.NullInt64
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*), MIN(changed_at), MAX(changed_at)
+		FROM port_status_events
+	`).Scan(&result.PortHistoryRows, &oldestHistory, &newestHistory); err != nil {
+		return result, fmt.Errorf("summarize port history: %w", err)
+	}
+	if oldestHistory.Valid {
+		at := time.Unix(oldestHistory.Int64, 0)
+		result.PortHistoryOldestAt = &at
+	}
+	if newestHistory.Valid {
+		at := time.Unix(newestHistory.Int64, 0)
+		result.PortHistoryNewestAt = &at
 	}
 	if err := s.db.QueryRow(`PRAGMA quick_check`).Scan(&result.IntegrityResult); err != nil {
 		return result, fmt.Errorf("check database integrity: %w", err)

@@ -41,16 +41,22 @@ function AnimatedMetricValue({ value }: { value: number }) {
     const startedAt = performance.now()
     const duration = 220
     let frame = 0
+    const finish = window.setTimeout(
+      () => setDisplayValue(value),
+      duration + 40
+    )
     const tick = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / duration)
       const eased = 1 - Math.pow(1 - progress, 3)
-      setDisplayValue(
-        Math.round(startValue + (value - startValue) * eased)
-      )
+      setDisplayValue(Math.round(startValue + (value - startValue) * eased))
       if (progress < 1) frame = requestAnimationFrame(tick)
+      else window.clearTimeout(finish)
     }
     frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(finish)
+    }
   }, [value])
 
   return displayValue

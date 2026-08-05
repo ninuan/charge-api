@@ -479,12 +479,48 @@ func (s *Store) DeletePortStatusEvents(userID, deviceID string) (int64, error) {
 }
 
 func (s *Store) PrunePortStatusEvents(before time.Time) (int64, error) {
-	result, err := s.db.Exec(
-		`DELETE FROM port_status_events WHERE changed_at < ?`,
+	if err := s.ensurePortHistoryRetentionAnchors(before); err != nil {
+		return 0, err
+	}
+	return s.pruneRowsInBatches(
+		"port_status_events",
+		"changed_at",
 		before.Unix(),
 	)
+}
+
+func (s *Store) ensurePortHistoryRetentionAnchors(before time.Time) error {
+	cutoff := before.Unix()
+	_, err := s.db.Exec(`
+		WITH ranked AS (
+			SELECT user_id, device_id, port_id, to_status, used_seconds,
+			       remaining_text,
+			       ROW_NUMBER() OVER (
+				   PARTITION BY user_id, device_id, port_id
+				   ORDER BY changed_at DESC, id DESC
+			   ) AS position
+			FROM port_status_events
+			WHERE changed_at < ?
+		)
+		INSERT INTO port_status_events(
+			user_id, device_id, port_id, from_status, to_status, changed_at,
+			used_seconds, remaining_text, source
+		)
+		SELECT ranked.user_id, ranked.device_id, ranked.port_id, NULL,
+		       ranked.to_status, ?, ranked.used_seconds, ranked.remaining_text,
+		       'retention'
+		FROM ranked
+		WHERE ranked.position = 1
+		  AND NOT EXISTS (
+			SELECT 1 FROM port_status_events current
+			WHERE current.user_id = ranked.user_id
+			  AND current.device_id = ranked.device_id
+			  AND current.port_id = ranked.port_id
+			  AND current.changed_at = ?
+		  )
+	`, cutoff, cutoff, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("prune port status events: %w", err)
+		return fmt.Errorf("create port history retention anchors: %w", err)
 	}
-	return result.RowsAffected()
+	return nil
 }

@@ -116,6 +116,8 @@ export function AdminSettings({
                 <Input
                   id="retention"
                   type="number"
+                  min={1}
+                  max={365}
                   value={settings.statsRetentionDays}
                   onChange={(event) =>
                     setSettings({
@@ -124,9 +126,30 @@ export function AdminSettings({
                     })
                   }
                 />
-                <p className="text-xs text-muted-foreground">
-                  用于运营总览和异常分析的历史数据保留时间。
-                </p>
+                <FieldDescription>
+                  用于运营趋势和异常分析，范围为 1–365 天。
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="port-history-retention">
+                  端口历史保留天数
+                </FieldLabel>
+                <Input
+                  id="port-history-retention"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={settings.portHistoryRetentionDays}
+                  onChange={(event) =>
+                    setSettings({
+                      ...settings,
+                      portHistoryRetentionDays: Number(event.target.value),
+                    })
+                  }
+                />
+                <FieldDescription>
+                  控制状态时间线、占用趋势和热力图的数据范围，范围为 1–365 天。
+                </FieldDescription>
               </Field>
               <Button type="submit">保存设置</Button>
             </FieldGroup>

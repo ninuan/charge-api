@@ -265,7 +265,7 @@ export function AdminTrendPanel({
           <div
             key={trends.window.range}
             className={cn(
-              "admin-trend-enter flex flex-col gap-4 transition-opacity duration-200",
+              "admin-trend-content admin-trend-enter flex flex-col gap-4 transition-opacity duration-200",
               loading && "opacity-45"
             )}
           >
@@ -324,7 +324,7 @@ export function AdminTrendPanel({
                       <span className="flex h-40 w-full max-w-8 items-end overflow-hidden rounded-md bg-muted">
                         <span
                           aria-hidden="true"
-                          className="w-full rounded-md bg-primary transition-[height,background-color] duration-300 group-hover:bg-primary/80 group-focus-visible:bg-primary/80"
+                          className="admin-trend-bar w-full rounded-md bg-primary transition-[height,background-color] duration-300 group-hover:bg-primary/80 group-focus-visible:bg-primary/80"
                           style={{
                             height:
                               value === null || value === 0

@@ -155,6 +155,7 @@ export interface RegistrationSettings {
   defaultDeviceLimit: number
   defaultRefreshEnabled: boolean
   statsRetentionDays: number
+  portHistoryRetentionDays: number
 }
 
 export interface InviteCode {
@@ -271,6 +272,10 @@ export interface OperationsStatus {
   databaseSizeBytes: number
   metricRows: number
   metricRetentionDays: number
+  portHistoryRows: number
+  portHistoryRetentionDays: number
+  portHistoryOldestAt?: string
+  portHistoryNewestAt?: string
   integrityResult: string
   checkedAt: string
   lastBackupAt?: string

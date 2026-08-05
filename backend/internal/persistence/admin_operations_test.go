@@ -99,10 +99,27 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 		t.Fatalf("OpenSQLite: %v", err)
 	}
 	defer store.Close()
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	if err := store.Save(State{
+		Version: 3,
+		Users: []model.User{{
+			ID: "user-1", Username: "alice", PasswordHash: "hash",
+			Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		}},
+		UserStates: map[string]UserState{"user-1": {}},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.RecordPortStatusEvents([]model.PortStatusEvent{
+		{UserID: "user-1", DeviceID: "device-1", PortID: 1, ToStatus: model.PortIdle, ChangedAt: now.Add(-time.Hour), Source: "remote"},
+		{UserID: "user-1", DeviceID: "device-1", PortID: 1, ToStatus: model.PortInUse, ChangedAt: now, Source: "remote"},
+	}); err != nil {
+		t.Fatalf("RecordPortStatusEvents: %v", err)
+	}
 	if err := store.RecordAudit(model.AuditEntry{
 		ActorID: "admin-1", Actor: "admin", Action: "user.delete",
 		TargetType: "user", TargetID: "user-1", TargetLabel: "alice",
-		Result: "success", CreatedAt: time.Now(),
+		Result: "success", CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("RecordAudit: %v", err)
 	}
@@ -113,12 +130,15 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 	if page.Total != 1 || page.Items[0].TargetLabel != "alice" {
 		t.Fatalf("unexpected audit page: %+v", page)
 	}
-	status, err := store.OperationsStatus(90)
+	status, err := store.OperationsStatus(90, 120)
 	if err != nil {
 		t.Fatalf("OperationsStatus: %v", err)
 	}
 	if status.DatabaseSizeBytes <= 0 || status.IntegrityResult != "ok" ||
-		status.MetricRetentionDays != 90 {
+		status.MetricRetentionDays != 90 || status.PortHistoryRetentionDays != 120 ||
+		status.PortHistoryRows != 2 || status.PortHistoryOldestAt == nil ||
+		!status.PortHistoryOldestAt.Equal(now.Add(-time.Hour)) ||
+		status.PortHistoryNewestAt == nil || !status.PortHistoryNewestAt.Equal(now) {
 		t.Fatalf("unexpected operations status: %+v", status)
 	}
 }
