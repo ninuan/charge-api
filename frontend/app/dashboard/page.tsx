@@ -85,6 +85,13 @@ const AddPileDialog = dynamic(
     ),
   }
 )
+const DeviceHistorySheet = dynamic(
+  () =>
+    import("@/components/device-history-sheet").then(
+      (m) => m.DeviceHistorySheet
+    ),
+  { ssr: false }
+)
 
 function formatTime(value?: string) {
   return value
@@ -123,6 +130,7 @@ export default function DashboardPage() {
   const [initialLoadFinished, setInitialLoadFinished] = useState(false)
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<PortFilter>("all")
+  const [historyPileId, setHistoryPileId] = useState<string | null>(null)
   const [queryReady, setQueryReady] = useState(false)
   // 输入框即时回显，筛选计算滞后一拍，键入时不再同步重渲染整个卡片列表。
   const deferredSearch = useDeferredValue(search)
@@ -240,6 +248,11 @@ export default function DashboardPage() {
     () => filterPiles(snapshot.piles, deferredSearch, filter),
     [filter, deferredSearch, snapshot.piles]
   )
+  const historyPile = useMemo(
+    () => snapshot.piles.find((pile) => pile.id === historyPileId) ?? null,
+    [historyPileId, snapshot.piles]
+  )
+  const openHistory = useCallback((id: string) => setHistoryPileId(id), [])
   const visiblePortCount = entries.reduce(
     (total, entry) => total + entry.portIds.length,
     0
@@ -422,6 +435,7 @@ export default function DashboardPage() {
                   canMoveDown={snapshot.piles.at(-1)?.id !== entry.pile.id}
                   reordering={reordering}
                   onMove={handleMove}
+                  onHistory={openHistory}
                 />
               </div>
             ))}
@@ -460,6 +474,16 @@ export default function DashboardPage() {
           </Card>
         )}
       </section>
+      {historyPile && (
+        <DeviceHistorySheet
+          key={historyPile.id}
+          pile={historyPile}
+          open
+          onOpenChange={(next) => {
+            if (!next) setHistoryPileId(null)
+          }}
+        />
+      )}
     </AppShell>
   )
 }

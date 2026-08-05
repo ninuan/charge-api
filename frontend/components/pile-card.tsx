@@ -4,6 +4,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   BatteryChargingIcon,
+  BarChart3Icon,
   CheckCircle2Icon,
   ChevronDownIcon,
   Clock3Icon,
@@ -44,6 +45,7 @@ type Props = {
   canMoveDown: boolean
   reordering: boolean
   onMove: (id: string, direction: "up" | "down") => void | Promise<void>
+  onHistory: (id: string) => void
 }
 
 function portMeta(port: Port) {
@@ -152,6 +154,7 @@ function PileCardComponent({
   canMoveDown,
   reordering,
   onMove,
+  onHistory,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -238,6 +241,15 @@ function PileCardComponent({
                 个匹配端口
               </p>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => onHistory(pile.id)}
+            >
+              <BarChart3Icon data-icon="inline-start" />
+              历史趋势
+            </Button>
           </div>
           <div className="flex items-center justify-between gap-3 sm:justify-end">
             <div className="flex gap-4 text-right text-xs text-muted-foreground">
@@ -458,6 +470,7 @@ export const PileCard = memo(
     prev.onRemove === next.onRemove &&
     prev.onUpdate === next.onUpdate &&
     prev.onMove === next.onMove &&
+    prev.onHistory === next.onHistory &&
     prev.canMoveUp === next.canMoveUp &&
     prev.canMoveDown === next.canMoveDown &&
     prev.reordering === next.reordering &&

@@ -53,6 +53,7 @@ describe("PileCard", () => {
         canMoveDown
         reordering={false}
         onMove={vi.fn()}
+        onHistory={vi.fn()}
         onRemove={vi.fn()}
         onUpdate={vi.fn()}
       />
@@ -73,6 +74,7 @@ describe("PileCard", () => {
         canMoveDown
         reordering={false}
         onMove={onMove}
+        onHistory={vi.fn()}
         onRemove={vi.fn()}
         onUpdate={vi.fn()}
       />
@@ -91,6 +93,7 @@ describe("PileCard", () => {
       canMoveDown: true,
       reordering: false,
       onMove: vi.fn(),
+      onHistory: vi.fn(),
       onRemove: vi.fn(),
       onUpdate: vi.fn(),
     }
@@ -115,5 +118,26 @@ describe("PileCard", () => {
     expect(screen.getByLabelText("2 号充电口")).not.toHaveClass(
       "port-state-changed"
     )
+  })
+
+  it("opens history from an explicit card action", async () => {
+    const onHistory = vi.fn()
+    render(
+      <PileCard
+        pile={pile}
+        visiblePortIds={[1, 2]}
+        filtering={false}
+        canMoveUp={false}
+        canMoveDown
+        reordering={false}
+        onMove={vi.fn()}
+        onHistory={onHistory}
+        onRemove={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "历史趋势" }))
+    expect(onHistory).toHaveBeenCalledWith("pile-1")
   })
 })

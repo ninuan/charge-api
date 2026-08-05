@@ -8,7 +8,9 @@ describe("historyApi", () => {
   it("requests device history with generated query parameters", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ historyNotice: "ready" })))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ historyNotice: "ready" }))
+      )
     vi.stubGlobal("fetch", fetchMock)
 
     await historyApi.device("2601201412385560088", {
@@ -25,7 +27,9 @@ describe("historyApi", () => {
   it("requests one port without appending an empty query string", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ historyNotice: "ready" })))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ historyNotice: "ready" }))
+      )
     vi.stubGlobal("fetch", fetchMock)
 
     await historyApi.port("2601201412385560088", 3)

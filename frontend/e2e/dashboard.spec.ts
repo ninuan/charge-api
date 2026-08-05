@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test"
 
+import type {
+  DeviceHistoryResponse,
+  PortHistoryMetrics,
+  PortHistoryResponse,
+  PortStatus,
+} from "@/lib/api/generated"
+
 const user = {
   id: "user-wang",
   username: "wang",
@@ -13,7 +20,11 @@ const user = {
 
 const ports = Array.from({ length: 10 }, (_, index) => ({
   id: index + 1,
-  status: index === 2 ? "idle" : index === 4 ? "offline" : "in_use",
+  status: (index === 2
+    ? "idle"
+    : index === 4
+      ? "offline"
+      : "in_use") as PortStatus,
   powerKw: index === 2 ? 0 : 6.6,
   energyKwh: index === 2 ? 0 : 2.4,
   updatedAt: "2026-07-15T09:00:00Z",
@@ -62,6 +73,95 @@ const snapshot = {
     message: "已更新 1 台充电桩",
     lastRemoteAt: "2026-07-15T09:00:00Z",
   },
+}
+
+const historyMetrics: PortHistoryMetrics = {
+  observedSeconds: 432000,
+  gapSeconds: 172800,
+  idleSeconds: 302400,
+  inUseSeconds: 129600,
+  offlineSeconds: 0,
+  occupancyPercent: 30,
+  completedSessions: 6,
+  averageSessionSeconds: 3600,
+  sampleState: "partial",
+}
+
+const historyDaily = Array.from({ length: 7 }, (_, index) => ({
+  date: `2026-07-${String(9 + index).padStart(2, "0")}`,
+  metrics: { ...historyMetrics, occupancyPercent: 20 + index * 5 },
+}))
+
+const deviceHistory: DeviceHistoryResponse = {
+  device: {
+    id: snapshot.piles[0].id,
+    number: snapshot.piles[0].number,
+    name: snapshot.piles[0].name,
+    address: snapshot.piles[0].address,
+  },
+  window: {
+    range: "7d",
+    timezone: "Asia/Shanghai",
+    start: "2026-07-09T09:00:00Z",
+    end: "2026-07-16T09:00:00Z",
+  },
+  metrics: historyMetrics,
+  daily: historyDaily,
+  heatmap: Array.from({ length: 168 }, (_, index) => ({
+    weekday: Math.floor(index / 24) + 1,
+    hour: index % 24,
+    idleSeconds: 7200,
+    inUseSeconds: 3600,
+    offlineSeconds: 0,
+    occupancyPercent: 33.3,
+    sampleDates: 4,
+    sampleSufficient: true,
+  })),
+  ports: ports.map((port) => ({
+    portId: port.id,
+    currentStatus: port.status,
+    metrics: historyMetrics,
+  })),
+  busiestHours: [{ weekday: 1, hour: 9, occupancyPercent: 78, sampleDates: 4 }],
+  quietSuggestion: {
+    weekday: 3,
+    hour: 14,
+    occupancyPercent: 12,
+    sampleDates: 4,
+  },
+  historyStartedAt: "2026-07-09T09:00:00Z",
+  historyNotice: "历史从启用记录后开始，首次记录之前的时段不会计为空闲。",
+}
+
+function portHistory(portId: number): PortHistoryResponse {
+  return {
+    device: deviceHistory.device,
+    portId,
+    currentStatus: ports[portId - 1].status,
+    window: deviceHistory.window,
+    metrics: historyMetrics,
+    daily: historyDaily,
+    timeline: [
+      {
+        portId,
+        fromStatus: "idle",
+        toStatus: "in_use",
+        changedAt: "2026-07-15T08:00:00Z",
+        usedSeconds: 0,
+      },
+      {
+        portId,
+        fromStatus: "in_use",
+        toStatus: ports[portId - 1].status,
+        changedAt: "2026-07-15T09:00:00Z",
+        usedSeconds: 3600,
+        remainingText: "25 分钟",
+      },
+    ],
+    timelineTruncated: false,
+    historyStartedAt: "2026-07-09T09:00:00Z",
+    historyNotice: deviceHistory.historyNotice,
+  }
 }
 
 test("administrator handles a user and verifies the audit trail", async ({
@@ -365,6 +465,89 @@ test("dashboard fades in every port card at the same time", async ({
 
   await page.screenshot({
     path: "/tmp/charge-1.4.13-dashboard-port-motion.png",
+    fullPage: false,
+  })
+})
+
+test("dashboard history sheet supports port navigation and mobile layout", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.addInitScript(() => {
+    class LocalEventSource {
+      static OPEN = 1
+      readyState = LocalEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor() {
+        setTimeout(() => this.onopen?.(new Event("open")), 0)
+      }
+
+      addEventListener() {}
+      close() {}
+    }
+    Object.defineProperty(window, "EventSource", {
+      configurable: true,
+      value: LocalEventSource,
+    })
+  })
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({ status: 200, json: user })
+  )
+  await page.route("**/api/piles", (route) =>
+    route.fulfill({ status: 200, json: snapshot })
+  )
+  await page.route("**/api/piles/*/ports/*/history**", (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    const portId = Number(pathname.match(/ports\/(\d+)\/history/)?.[1] ?? 1)
+    return route.fulfill({ status: 200, json: portHistory(portId) })
+  })
+  await page.route("**/api/piles/*/history**", (route) =>
+    route.fulfill({ status: 200, json: deviceHistory })
+  )
+
+  await page.goto("/dashboard")
+  await page.getByRole("button", { name: "历史趋势" }).click()
+
+  const sheet = page.locator("[data-slot=sheet-content]")
+  await expect(
+    sheet.getByRole("heading", { name: /松园 3 号楼/ })
+  ).toBeVisible()
+  await expect(sheet.getByText("最近 7 天占用率")).toBeVisible()
+  await expect(
+    sheet.getByRole("group", { name: "星期与小时占用率热力图" })
+  ).toBeVisible()
+  await expect(
+    sheet.getByRole("list", { name: "1 号口状态时间线" })
+  ).toBeVisible()
+
+  await page.screenshot({
+    path: "/tmp/charge-1.5.0-history-desktop.png",
+    fullPage: false,
+  })
+
+  const firstPort = sheet.getByRole("tab", { name: "01 号" })
+  await firstPort.focus()
+  await page.keyboard.press("ArrowRight")
+  await expect(sheet.getByRole("tab", { name: "02 号" })).toBeFocused()
+  await expect(
+    sheet.getByRole("list", { name: "2 号口状态时间线" })
+  ).toBeVisible()
+
+  await page.setViewportSize({ width: 375, height: 812 })
+  const mobileBox = await sheet.boundingBox()
+  expect(mobileBox?.x).toBeGreaterThanOrEqual(0)
+  expect((mobileBox?.x ?? 0) + (mobileBox?.width ?? 0)).toBeLessThanOrEqual(376)
+  await sheet
+    .locator('[data-slot="history-scroll"]')
+    .evaluate((element) => element.scrollTo({ top: 0 }))
+  await expect(sheet.getByText("使用概览")).toBeVisible()
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(375)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.0-history-mobile.png",
     fullPage: false,
   })
 })
