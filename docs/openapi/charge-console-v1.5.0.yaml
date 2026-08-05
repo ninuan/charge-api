@@ -1,0 +1,519 @@
+openapi: 3.0.3
+info:
+  title: Charge Console History API
+  version: 1.5.0
+  description: |
+    Charge Console 1.5.0 新增的用户端历史查询契约。
+    本文件只描述已经实现的接口；管理员趋势与 CSV 接口将在对应阶段实现时补充。
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+tags:
+  - name: History
+    description: 当前登录普通用户所绑定充电桩的历史分析
+paths:
+  /api/piles/{deviceId}/history:
+    get:
+      operationId: getDeviceHistory
+      summary: 获取充电桩历史分析
+      tags: [History]
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/HistoryRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 设备维度的历史指标、每日趋势、热力图和端口摘要
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceHistoryResponse"
+        "400":
+          $ref: "#/components/responses/InvalidHistoryQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/HistoryNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "422":
+          $ref: "#/components/responses/HistoryRangeTooLarge"
+        "503":
+          $ref: "#/components/responses/HistoryUnavailable"
+  /api/piles/{deviceId}/ports/{portId}/history:
+    get:
+      operationId: getPortHistory
+      summary: 获取单个充电口历史分析
+      tags: [History]
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/PortId"
+        - $ref: "#/components/parameters/HistoryRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 单个端口的历史指标、每日趋势和最近状态时间线
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortHistoryResponse"
+        "400":
+          $ref: "#/components/responses/InvalidPortHistoryQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/HistoryNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "422":
+          $ref: "#/components/responses/HistoryRangeTooLarge"
+        "503":
+          $ref: "#/components/responses/HistoryUnavailable"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: charge_session
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      description: 当前用户已绑定的 6–64 位数字设备 ID
+      schema:
+        type: string
+        pattern: "^[0-9]{6,64}$"
+    PortId:
+      name: portId
+      in: path
+      required: true
+      description: 充电口编号
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    HistoryRange:
+      name: range
+      in: query
+      required: false
+      description: 历史统计范围；省略时使用 7d
+      schema:
+        $ref: "#/components/schemas/HistoryRange"
+    Timezone:
+      name: timezone
+      in: query
+      required: false
+      description: IANA 时区名称；省略时使用 Asia/Shanghai
+      schema:
+        type: string
+        maxLength: 64
+        default: Asia/Shanghai
+        example: Asia/Shanghai
+  headers:
+    PrivateNoStore:
+      description: 历史响应包含用户数据，不允许共享或本地缓存
+      schema:
+        type: string
+        enum: ["private, no-store"]
+  responses:
+    InvalidHistoryQuery:
+      description: 设备 ID、历史范围或时区参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          examples:
+            invalidDevice:
+              value:
+                code: DEVICE_ID_INVALID
+                error: 设备 ID 格式无效
+            invalidQuery:
+              value:
+                code: HISTORY_QUERY_INVALID
+                error: 历史范围或时区参数无效
+    InvalidPortHistoryQuery:
+      description: 设备 ID、端口编号、历史范围或时区参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          examples:
+            invalidPort:
+              value:
+                code: PORT_ID_INVALID
+                error: 充电口编号格式无效
+            invalidQuery:
+              value:
+                code: HISTORY_QUERY_INVALID
+                error: 历史范围或时区参数无效
+    Unauthenticated:
+      description: 未登录或会话已失效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: login required
+    OrdinaryUserRequired:
+      description: 当前账户不是普通用户
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: ordinary user permission required
+    HistoryNotFound:
+      description: 设备不属于当前用户、端口不存在或尚无该端口历史
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: HISTORY_NOT_FOUND
+            error: 未找到对应的历史记录
+    MethodNotAllowed:
+      description: 请求方法不受支持
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: method not allowed
+    HistoryRangeTooLarge:
+      description: 所选范围内的状态变化超过单次分析上限
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: HISTORY_RANGE_TOO_LARGE
+            error: 该范围内历史变化过多，请缩短查询范围
+    HistoryUnavailable:
+      description: 历史存储或聚合暂时不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: HISTORY_UNAVAILABLE
+            error: 历史数据暂时不可用，请稍后重试
+  schemas:
+    HistoryRange:
+      type: string
+      enum: [24h, 7d, 30d]
+      default: 7d
+    PortStatus:
+      type: string
+      enum: [idle, in_use, offline]
+    HistorySampleState:
+      type: string
+      enum: [no_data, insufficient, partial, sufficient]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+    CodedErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, error]
+      properties:
+        code:
+          type: string
+          enum:
+            - DEVICE_ID_INVALID
+            - PORT_ID_INVALID
+            - HISTORY_QUERY_INVALID
+            - HISTORY_NOT_FOUND
+            - HISTORY_RANGE_TOO_LARGE
+            - HISTORY_UNAVAILABLE
+        error:
+          type: string
+    HistoryWindow:
+      type: object
+      additionalProperties: false
+      required: [range, timezone, start, end]
+      properties:
+        range:
+          $ref: "#/components/schemas/HistoryRange"
+        timezone:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    PortHistoryMetrics:
+      type: object
+      additionalProperties: false
+      required:
+        - observedSeconds
+        - gapSeconds
+        - idleSeconds
+        - inUseSeconds
+        - offlineSeconds
+        - occupancyPercent
+        - completedSessions
+        - averageSessionSeconds
+        - sampleState
+      properties:
+        observedSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        gapSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        idleSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        inUseSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        offlineSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        occupancyPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        completedSessions:
+          type: integer
+          minimum: 0
+        averageSessionSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        sampleState:
+          $ref: "#/components/schemas/HistorySampleState"
+    HistoryDailyPoint:
+      type: object
+      additionalProperties: false
+      required: [date, metrics]
+      properties:
+        date:
+          type: string
+          format: date
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+    HistoryHeatmapCell:
+      type: object
+      additionalProperties: false
+      required:
+        - weekday
+        - hour
+        - idleSeconds
+        - inUseSeconds
+        - offlineSeconds
+        - occupancyPercent
+        - sampleDates
+        - sampleSufficient
+      properties:
+        weekday:
+          type: integer
+          minimum: 1
+          maximum: 7
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        idleSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        inUseSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        offlineSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        occupancyPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        sampleDates:
+          type: integer
+          minimum: 0
+        sampleSufficient:
+          type: boolean
+    HistoryHourInsight:
+      type: object
+      additionalProperties: false
+      required: [weekday, hour, occupancyPercent, sampleDates]
+      properties:
+        weekday:
+          type: integer
+          minimum: 1
+          maximum: 7
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        occupancyPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        sampleDates:
+          type: integer
+          minimum: 0
+    PortHistoryTimelineItem:
+      type: object
+      additionalProperties: false
+      required: [portId, toStatus, changedAt, usedSeconds]
+      properties:
+        portId:
+          type: integer
+          minimum: 1
+        fromStatus:
+          $ref: "#/components/schemas/PortStatus"
+        toStatus:
+          $ref: "#/components/schemas/PortStatus"
+        changedAt:
+          type: string
+          format: date-time
+        usedSeconds:
+          type: integer
+          minimum: 0
+        remainingText:
+          type: string
+    HistoryDevice:
+      type: object
+      additionalProperties: false
+      required: [id, number, name, address]
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+    PortHistorySummary:
+      type: object
+      additionalProperties: false
+      required: [portId, currentStatus, metrics]
+      properties:
+        portId:
+          type: integer
+          minimum: 1
+        currentStatus:
+          $ref: "#/components/schemas/PortStatus"
+        historyStartedAt:
+          type: string
+          format: date-time
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+    DeviceHistoryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - device
+        - window
+        - metrics
+        - daily
+        - heatmap
+        - ports
+        - busiestHours
+        - historyNotice
+      properties:
+        device:
+          $ref: "#/components/schemas/HistoryDevice"
+        window:
+          $ref: "#/components/schemas/HistoryWindow"
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryDailyPoint"
+        heatmap:
+          type: array
+          minItems: 168
+          maxItems: 168
+          items:
+            $ref: "#/components/schemas/HistoryHeatmapCell"
+        ports:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortHistorySummary"
+        busiestHours:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/HistoryHourInsight"
+        quietSuggestion:
+          $ref: "#/components/schemas/HistoryHourInsight"
+        historyStartedAt:
+          type: string
+          format: date-time
+        historyNotice:
+          type: string
+    PortHistoryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - device
+        - portId
+        - currentStatus
+        - window
+        - metrics
+        - daily
+        - timeline
+        - timelineTruncated
+        - historyNotice
+      properties:
+        device:
+          $ref: "#/components/schemas/HistoryDevice"
+        portId:
+          type: integer
+          minimum: 1
+        currentStatus:
+          $ref: "#/components/schemas/PortStatus"
+        window:
+          $ref: "#/components/schemas/HistoryWindow"
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryDailyPoint"
+        timeline:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/PortHistoryTimelineItem"
+        timelineTruncated:
+          type: boolean
+        historyStartedAt:
+          type: string
+          format: date-time
+        historyNotice:
+          type: string

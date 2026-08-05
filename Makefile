@@ -1,4 +1,4 @@
-.PHONY: setup dev check deploy deploy-git reset-local
+.PHONY: setup dev check generate-api deploy deploy-git reset-local
 
 setup:
 	cd backend && go mod download
@@ -9,6 +9,9 @@ dev:
 
 check:
 	bash scripts/check.sh
+
+generate-api:
+	cd frontend && pnpm run generate:api
 
 deploy:
 	@DEPLOY_HOST="$(DEPLOY_HOST)" \

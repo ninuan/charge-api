@@ -42,7 +42,10 @@ dist/
 .Trashes
 Thumbs.db
 
-docs/
+docs/*
+!docs/openapi/
+docs/openapi/*
+!docs/openapi/charge-console-v1.5.0.yaml
 .superpowers/
 .worktrees/
 ROADMAP.md

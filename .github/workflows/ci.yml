@@ -37,8 +37,8 @@ jobs:
       - name: Install dependencies
         run: make setup
 
-      # check.sh 与本地提交门禁完全一致：部署脚本测试、前端 lint/测试、
-      # Go 测试/构建、类型检查与生产构建。
+      # check.sh 与本地提交门禁完全一致：OpenAPI 类型漂移、部署脚本测试、
+      # 前端 lint/测试、Go 测试/构建、类型检查与生产构建。
       - name: Run checks
         run: bash scripts/check.sh
 

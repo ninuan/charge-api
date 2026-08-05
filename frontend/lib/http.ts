@@ -14,6 +14,11 @@ const publicErrorMessages: Record<string, string> = {
   COOKIE_REQUIRED: "请输入 Cookie",
   COOKIE_TOO_LARGE: "Cookie 内容过长",
   DEVICE_ID_INVALID: "设备 ID 格式无效",
+  PORT_ID_INVALID: "充电口编号格式无效",
+  HISTORY_QUERY_INVALID: "历史范围或时区参数无效",
+  HISTORY_NOT_FOUND: "未找到对应的历史记录",
+  HISTORY_RANGE_TOO_LARGE: "该范围内历史变化过多，请缩短查询范围",
+  HISTORY_UNAVAILABLE: "历史数据暂时不可用，请稍后重试",
 }
 
 export async function responseErrorMessage(

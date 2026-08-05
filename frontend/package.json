@@ -7,12 +7,14 @@
     "dev": "next dev",
     "build": "next build",
     "build:static": "next build && rsync -a --delete out/ dist/",
+    "check:api": "openapi-typescript ../docs/openapi/charge-console-v1.5.0.yaml -o lib/api/generated.ts --root-types --root-types-no-schema-prefix --alphabetize --check",
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "generate:api": "openapi-typescript ../docs/openapi/charge-console-v1.5.0.yaml -o lib/api/generated.ts --root-types --root-types-no-schema-prefix --alphabetize",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -40,6 +42,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "shadcn": "^4.13.0",
