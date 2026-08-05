@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 type Store struct {
 	db     *sql.DB
@@ -104,10 +104,29 @@ func (s *Store) initialize() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id TEXT NOT NULL,
 			kind TEXT NOT NULL,
-			created_at INTEGER NOT NULL
+			created_at INTEGER NOT NULL,
+			count INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE INDEX IF NOT EXISTS metrics_created_at_idx ON metrics(created_at)`,
 		`CREATE INDEX IF NOT EXISTS metrics_user_time_idx ON metrics(user_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS port_status_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			device_id TEXT NOT NULL,
+			port_id INTEGER NOT NULL,
+			from_status TEXT,
+			to_status TEXT NOT NULL,
+			changed_at INTEGER NOT NULL,
+			used_seconds INTEGER NOT NULL DEFAULT 0,
+			remaining_text TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'remote'
+		)`,
+		`CREATE INDEX IF NOT EXISTS port_status_events_user_device_port_time_idx
+			ON port_status_events(user_id, device_id, port_id, changed_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS port_status_events_user_time_idx
+			ON port_status_events(user_id, changed_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS port_status_events_changed_at_idx
+			ON port_status_events(changed_at)`,
 		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			actor_id TEXT NOT NULL,
@@ -171,6 +190,9 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := s.ensureColumn("user_states", "recovery_diagnostics_json", "BLOB NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("metrics", "count", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
 	for column, definition := range map[string]string{
@@ -716,7 +738,20 @@ func (s *Store) Save(state State) error {
 }
 
 func (s *Store) RecordMetric(userID, kind string, at time.Time) error {
-	_, err := s.db.Exec(`INSERT INTO metrics(user_id, kind, created_at) VALUES(?,?,?)`, userID, kind, at.Unix())
+	return s.RecordMetricCount(userID, kind, 1, at)
+}
+
+func (s *Store) RecordMetricCount(userID, kind string, count int, at time.Time) error {
+	if count <= 0 {
+		return fmt.Errorf("metric count must be positive")
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO metrics(user_id, kind, created_at, count) VALUES(?,?,?,?)`,
+		userID,
+		kind,
+		at.Unix(),
+		count,
+	)
 	return err
 }
 
@@ -727,7 +762,7 @@ func (s *Store) PruneMetrics(before time.Time) error {
 
 func (s *Store) MetricSeries(since time.Time, bucketSeconds int64) ([]model.MetricPoint, error) {
 	rows, err := s.db.Query(`
-		SELECT (created_at / ?) * ?, kind, COUNT(*), COUNT(DISTINCT user_id)
+		SELECT (created_at / ?) * ?, kind, SUM(count), COUNT(DISTINCT user_id)
 		FROM metrics WHERE created_at >= ?
 		GROUP BY 1, kind ORDER BY 1
 	`, bucketSeconds, bucketSeconds, since.Unix())

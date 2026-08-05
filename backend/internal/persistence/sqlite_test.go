@@ -298,3 +298,30 @@ func TestMetricSeriesIncludesRemoteFailures(t *testing.T) {
 		t.Fatalf("unexpected remote counts: %+v", points[0])
 	}
 }
+
+func TestMetricSeriesSumsMetricCounts(t *testing.T) {
+	path := t.TempDir() + "/state.db"
+	store, err := OpenSQLite(path, bytes.Repeat([]byte{0x42}, CookieKeySize))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Truncate(time.Hour).Add(15 * time.Minute)
+	if err := store.RecordMetricCount("user-1", "request", 7, now); err != nil {
+		t.Fatalf("RecordMetricCount: %v", err)
+	}
+	if err := store.RecordMetricCount("user-2", "request", 3, now); err != nil {
+		t.Fatalf("RecordMetricCount second user: %v", err)
+	}
+	points, err := store.MetricSeries(now.Add(-time.Hour), 3600)
+	if err != nil {
+		t.Fatalf("MetricSeries: %v", err)
+	}
+	if len(points) != 1 || points[0].Requests != 10 || points[0].ActiveUsers != 2 {
+		t.Fatalf("unexpected counted metric series: %+v", points)
+	}
+	if err := store.RecordMetricCount("user-1", "request", 0, now); err == nil {
+		t.Fatal("expected zero metric count to fail")
+	}
+}

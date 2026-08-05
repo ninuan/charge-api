@@ -23,6 +23,19 @@ type Port struct {
 	RemainingText string     `json:"remainingText,omitempty"`
 }
 
+type PortStatusEvent struct {
+	ID            int64       `json:"id"`
+	UserID        string      `json:"userId"`
+	DeviceID      string      `json:"deviceId"`
+	PortID        int         `json:"portId"`
+	FromStatus    *PortStatus `json:"fromStatus,omitempty"`
+	ToStatus      PortStatus  `json:"toStatus"`
+	ChangedAt     time.Time   `json:"changedAt"`
+	UsedSeconds   int         `json:"usedSeconds"`
+	RemainingText string      `json:"remainingText,omitempty"`
+	Source        string      `json:"source"`
+}
+
 type Pile struct {
 	ID          string    `json:"id"`
 	Number      string    `json:"number"`
