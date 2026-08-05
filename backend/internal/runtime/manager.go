@@ -64,6 +64,7 @@ type Manager struct {
 
 type UserRuntime struct {
 	mu                  sync.Mutex
+	refreshMu           sync.Mutex
 	store               *store.DashboardStore
 	client              *charger.Client
 	stats               model.TrafficStats
@@ -298,7 +299,7 @@ func newUserRuntime(requests []parser.CaptureRequest, state persistence.UserStat
 	return runtime
 }
 
-func (r *UserRuntime) refresh(force bool) error {
+func (r *UserRuntime) refresh(force bool) ([]model.Pile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -314,7 +315,7 @@ func (r *UserRuntime) refresh(force bool) error {
 			Cached:             true,
 			Message:            "刷新间隔内，已返回缓存数据",
 		})
-		return nil
+		return nil, nil
 	}
 
 	result := r.client.FetchPiles(force)
@@ -377,9 +378,9 @@ func (r *UserRuntime) refresh(force bool) error {
 		Message:            info.Message,
 	})
 	if len(result.Piles) == 0 && failed > 0 {
-		return result.FirstError()
+		return nil, result.FirstError()
 	}
-	return nil
+	return append([]model.Pile(nil), result.Piles...), nil
 }
 
 func (r *UserRuntime) recordRequest() {

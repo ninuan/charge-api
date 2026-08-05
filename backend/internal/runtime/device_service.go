@@ -23,6 +23,8 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 	if err != nil {
 		return model.Pile{}, err
 	}
+	runtime.refreshMu.Lock()
+	defer runtime.refreshMu.Unlock()
 	req.ID = strings.TrimSpace(req.ID)
 	req.Number = strings.TrimSpace(req.Number)
 	req.Name = strings.TrimSpace(req.Name)
@@ -56,10 +58,13 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 		}
 		return model.Pile{}, err
 	}
-	if err := runtime.refresh(true); err != nil {
+	remotePiles, err := runtime.refresh(true)
+	if err != nil {
 		info := runtime.store.Snapshot().Refresh
 		m.recordRefreshMetrics(userID, info)
-		m.recordMetric(userID, "cookie_error")
+		if charger.IsAuthExpired(err) {
+			m.recordMetric(userID, "cookie_error")
+		}
 		runtime.client.RemoveDevice(req.ID)
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
@@ -70,12 +75,14 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 	for _, pile := range snapshot.Piles {
 		if pile.ID == req.ID {
 			updated, _ := runtime.store.UpdatePile(req.ID, req.Name, req.Address, pile.SortOrder)
-			return updated, m.Save()
+			return updated, m.saveAndRecordRemotePiles(userID, remotePiles)
 		}
 	}
 	runtime.client.RemoveDevice(req.ID)
 	runtime.recordFailure(false)
-	_ = m.Save()
+	if saveErr := m.saveAndRecordRemotePiles(userID, remotePiles); saveErr != nil {
+		return model.Pile{}, saveErr
+	}
 	return model.Pile{}, fmt.Errorf("device %s was not returned by remote API", req.ID)
 }
 
@@ -122,6 +129,8 @@ func (m *Manager) DeletePile(userID string, id string) error {
 	if err != nil {
 		return err
 	}
+	runtime.refreshMu.Lock()
+	defer runtime.refreshMu.Unlock()
 	runtime.recordRequest()
 	m.recordMetric(userID, "request")
 	if !runtime.store.DeletePile(id) {
@@ -130,7 +139,11 @@ func (m *Manager) DeletePile(userID string, id string) error {
 		return fmt.Errorf("pile not found")
 	}
 	runtime.client.RemoveDevice(id)
-	return m.Save()
+	if err := m.Save(); err != nil {
+		return err
+	}
+	_, err = m.repository.DeletePortStatusEvents(userID, id)
+	return err
 }
 
 func (m *Manager) UpdatePile(userID, id, name, address string, sortOrder int) (model.Pile, error) {
@@ -167,6 +180,8 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 	if err != nil {
 		return model.DashboardSnapshot{}, err
 	}
+	runtime.refreshMu.Lock()
+	defer runtime.refreshMu.Unlock()
 	runtime.recordRequest()
 	m.recordMetric(userID, "request")
 	user, _ := m.User(userID)
@@ -177,10 +192,13 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		snapshot.Refresh.Message = "管理员已暂停此账户的远端刷新，当前展示缓存数据"
 		return snapshot, nil
 	}
-	if err := runtime.refresh(force); err != nil {
+	remotePiles, err := runtime.refresh(force)
+	if err != nil {
 		info := runtime.store.Snapshot().Refresh
 		m.recordRefreshMetrics(userID, info)
-		m.recordMetric(userID, "cookie_error")
+		if charger.IsAuthExpired(err) {
+			m.recordMetric(userID, "cookie_error")
+		}
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
@@ -191,7 +209,7 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 	} else {
 		m.recordRefreshMetrics(userID, snapshot.Refresh)
 	}
-	return snapshot, m.Save()
+	return snapshot, m.saveAndRecordRemotePiles(userID, remotePiles)
 }
 
 func (m *Manager) RefreshWithYYB(userID string, force bool, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
@@ -230,6 +248,8 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 	if err != nil {
 		return model.DashboardSnapshot{}, err
 	}
+	runtime.refreshMu.Lock()
+	defer runtime.refreshMu.Unlock()
 	runtime.recordRequest()
 	m.recordMetric(userID, "request")
 	previous := runtime.client.Cookie()
@@ -249,7 +269,8 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		}
 		return snapshot, nil
 	}
-	if err := runtime.refresh(true); err != nil {
+	remotePiles, err := runtime.refresh(true)
+	if err != nil {
 		info := runtime.store.Snapshot().Refresh
 		m.recordRefreshMetrics(userID, info)
 		_ = runtime.client.UpdateCookie(previous)
@@ -259,7 +280,20 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 	}
 	snapshot := runtime.store.Snapshot()
 	m.recordRefreshMetrics(userID, snapshot.Refresh)
-	return snapshot, m.Save()
+	return snapshot, m.saveAndRecordRemotePiles(userID, remotePiles)
+}
+
+func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) error {
+	if err := m.Save(); err != nil {
+		return err
+	}
+	if len(piles) == 0 {
+		return nil
+	}
+	if _, err := m.repository.RecordPortStatusTransitions(userID, piles); err != nil {
+		return fmt.Errorf("record remote port status transitions: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) Subscribe(userID string) (chan model.DashboardSnapshot, error) {

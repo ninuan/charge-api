@@ -99,6 +99,118 @@ func TestPortStatusEventsRoundTripAndMaintenance(t *testing.T) {
 	}
 }
 
+func TestRecordPortStatusTransitionsWritesBaselinesAndChangesOnly(t *testing.T) {
+	store, err := OpenSQLite(
+		t.TempDir()+"/state.db",
+		bytes.Repeat([]byte{0x55}, CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
+	if err := store.Save(State{
+		Version: 3,
+		Users: []model.User{{
+			ID: "user-1", Username: "alice", PasswordHash: "hash",
+			Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		}},
+		UserStates: map[string]UserState{"user-1": {}},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	pile := model.Pile{
+		ID: "device-1", UpdatedAt: now,
+		Ports: []model.Port{
+			{ID: 1, Status: model.PortIdle, UpdatedAt: now},
+			{ID: 2, Status: model.PortOffline, UpdatedAt: now},
+		},
+	}
+	inserted, err := store.RecordPortStatusTransitions("user-1", []model.Pile{pile})
+	if err != nil {
+		t.Fatalf("record baselines: %v", err)
+	}
+	if len(inserted) != 2 || inserted[0].FromStatus != nil || inserted[1].FromStatus != nil {
+		t.Fatalf("unexpected baselines: %+v", inserted)
+	}
+
+	pile.UpdatedAt = now.Add(time.Minute)
+	for index := range pile.Ports {
+		pile.Ports[index].UpdatedAt = pile.UpdatedAt
+	}
+	inserted, err = store.RecordPortStatusTransitions("user-1", []model.Pile{pile})
+	if err != nil {
+		t.Fatalf("record unchanged snapshot: %v", err)
+	}
+	if len(inserted) != 0 {
+		t.Fatalf("unchanged snapshot inserted events: %+v", inserted)
+	}
+
+	pile.Ports[0].Status = model.PortInUse
+	pile.Ports[0].UsedSeconds = 120
+	pile.Ports[0].RemainingText = "28 分钟"
+	pile.Ports[0].UpdatedAt = now.Add(2 * time.Minute)
+	inserted, err = store.RecordPortStatusTransitions("user-1", []model.Pile{pile})
+	if err != nil {
+		t.Fatalf("record status change: %v", err)
+	}
+	if len(inserted) != 1 || inserted[0].FromStatus == nil ||
+		*inserted[0].FromStatus != model.PortIdle || inserted[0].ToStatus != model.PortInUse ||
+		inserted[0].UsedSeconds != 120 || inserted[0].RemainingText != "28 分钟" ||
+		inserted[0].Source != "remote" {
+		t.Fatalf("unexpected status change: %+v", inserted)
+	}
+
+	events, err := store.PortStatusEvents(PortStatusEventQuery{
+		UserID: "user-1", DeviceID: "device-1",
+	})
+	if err != nil {
+		t.Fatalf("PortStatusEvents: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want two baselines and one change: %+v", len(events), events)
+	}
+}
+
+func TestRecordPortStatusTransitionsRejectsDuplicateBatchAtomically(t *testing.T) {
+	store, err := OpenSQLite(
+		t.TempDir()+"/state.db",
+		bytes.Repeat([]byte{0x56}, CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.Save(State{
+		Version: 3,
+		Users: []model.User{{
+			ID: "user-1", Username: "alice", PasswordHash: "hash",
+			Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		}},
+		UserStates: map[string]UserState{"user-1": {}},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err = store.RecordPortStatusTransitions("user-1", []model.Pile{
+		{ID: "device-1", Ports: []model.Port{{ID: 1, Status: model.PortIdle, UpdatedAt: now}}},
+		{ID: "device-1", Ports: []model.Port{{ID: 1, Status: model.PortInUse, UpdatedAt: now}}},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate port batch to fail")
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM port_status_events`).Scan(&count); err != nil {
+		t.Fatalf("count port status events: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("duplicate batch inserted %d events", count)
+	}
+}
+
 func TestRecordPortStatusEventsRejectsInvalidBatchAtomically(t *testing.T) {
 	store, err := OpenSQLite(
 		t.TempDir()+"/state.db",

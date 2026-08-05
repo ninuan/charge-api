@@ -21,6 +21,133 @@ type PortStatusEventQuery struct {
 	Limit    int
 }
 
+// RecordPortStatusTransitions compares fresh remote piles with the latest
+// persisted status for every port and records only baselines or real changes.
+// The latest-state reads and inserts share one transaction so concurrent
+// refreshes cannot manufacture duplicate transitions.
+func (s *Store) RecordPortStatusTransitions(userID string, piles []model.Pile) ([]model.PortStatusEvent, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("port status transitions require a user")
+	}
+	if len(piles) == 0 {
+		return []model.PortStatusEvent{}, nil
+	}
+
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin port status transition transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	latestStatement, err := tx.Prepare(`
+		SELECT to_status, changed_at
+		FROM port_status_events
+		WHERE user_id = ? AND device_id = ? AND port_id = ?
+		ORDER BY changed_at DESC, id DESC
+		LIMIT 1
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("prepare latest port status query: %w", err)
+	}
+	defer latestStatement.Close()
+
+	insertStatement, err := tx.Prepare(`
+		INSERT INTO port_status_events(
+			user_id, device_id, port_id, from_status, to_status, changed_at,
+			used_seconds, remaining_text, source
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'remote')
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("prepare port status transition insert: %w", err)
+	}
+	defer insertStatement.Close()
+
+	observedAt := time.Now().UTC()
+	seen := make(map[string]struct{})
+	events := make([]model.PortStatusEvent, 0)
+	for _, pile := range piles {
+		deviceID := strings.TrimSpace(pile.ID)
+		if deviceID == "" {
+			return nil, fmt.Errorf("port status transition requires a device")
+		}
+		for _, port := range pile.Ports {
+			key := fmt.Sprintf("%s\x00%d", deviceID, port.ID)
+			if _, duplicate := seen[key]; duplicate {
+				return nil, fmt.Errorf("duplicate port status transition for device %s port %d", deviceID, port.ID)
+			}
+			seen[key] = struct{}{}
+			if port.ID <= 0 {
+				return nil, fmt.Errorf("port status transition requires a positive port id")
+			}
+			if !validPortStatus(port.Status) {
+				return nil, fmt.Errorf("invalid port status %q", port.Status)
+			}
+			if port.UsedSeconds < 0 {
+				return nil, fmt.Errorf("port status transition used seconds cannot be negative")
+			}
+
+			var previousStatus string
+			var previousChangedAt int64
+			err := latestStatement.QueryRow(userID, deviceID, port.ID).Scan(&previousStatus, &previousChangedAt)
+			hasPrevious := err == nil
+			if err != nil && err != sql.ErrNoRows {
+				return nil, fmt.Errorf("query latest port status transition: %w", err)
+			}
+			if hasPrevious && previousStatus == string(port.Status) {
+				continue
+			}
+
+			changedAt := port.UpdatedAt
+			if changedAt.IsZero() {
+				changedAt = pile.UpdatedAt
+			}
+			if changedAt.IsZero() {
+				changedAt = observedAt
+			}
+			changedAt = changedAt.UTC().Truncate(time.Second)
+			if hasPrevious && changedAt.Unix() < previousChangedAt {
+				changedAt = time.Unix(previousChangedAt, 0).UTC()
+			}
+
+			var fromStatus any
+			var previous *model.PortStatus
+			if hasPrevious {
+				status := model.PortStatus(previousStatus)
+				previous = &status
+				fromStatus = previousStatus
+			}
+			result, err := insertStatement.Exec(
+				userID,
+				deviceID,
+				port.ID,
+				fromStatus,
+				string(port.Status),
+				changedAt.Unix(),
+				port.UsedSeconds,
+				port.RemainingText,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("insert port status transition: %w", err)
+			}
+			id, err := result.LastInsertId()
+			if err != nil {
+				return nil, fmt.Errorf("read port status transition id: %w", err)
+			}
+			events = append(events, model.PortStatusEvent{
+				ID: id, UserID: userID, DeviceID: deviceID, PortID: port.ID,
+				FromStatus: previous, ToStatus: port.Status, ChangedAt: changedAt,
+				UsedSeconds: port.UsedSeconds, RemainingText: port.RemainingText, Source: "remote",
+			})
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit port status transitions: %w", err)
+	}
+	return events, nil
+}
+
 func (s *Store) RecordPortStatusEvents(events []model.PortStatusEvent) error {
 	if len(events) == 0 {
 		return nil
