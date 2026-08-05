@@ -43,6 +43,37 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "503":
           $ref: "#/components/responses/AdminTrendsUnavailable"
+  /api/admin/trends.csv:
+    get:
+      operationId: exportAdminTrendsCSV
+      summary: 导出管理员运营趋势 CSV
+      tags: [Admin Trends]
+      parameters:
+        - $ref: "#/components/parameters/AdminTrendRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 与相同范围趋势接口数值一致的 UTF-8 BOM CSV 文件
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+            Content-Disposition:
+              $ref: "#/components/headers/CSVContentDisposition"
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/InvalidAdminTrendQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AdminTrendsUnavailable"
   /api/piles/{deviceId}/history:
     get:
       operationId: getDeviceHistory
@@ -164,6 +195,11 @@ components:
       schema:
         type: string
         enum: ["private, no-store"]
+    CSVContentDisposition:
+      description: 包含范围和导出日期的安全 ASCII 文件名
+      schema:
+        type: string
+        example: attachment; filename="charge-trends-7d-2026-08-05.csv"
   responses:
     InvalidAdminTrendQuery:
       description: 趋势范围或时区参数无效

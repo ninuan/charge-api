@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { adminApi } from "@/lib/admin-api"
+import type { AdminTrendRange, AdminTrendsResponse } from "@/lib/api/generated"
 import { useAuth } from "@/lib/auth-context"
 import type {
   AdminHealth,
@@ -115,6 +116,10 @@ const roleOptions = [
   { value: "admin", label: "管理员" },
 ]
 
+function adminTrendRange(value: string | null): AdminTrendRange {
+  return value === "7d" || value === "30d" ? value : "24h"
+}
+
 export default function AdminPage() {
   return (
     <Suspense fallback={<div className="min-h-dvh bg-muted/35" />}>
@@ -133,7 +138,11 @@ function AdminPageContent() {
       ? currentTab
       : "overview"
   ) as Tab
+  const trendRange = adminTrendRange(searchParams.get("range"))
   const [stats, setStats] = useState<AdminStats | null>(null)
+  const [trends, setTrends] = useState<AdminTrendsResponse | null>(null)
+  const [trendLoading, setTrendLoading] = useState(false)
+  const [trendError, setTrendError] = useState<string | null>(null)
   const [health, setHealth] = useState<AdminHealth | null>(null)
   const [userPage, setUserPage] = useState<AdminUserPage | null>(null)
   const [query, setQuery] = useState(emptyQuery)
@@ -148,11 +157,44 @@ function AdminPageContent() {
     role: "user" as UserRole,
   })
 
+  const replaceAdminParams = (update: (params: URLSearchParams) => void) => {
+    const params = new URLSearchParams(searchParams.toString())
+    update(params)
+    const queryString = params.toString()
+    router.replace(queryString ? `/admin?${queryString}` : "/admin")
+  }
+
   const setTab = (next: Tab) =>
-    router.replace(next === "overview" ? "/admin" : `/admin?tab=${next}`)
+    replaceAdminParams((params) => {
+      if (next === "overview") params.delete("tab")
+      else params.set("tab", next)
+    })
+
+  const setTrendRange = (next: AdminTrendRange) =>
+    replaceAdminParams((params) => {
+      if (next === "24h") params.delete("range")
+      else params.set("range", next)
+    })
 
   async function loadOverview() {
-    setStats(await adminApi.stats())
+    setTrendLoading(true)
+    setTrendError(null)
+    try {
+      const [statsResult, trendsResult] = await Promise.allSettled([
+        adminApi.stats(),
+        adminApi.trends(trendRange),
+      ])
+      if (statsResult.status === "fulfilled") setStats(statsResult.value)
+      if (trendsResult.status === "fulfilled") setTrends(trendsResult.value)
+      else setTrendError((trendsResult.reason as Error).message)
+
+      const rejection = [statsResult, trendsResult].find(
+        (result) => result.status === "rejected"
+      )
+      if (rejection?.status === "rejected") throw rejection.reason
+    } finally {
+      setTrendLoading(false)
+    }
   }
 
   async function loadUsers(nextQuery = query) {
@@ -199,9 +241,9 @@ function AdminPageContent() {
       if (user.role !== "admin") return router.replace("/dashboard")
       await load()
     })()
-    // Initial access check intentionally follows the selected tab only.
+    // Access and overview data follow the selected tab and trend range.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
+  }, [tab, trendRange])
 
   async function createUser(event: React.FormEvent) {
     event.preventDefault()
@@ -350,6 +392,16 @@ function AdminPageContent() {
       {tab === "overview" && (
         <AdminOverview
           stats={stats}
+          trends={trends}
+          trendRange={trendRange}
+          trendLoading={trendLoading}
+          trendError={trendError}
+          onTrendRangeChange={setTrendRange}
+          onTrendReload={() => {
+            void loadOverview().catch((reason) =>
+              toast.error((reason as Error).message)
+            )
+          }}
           onUser={(id) => {
             setSelectedUserId(id)
             setTab("users")

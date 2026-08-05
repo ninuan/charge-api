@@ -28,11 +28,17 @@ func (m *Manager) adminTrendsAt(rangeName, timezone string, now time.Time) (mode
 	buckets := adminTrendBuckets(window, location)
 	points := make([]model.AdminTrendPoint, 0, len(buckets))
 	for _, bucket := range buckets {
-		metrics, err := m.repository.MetricAggregate(bucket.start, bucket.end)
+		queryEnd := bucket.end
+		if bucket.end.Equal(window.End) {
+			// Metrics use Unix-second precision. Include the current second in the
+			// final bucket without making the preceding buckets overlap.
+			queryEnd = queryEnd.Add(time.Second)
+		}
+		metrics, err := m.repository.MetricAggregate(bucket.start, queryEnd)
 		if err != nil {
 			return model.AdminTrends{}, fmt.Errorf("load admin trend metric bucket: %w", err)
 		}
-		offlinePorts, err := m.repository.OfflinePortCountAt(bucket.end)
+		offlinePorts, err := m.repository.OfflinePortCountAt(queryEnd)
 		if err != nil {
 			return model.AdminTrends{}, fmt.Errorf("load admin trend offline ports: %w", err)
 		}
@@ -45,11 +51,12 @@ func (m *Manager) adminTrendsAt(rangeName, timezone string, now time.Time) (mode
 		})
 	}
 
-	totals, err := m.repository.MetricAggregate(window.Start, window.End)
+	queryEnd := window.End.Add(time.Second)
+	totals, err := m.repository.MetricAggregate(window.Start, queryEnd)
 	if err != nil {
 		return model.AdminTrends{}, fmt.Errorf("load admin trend summary: %w", err)
 	}
-	offlinePorts, err := m.repository.OfflinePortCountAt(window.End)
+	offlinePorts, err := m.repository.OfflinePortCountAt(queryEnd)
 	if err != nil {
 		return model.AdminTrends{}, fmt.Errorf("load admin trend offline port summary: %w", err)
 	}

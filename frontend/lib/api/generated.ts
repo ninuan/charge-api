@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/trends.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 导出管理员运营趋势 CSV */
+        get: operations["exportAdminTrendsCSV"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/piles/{deviceId}/history": {
         parameters: {
             query?: never;
@@ -388,6 +405,8 @@ export interface components {
     };
     requestBodies: never;
     headers: {
+        /** @description 包含范围和导出日期的安全 ASCII 文件名 */
+        CSVContentDisposition: string;
         /** @description 分析响应包含用户或运营数据，不允许共享或本地缓存 */
         PrivateNoStore: "private, no-store";
     };
@@ -429,6 +448,7 @@ export type ParameterDeviceId = components['parameters']['DeviceId'];
 export type ParameterHistoryRange = components['parameters']['HistoryRange'];
 export type ParameterPortId = components['parameters']['PortId'];
 export type ParameterTimezone = components['parameters']['Timezone'];
+export type HeaderCsvContentDisposition = components['headers']['CSVContentDisposition'];
 export type HeaderPrivateNoStore = components['headers']['PrivateNoStore'];
 export type $defs = Record<string, never>;
 export interface operations {
@@ -454,6 +474,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminTrendsResponse"];
+                };
+            };
+            400: components["responses"]["InvalidAdminTrendQuery"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["AdminTrendsUnavailable"];
+        };
+    };
+    exportAdminTrendsCSV: {
+        parameters: {
+            query?: {
+                /** @description 趋势统计范围；省略时使用 24h */
+                range?: components["parameters"]["AdminTrendRange"];
+                /** @description IANA 时区名称；省略时使用 Asia/Shanghai */
+                timezone?: components["parameters"]["Timezone"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 与相同范围趋势接口数值一致的 UTF-8 BOM CSV 文件 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    "Content-Disposition": components["headers"]["CSVContentDisposition"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
                 };
             };
             400: components["responses"]["InvalidAdminTrendQuery"];

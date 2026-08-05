@@ -108,6 +108,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/users/", s.handleAdminUserActions)
 	mux.HandleFunc("/api/admin/stats", s.handleAdminStats)
 	mux.HandleFunc("/api/admin/trends", s.handleAdminTrends)
+	mux.HandleFunc("/api/admin/trends.csv", s.handleAdminTrendsCSV)
 	mux.HandleFunc("/api/admin/health", s.handleAdminHealth)
 	mux.HandleFunc("/api/admin/incidents", s.handleAdminIncidents)
 	mux.HandleFunc("/api/admin/incidents/", s.handleAdminIncidentActions)

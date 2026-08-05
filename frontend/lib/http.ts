@@ -19,6 +19,8 @@ const publicErrorMessages: Record<string, string> = {
   HISTORY_NOT_FOUND: "未找到对应的历史记录",
   HISTORY_RANGE_TOO_LARGE: "该范围内历史变化过多，请缩短查询范围",
   HISTORY_UNAVAILABLE: "历史数据暂时不可用，请稍后重试",
+  ADMIN_TREND_QUERY_INVALID: "趋势范围或时区参数无效",
+  ADMIN_TRENDS_UNAVAILABLE: "运营趋势暂时不可用，请稍后重试",
 }
 
 export async function responseErrorMessage(
@@ -63,7 +65,10 @@ export async function request<T>(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const external = rest.signal
   if (external?.aborted) controller.abort()
-  else external?.addEventListener("abort", () => controller.abort(), { once: true })
+  else
+    external?.addEventListener("abort", () => controller.abort(), {
+      once: true,
+    })
 
   let response: Response
   try {

@@ -1,9 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -382,18 +385,87 @@ func (s *Server) handleAdminTrends(w http.ResponseWriter, r *http.Request) {
 		r.URL.Query().Get("timezone"),
 	)
 	if err != nil {
-		if errors.Is(err, appruntime.ErrAdminTrendQueryInvalid) {
-			writeCodedError(w, http.StatusBadRequest, "ADMIN_TREND_QUERY_INVALID", "趋势范围或时区参数无效")
-			return
-		}
-		s.setHealthDegraded("admin_trends", "运营趋势查询失败")
-		logStructuredError("load_admin_trends", "", err)
-		writeCodedError(w, http.StatusServiceUnavailable, "ADMIN_TRENDS_UNAVAILABLE", "运营趋势暂时不可用，请稍后重试")
+		s.writeAdminTrendsError(w, "load_admin_trends", err)
 		return
 	}
 	s.setHealthDegraded("admin_trends", "")
 	w.Header().Set("Cache-Control", "private, no-store")
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleAdminTrendsCSV(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	result, err := s.manager.AdminTrends(
+		r.URL.Query().Get("range"),
+		r.URL.Query().Get("timezone"),
+	)
+	if err != nil {
+		s.writeAdminTrendsError(w, "export_admin_trends", err)
+		return
+	}
+
+	var body bytes.Buffer
+	body.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(&body)
+	_ = writer.Write([]string{
+		"时间段开始", "时间段结束", "请求量", "远端尝试", "远端成功",
+		"远端失败", "远端成功率(%)", "活跃用户", "离线端口",
+	})
+	for _, point := range result.Points {
+		successRate := ""
+		if point.RemoteSuccessRate != nil {
+			successRate = strconv.FormatFloat(*point.RemoteSuccessRate, 'f', 1, 64)
+		}
+		_ = writer.Write([]string{
+			point.Start.Format(time.RFC3339),
+			point.End.Format(time.RFC3339),
+			strconv.Itoa(point.Requests),
+			strconv.Itoa(point.RemoteAttempts),
+			strconv.Itoa(point.RemoteSuccesses),
+			strconv.Itoa(point.RemoteFailures),
+			successRate,
+			strconv.Itoa(point.ActiveUsers),
+			strconv.Itoa(point.OfflinePorts),
+		})
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		s.setHealthDegraded("admin_trends", "运营趋势导出失败")
+		logStructuredError("encode_admin_trends_csv", "", err)
+		writeCodedError(w, http.StatusServiceUnavailable, "ADMIN_TRENDS_UNAVAILABLE", "运营趋势暂时不可用，请稍后重试")
+		return
+	}
+
+	exportDate := result.UpdatedAt.UTC().Format("2006-01-02")
+	if location, err := time.LoadLocation(result.Window.Timezone); err == nil {
+		exportDate = result.UpdatedAt.In(location).Format("2006-01-02")
+	}
+	s.setHealthDegraded("admin_trends", "")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="charge-trends-%s-%s.csv"`,
+		result.Window.Range,
+		exportDate,
+	))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body.Bytes())
+}
+
+func (s *Server) writeAdminTrendsError(w http.ResponseWriter, operation string, err error) {
+	if errors.Is(err, appruntime.ErrAdminTrendQueryInvalid) {
+		writeCodedError(w, http.StatusBadRequest, "ADMIN_TREND_QUERY_INVALID", "趋势范围或时区参数无效")
+		return
+	}
+	s.setHealthDegraded("admin_trends", "运营趋势查询失败")
+	logStructuredError(operation, "", err)
+	writeCodedError(w, http.StatusServiceUnavailable, "ADMIN_TRENDS_UNAVAILABLE", "运营趋势暂时不可用，请稍后重试")
 }
 
 func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {

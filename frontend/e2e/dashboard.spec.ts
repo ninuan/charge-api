@@ -1,11 +1,56 @@
 import { expect, test } from "@playwright/test"
 
 import type {
+  AdminTrendRange,
+  AdminTrendsResponse,
   DeviceHistoryResponse,
   PortHistoryMetrics,
   PortHistoryResponse,
   PortStatus,
 } from "@/lib/api/generated"
+
+function adminTrends(range: AdminTrendRange): AdminTrendsResponse {
+  const count = range === "24h" ? 24 : range === "7d" ? 7 : 30
+  const bucketUnit = range === "24h" ? "hour" : "day"
+  const end = new Date("2026-08-05T10:00:00Z")
+  const bucketMs = bucketUnit === "hour" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000
+  const start = new Date(end.getTime() - count * bucketMs)
+  const points = Array.from({ length: count }, (_, index) => {
+    const pointStart = new Date(start.getTime() + index * bucketMs)
+    const pointEnd = new Date(pointStart.getTime() + bucketMs)
+    return {
+      start: pointStart.toISOString(),
+      end: pointEnd.toISOString(),
+      requests: 20 + index,
+      remoteAttempts: 10,
+      remoteSuccesses: 9,
+      remoteFailures: 1,
+      remoteSuccessRate: 90,
+      activeUsers: 2 + (index % 7),
+      offlinePorts: index % 3,
+    }
+  })
+  return {
+    window: {
+      range,
+      timezone: "Asia/Shanghai",
+      bucketUnit,
+      start: start.toISOString(),
+      end: end.toISOString(),
+    },
+    summary: {
+      requests: points.reduce((total, point) => total + point.requests, 0),
+      remoteAttempts: count * 10,
+      remoteSuccesses: count * 9,
+      remoteFailures: count,
+      remoteSuccessRate: 90,
+      activeUsers: 8,
+      offlinePorts: points.at(-1)?.offlinePorts ?? 0,
+    },
+    points,
+    updatedAt: end.toISOString(),
+  }
+}
 
 const user = {
   id: "user-wang",
@@ -277,6 +322,68 @@ test("administrator handles a user and verifies the audit trail", async ({
   )
   await page.screenshot({
     path: "/tmp/charge-1.4.13-admin-mobile-menu.png",
+    fullPage: false,
+  })
+})
+
+test("administrator switches trend ranges, reads tooltips, and exports matching CSV", async ({
+  page,
+}) => {
+  await page.route("**/api/admin/trends?*", async (route) => {
+    const range = (new URL(route.request().url()).searchParams.get("range") ??
+      "24h") as AdminTrendRange
+    await route.fulfill({ json: adminTrends(range) })
+  })
+  await page.route("**/api/admin/trends.csv?*", async (route) => {
+    const range =
+      new URL(route.request().url()).searchParams.get("range") ?? "24h"
+    await route.fulfill({
+      status: 200,
+      contentType: "text/csv; charset=utf-8",
+      headers: {
+        "Content-Disposition": `attachment; filename="charge-trends-${range}-2026-08-05.csv"`,
+      },
+      body: "\uFEFF时间段开始,时间段结束,请求量\n2026-08-04T10:00:00Z,2026-08-05T10:00:00Z,120\n",
+    })
+  })
+
+  await page.goto("/login")
+  await page.getByLabel("用户名").fill("admin")
+  await page.locator("#password").fill("localadmin123")
+  await page.getByRole("button", { name: "登录", exact: true }).click()
+
+  await expect(
+    page.getByRole("group", { name: "24 小时远端成功率趋势" })
+  ).toBeVisible()
+  await page.getByRole("tab", { name: "7 天", exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\?range=7d$/)
+  const chart = page.getByRole("group", { name: "7 天远端成功率趋势" })
+  await expect(chart).toBeVisible()
+
+  await page.getByRole("tab", { name: "活跃用户", exact: true }).click()
+  await expect(page.getByText("8 人", { exact: true })).toBeVisible()
+  const activeChart = page.getByRole("group", { name: "7 天活跃用户趋势" })
+  await activeChart.getByRole("button").first().focus()
+  await expect(page.getByText(/活跃用户 2 人/)).toBeVisible()
+
+  await page.reload()
+  await expect(page).toHaveURL(/\/admin\?range=7d$/)
+  await expect(page.getByRole("tab", { name: "7 天" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
+  await expect(
+    page.getByRole("group", { name: "7 天远端成功率趋势" })
+  ).toBeVisible()
+
+  const downloadPromise = page.waitForEvent("download")
+  await page.getByRole("button", { name: "导出 CSV" }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe("charge-trends-7d-2026-08-05.csv")
+  await expect(page.getByText("7 天趋势已导出")).toBeVisible()
+
+  await page.screenshot({
+    path: "/tmp/charge-1.5.0-admin-trends.png",
     fullPage: false,
   })
 })

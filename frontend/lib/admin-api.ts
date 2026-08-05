@@ -15,7 +15,19 @@ import type {
   UserRole,
 } from "@/lib/types"
 import type { AdminTrendRange, AdminTrendsResponse } from "@/lib/api/generated"
-import { request } from "@/lib/http"
+import { request, RequestError, responseErrorMessage } from "@/lib/http"
+
+export type DownloadedTrendCSV = {
+  blob: Blob
+  filename: string
+}
+
+function downloadFilename(disposition: string | null, range: AdminTrendRange) {
+  const candidate = disposition?.match(/filename="?([^";]+)"?/i)?.[1]
+  return candidate && /^[A-Za-z0-9._-]+$/.test(candidate)
+    ? candidate
+    : `charge-trends-${range}.csv`
+}
 
 export const adminApi = {
   stats: () => request<AdminStats>("/api/admin/stats", {}, "加载运营统计失败"),
@@ -25,6 +37,38 @@ export const adminApi = {
       {},
       "加载运营趋势失败"
     ),
+  trendsCSV: async (
+    range: AdminTrendRange = "24h",
+    timezone = "Asia/Shanghai"
+  ): Promise<DownloadedTrendCSV> => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 30_000)
+    try {
+      const response = await fetch(
+        `/api/admin/trends.csv?${new URLSearchParams({ range, timezone })}`,
+        { credentials: "include", signal: controller.signal }
+      )
+      if (!response.ok) {
+        throw new RequestError(
+          await responseErrorMessage(response, "导出运营趋势失败"),
+          response.status
+        )
+      }
+      return {
+        blob: await response.blob(),
+        filename: downloadFilename(
+          response.headers.get("Content-Disposition"),
+          range
+        ),
+      }
+    } catch (error) {
+      if (controller.signal.aborted)
+        throw new RequestError("导出超时，请检查网络后重试", 0)
+      throw error
+    } finally {
+      window.clearTimeout(timer)
+    }
+  },
   health: () =>
     request<AdminHealth>("/api/admin/health", {}, "加载系统状态失败"),
   settings: () =>

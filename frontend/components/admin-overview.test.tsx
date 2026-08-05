@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AdminOverview } from "@/components/admin-overview"
 import { MetricCard } from "@/components/metric-card"
+import type { AdminTrendsResponse } from "@/lib/api/generated"
 import type { AdminStats, MetricPoint } from "@/lib/types"
 
 const point = (
@@ -35,24 +36,74 @@ const stats: AdminStats = {
   exceptions: [],
 }
 
+const trends: AdminTrendsResponse = {
+  window: {
+    range: "24h",
+    timezone: "Asia/Shanghai",
+    bucketUnit: "hour",
+    start: "2026-07-26T10:00:00Z",
+    end: "2026-07-27T10:00:00Z",
+  },
+  summary: {
+    requests: 5,
+    remoteAttempts: 5,
+    remoteSuccesses: 5,
+    remoteFailures: 0,
+    remoteSuccessRate: 100,
+    activeUsers: 2,
+    offlinePorts: 0,
+  },
+  points: [
+    {
+      start: "2026-07-27T08:00:00Z",
+      end: "2026-07-27T09:00:00Z",
+      requests: 2,
+      remoteAttempts: 2,
+      remoteSuccesses: 2,
+      remoteFailures: 0,
+      remoteSuccessRate: 100,
+      activeUsers: 1,
+      offlinePorts: 0,
+    },
+    {
+      start: "2026-07-27T09:00:00Z",
+      end: "2026-07-27T10:00:00Z",
+      requests: 3,
+      remoteAttempts: 3,
+      remoteSuccesses: 3,
+      remoteFailures: 0,
+      remoteSuccessRate: 100,
+      activeUsers: 2,
+      offlinePorts: 0,
+    },
+  ],
+  updatedAt: "2026-07-27T10:00:00Z",
+}
+
 describe("AdminOverview", () => {
   afterEach(cleanup)
 
-  it("shows explicit metric units and accessible trend ranges", () => {
-    render(<AdminOverview stats={stats} onUser={vi.fn()} />)
+  it("shows explicit metric units and the unified trend panel", () => {
+    render(
+      <AdminOverview
+        stats={stats}
+        trends={trends}
+        trendRange="24h"
+        trendLoading={false}
+        trendError={null}
+        onTrendRangeChange={vi.fn()}
+        onTrendReload={vi.fn()}
+        onUser={vi.fn()}
+      />
+    )
 
     expect(screen.getByLabelText("远端成功率 指标")).toHaveTextContent("100%")
     expect(
-      screen.getByRole("img", {
-        name: "过去 2 小时远端请求趋势，共 5 次，成功率 100%",
+      screen.getByRole("group", {
+        name: "24 小时远端成功率趋势",
       })
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("img", {
-        name: "过去 2 天活跃用户趋势，单日峰值 3 人",
-      })
-    ).toBeInTheDocument()
-    expect(screen.getByText("峰值 3 人")).toBeInTheDocument()
+    expect(screen.getByText("100.0%")).toBeInTheDocument()
     expect(screen.getByText("0 条")).toBeInTheDocument()
   })
 })
