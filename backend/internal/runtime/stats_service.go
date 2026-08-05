@@ -259,9 +259,7 @@ func (m *Manager) recordMetricCount(userID, kind string, count int) {
 			runtime.recordRemoteOK(now)
 		}
 	}
-	for i := 0; i < count; i++ {
-		_ = m.repository.RecordMetric(userID, kind, now)
-	}
+	_ = m.repository.RecordMetricCount(userID, kind, count, now)
 }
 
 func (m *Manager) recordRefreshMetrics(userID string, info model.RefreshInfo) {

@@ -323,6 +323,43 @@ type AdminStats struct {
 	Exceptions []SystemException  `json:"exceptions"`
 }
 
+type AdminTrendWindow struct {
+	Range      string    `json:"range"`
+	Timezone   string    `json:"timezone"`
+	BucketUnit string    `json:"bucketUnit"`
+	Start      time.Time `json:"start"`
+	End        time.Time `json:"end"`
+}
+
+type AdminTrendPoint struct {
+	Start             time.Time `json:"start"`
+	End               time.Time `json:"end"`
+	Requests          int       `json:"requests"`
+	RemoteAttempts    int       `json:"remoteAttempts"`
+	RemoteSuccesses   int       `json:"remoteSuccesses"`
+	RemoteFailures    int       `json:"remoteFailures"`
+	RemoteSuccessRate *float64  `json:"remoteSuccessRate"`
+	ActiveUsers       int       `json:"activeUsers"`
+	OfflinePorts      int       `json:"offlinePorts"`
+}
+
+type AdminTrendSummary struct {
+	Requests          int      `json:"requests"`
+	RemoteAttempts    int      `json:"remoteAttempts"`
+	RemoteSuccesses   int      `json:"remoteSuccesses"`
+	RemoteFailures    int      `json:"remoteFailures"`
+	RemoteSuccessRate *float64 `json:"remoteSuccessRate"`
+	ActiveUsers       int      `json:"activeUsers"`
+	OfflinePorts      int      `json:"offlinePorts"`
+}
+
+type AdminTrends struct {
+	Window    AdminTrendWindow  `json:"window"`
+	Summary   AdminTrendSummary `json:"summary"`
+	Points    []AdminTrendPoint `json:"points"`
+	UpdatedAt time.Time         `json:"updatedAt"`
+}
+
 type HealthState string
 
 const (

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"charge-dashboard/internal/model"
+	appruntime "charge-dashboard/internal/runtime"
 )
 
 func (s *Server) handleAdminIncidents(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +367,33 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setAdminDegraded("")
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleAdminTrends(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	result, err := s.manager.AdminTrends(
+		r.URL.Query().Get("range"),
+		r.URL.Query().Get("timezone"),
+	)
+	if err != nil {
+		if errors.Is(err, appruntime.ErrAdminTrendQueryInvalid) {
+			writeCodedError(w, http.StatusBadRequest, "ADMIN_TREND_QUERY_INVALID", "趋势范围或时区参数无效")
+			return
+		}
+		s.setHealthDegraded("admin_trends", "运营趋势查询失败")
+		logStructuredError("load_admin_trends", "", err)
+		writeCodedError(w, http.StatusServiceUnavailable, "ADMIN_TRENDS_UNAVAILABLE", "运营趋势暂时不可用，请稍后重试")
+		return
+	}
+	s.setHealthDegraded("admin_trends", "")
+	w.Header().Set("Cache-Control", "private, no-store")
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {

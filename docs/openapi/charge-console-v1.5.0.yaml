@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
-  title: Charge Console History API
+  title: Charge Console Analytics API
   version: 1.5.0
   description: |
-    Charge Console 1.5.0 新增的用户端历史查询契约。
-    本文件只描述已经实现的接口；管理员趋势与 CSV 接口将在对应阶段实现时补充。
+    Charge Console 1.5.0 新增的用户端历史与管理员趋势查询契约。
+    本文件只描述已经实现的接口；CSV 接口将在对应阶段实现时补充。
 servers:
   - url: /
 security:
@@ -12,7 +12,37 @@ security:
 tags:
   - name: History
     description: 当前登录普通用户所绑定充电桩的历史分析
+  - name: Admin Trends
+    description: 管理员运营趋势分析
 paths:
+  /api/admin/trends:
+    get:
+      operationId: getAdminTrends
+      summary: 获取管理员运营趋势
+      tags: [Admin Trends]
+      parameters:
+        - $ref: "#/components/parameters/AdminTrendRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 请求量、远端成功率、活跃用户和离线端口趋势
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTrendsResponse"
+        "400":
+          $ref: "#/components/responses/InvalidAdminTrendQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AdminTrendsUnavailable"
   /api/piles/{deviceId}/history:
     get:
       operationId: getDeviceHistory
@@ -111,6 +141,13 @@ components:
       description: 历史统计范围；省略时使用 7d
       schema:
         $ref: "#/components/schemas/HistoryRange"
+    AdminTrendRange:
+      name: range
+      in: query
+      required: false
+      description: 趋势统计范围；省略时使用 24h
+      schema:
+        $ref: "#/components/schemas/AdminTrendRange"
     Timezone:
       name: timezone
       in: query
@@ -123,11 +160,20 @@ components:
         example: Asia/Shanghai
   headers:
     PrivateNoStore:
-      description: 历史响应包含用户数据，不允许共享或本地缓存
+      description: 分析响应包含用户或运营数据，不允许共享或本地缓存
       schema:
         type: string
         enum: ["private, no-store"]
   responses:
+    InvalidAdminTrendQuery:
+      description: 趋势范围或时区参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: ADMIN_TREND_QUERY_INVALID
+            error: 趋势范围或时区参数无效
     InvalidHistoryQuery:
       description: 设备 ID、历史范围或时区参数无效
       content:
@@ -174,6 +220,14 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             error: ordinary user permission required
+    AdminRequired:
+      description: 当前账户不是管理员
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: admin permission required
     HistoryNotFound:
       description: 设备不属于当前用户、端口不存在或尚无该端口历史
       content:
@@ -209,11 +263,24 @@ components:
           example:
             code: HISTORY_UNAVAILABLE
             error: 历史数据暂时不可用，请稍后重试
+    AdminTrendsUnavailable:
+      description: 指标或状态历史聚合暂时不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: ADMIN_TRENDS_UNAVAILABLE
+            error: 运营趋势暂时不可用，请稍后重试
   schemas:
     HistoryRange:
       type: string
       enum: [24h, 7d, 30d]
       default: 7d
+    AdminTrendRange:
+      type: string
+      enum: [24h, 7d, 30d]
+      default: 24h
     PortStatus:
       type: string
       enum: [idle, in_use, offline]
@@ -241,6 +308,8 @@ components:
             - HISTORY_NOT_FOUND
             - HISTORY_RANGE_TOO_LARGE
             - HISTORY_UNAVAILABLE
+            - ADMIN_TREND_QUERY_INVALID
+            - ADMIN_TRENDS_UNAVAILABLE
         error:
           type: string
     HistoryWindow:
@@ -256,6 +325,122 @@ components:
           type: string
           format: date-time
         end:
+          type: string
+          format: date-time
+    AdminTrendWindow:
+      type: object
+      additionalProperties: false
+      required: [range, timezone, bucketUnit, start, end]
+      properties:
+        range:
+          $ref: "#/components/schemas/AdminTrendRange"
+        timezone:
+          type: string
+        bucketUnit:
+          type: string
+          enum: [hour, day]
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    AdminTrendPoint:
+      type: object
+      additionalProperties: false
+      required:
+        - start
+        - end
+        - requests
+        - remoteAttempts
+        - remoteSuccesses
+        - remoteFailures
+        - remoteSuccessRate
+        - activeUsers
+        - offlinePorts
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        requests:
+          type: integer
+          minimum: 0
+        remoteAttempts:
+          type: integer
+          minimum: 0
+        remoteSuccesses:
+          type: integer
+          minimum: 0
+        remoteFailures:
+          type: integer
+          minimum: 0
+        remoteSuccessRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        activeUsers:
+          type: integer
+          minimum: 0
+        offlinePorts:
+          type: integer
+          minimum: 0
+    AdminTrendSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - requests
+        - remoteAttempts
+        - remoteSuccesses
+        - remoteFailures
+        - remoteSuccessRate
+        - activeUsers
+        - offlinePorts
+      properties:
+        requests:
+          type: integer
+          minimum: 0
+        remoteAttempts:
+          type: integer
+          minimum: 0
+        remoteSuccesses:
+          type: integer
+          minimum: 0
+        remoteFailures:
+          type: integer
+          minimum: 0
+        remoteSuccessRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        activeUsers:
+          type: integer
+          minimum: 0
+        offlinePorts:
+          type: integer
+          minimum: 0
+    AdminTrendsResponse:
+      type: object
+      additionalProperties: false
+      required: [window, summary, points, updatedAt]
+      properties:
+        window:
+          $ref: "#/components/schemas/AdminTrendWindow"
+        summary:
+          $ref: "#/components/schemas/AdminTrendSummary"
+        points:
+          type: array
+          minItems: 7
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/AdminTrendPoint"
+        updatedAt:
           type: string
           format: date-time
     PortHistoryMetrics:

@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/admin/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取管理员运营趋势 */
+        get: operations["getAdminTrends"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/piles/{deviceId}/history": {
         parameters: {
             query?: never;
@@ -42,9 +59,55 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdminTrendPoint: {
+            activeUsers: number;
+            /** Format: date-time */
+            end: string;
+            offlinePorts: number;
+            remoteAttempts: number;
+            remoteFailures: number;
+            remoteSuccesses: number;
+            /** Format: double */
+            remoteSuccessRate: number | null;
+            requests: number;
+            /** Format: date-time */
+            start: string;
+        };
+        /**
+         * @default 24h
+         * @enum {string}
+         */
+        AdminTrendRange: "24h" | "7d" | "30d";
+        AdminTrendsResponse: {
+            points: components["schemas"]["AdminTrendPoint"][];
+            summary: components["schemas"]["AdminTrendSummary"];
+            /** Format: date-time */
+            updatedAt: string;
+            window: components["schemas"]["AdminTrendWindow"];
+        };
+        AdminTrendSummary: {
+            activeUsers: number;
+            offlinePorts: number;
+            remoteAttempts: number;
+            remoteFailures: number;
+            remoteSuccesses: number;
+            /** Format: double */
+            remoteSuccessRate: number | null;
+            requests: number;
+        };
+        AdminTrendWindow: {
+            /** @enum {string} */
+            bucketUnit: "hour" | "day";
+            /** Format: date-time */
+            end: string;
+            range: components["schemas"]["AdminTrendRange"];
+            /** Format: date-time */
+            start: string;
+            timezone: string;
+        };
         CodedErrorResponse: {
             /** @enum {string} */
-            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE";
+            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE";
             error: string;
         };
         DeviceHistoryResponse: {
@@ -161,6 +224,35 @@ export interface components {
         PortStatus: "idle" | "in_use" | "offline";
     };
     responses: {
+        /** @description 当前账户不是管理员 */
+        AdminRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": "admin permission required"
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 指标或状态历史聚合暂时不可用 */
+        AdminTrendsUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "ADMIN_TRENDS_UNAVAILABLE",
+                 *       "error": "运营趋势暂时不可用，请稍后重试"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
         /** @description 设备不属于当前用户、端口不存在或尚无该端口历史 */
         HistoryNotFound: {
             headers: {
@@ -201,6 +293,21 @@ export interface components {
                  * @example {
                  *       "code": "HISTORY_UNAVAILABLE",
                  *       "error": "历史数据暂时不可用，请稍后重试"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 趋势范围或时区参数无效 */
+        InvalidAdminTrendQuery: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "ADMIN_TREND_QUERY_INVALID",
+                 *       "error": "趋势范围或时区参数无效"
                  *     }
                  */
                 "application/json": components["schemas"]["CodedErrorResponse"];
@@ -268,6 +375,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description 趋势统计范围；省略时使用 24h */
+        AdminTrendRange: components["schemas"]["AdminTrendRange"];
         /** @description 当前用户已绑定的 6–64 位数字设备 ID */
         DeviceId: string;
         /** @description 历史统计范围；省略时使用 7d */
@@ -279,11 +388,16 @@ export interface components {
     };
     requestBodies: never;
     headers: {
-        /** @description 历史响应包含用户数据，不允许共享或本地缓存 */
+        /** @description 分析响应包含用户或运营数据，不允许共享或本地缓存 */
         PrivateNoStore: "private, no-store";
     };
     pathItems: never;
 }
+export type AdminTrendPoint = components['schemas']['AdminTrendPoint'];
+export type AdminTrendRange = components['schemas']['AdminTrendRange'];
+export type AdminTrendsResponse = components['schemas']['AdminTrendsResponse'];
+export type AdminTrendSummary = components['schemas']['AdminTrendSummary'];
+export type AdminTrendWindow = components['schemas']['AdminTrendWindow'];
 export type CodedErrorResponse = components['schemas']['CodedErrorResponse'];
 export type DeviceHistoryResponse = components['schemas']['DeviceHistoryResponse'];
 export type ErrorResponse = components['schemas']['ErrorResponse'];
@@ -299,14 +413,18 @@ export type PortHistoryResponse = components['schemas']['PortHistoryResponse'];
 export type PortHistorySummary = components['schemas']['PortHistorySummary'];
 export type PortHistoryTimelineItem = components['schemas']['PortHistoryTimelineItem'];
 export type PortStatus = components['schemas']['PortStatus'];
+export type ResponseAdminRequired = components['responses']['AdminRequired'];
+export type ResponseAdminTrendsUnavailable = components['responses']['AdminTrendsUnavailable'];
 export type ResponseHistoryNotFound = components['responses']['HistoryNotFound'];
 export type ResponseHistoryRangeTooLarge = components['responses']['HistoryRangeTooLarge'];
 export type ResponseHistoryUnavailable = components['responses']['HistoryUnavailable'];
+export type ResponseInvalidAdminTrendQuery = components['responses']['InvalidAdminTrendQuery'];
 export type ResponseInvalidHistoryQuery = components['responses']['InvalidHistoryQuery'];
 export type ResponseInvalidPortHistoryQuery = components['responses']['InvalidPortHistoryQuery'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseOrdinaryUserRequired = components['responses']['OrdinaryUserRequired'];
 export type ResponseUnauthenticated = components['responses']['Unauthenticated'];
+export type ParameterAdminTrendRange = components['parameters']['AdminTrendRange'];
 export type ParameterDeviceId = components['parameters']['DeviceId'];
 export type ParameterHistoryRange = components['parameters']['HistoryRange'];
 export type ParameterPortId = components['parameters']['PortId'];
@@ -314,6 +432,37 @@ export type ParameterTimezone = components['parameters']['Timezone'];
 export type HeaderPrivateNoStore = components['headers']['PrivateNoStore'];
 export type $defs = Record<string, never>;
 export interface operations {
+    getAdminTrends: {
+        parameters: {
+            query?: {
+                /** @description 趋势统计范围；省略时使用 24h */
+                range?: components["parameters"]["AdminTrendRange"];
+                /** @description IANA 时区名称；省略时使用 Asia/Shanghai */
+                timezone?: components["parameters"]["Timezone"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 请求量、远端成功率、活跃用户和离线端口趋势 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTrendsResponse"];
+                };
+            };
+            400: components["responses"]["InvalidAdminTrendQuery"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["AdminTrendsUnavailable"];
+        };
+    };
     getDeviceHistory: {
         parameters: {
             query?: {

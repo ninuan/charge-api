@@ -14,10 +14,17 @@ import type {
   TemporaryPasswordResponse,
   UserRole,
 } from "@/lib/types"
+import type { AdminTrendRange, AdminTrendsResponse } from "@/lib/api/generated"
 import { request } from "@/lib/http"
 
 export const adminApi = {
   stats: () => request<AdminStats>("/api/admin/stats", {}, "加载运营统计失败"),
+  trends: (range: AdminTrendRange = "24h", timezone = "Asia/Shanghai") =>
+    request<AdminTrendsResponse>(
+      `/api/admin/trends?${new URLSearchParams({ range, timezone })}`,
+      {},
+      "加载运营趋势失败"
+    ),
   health: () =>
     request<AdminHealth>("/api/admin/health", {}, "加载系统状态失败"),
   settings: () =>
