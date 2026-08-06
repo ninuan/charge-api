@@ -18,6 +18,7 @@ import (
 	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/version"
 	"charge-dashboard/internal/yyb"
 )
 
@@ -130,7 +131,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"version": version.Current,
+	})
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {

@@ -26,28 +26,30 @@ func (m *Manager) adminTrendsAt(rangeName, timezone string, now time.Time) (mode
 		return model.AdminTrends{}, err
 	}
 	buckets := adminTrendBuckets(window, location)
-	points := make([]model.AdminTrendPoint, 0, len(buckets))
-	for _, bucket := range buckets {
-		queryEnd := bucket.end
+	queryEnds := make([]time.Time, len(buckets))
+	for index, bucket := range buckets {
+		queryEnds[index] = bucket.end
 		if bucket.end.Equal(window.End) {
-			// Metrics use Unix-second precision. Include the current second in the
-			// final bucket without making the preceding buckets overlap.
-			queryEnd = queryEnd.Add(time.Second)
+			queryEnds[index] = queryEnds[index].Add(time.Second)
 		}
+	}
+	offlineCounts, err := m.repository.OfflinePortCountsAt(queryEnds)
+	if err != nil {
+		return model.AdminTrends{}, fmt.Errorf("load admin trend offline ports: %w", err)
+	}
+	points := make([]model.AdminTrendPoint, 0, len(buckets))
+	for index, bucket := range buckets {
+		queryEnd := queryEnds[index]
 		metrics, err := m.repository.MetricAggregate(bucket.start, queryEnd)
 		if err != nil {
 			return model.AdminTrends{}, fmt.Errorf("load admin trend metric bucket: %w", err)
-		}
-		offlinePorts, err := m.repository.OfflinePortCountAt(queryEnd)
-		if err != nil {
-			return model.AdminTrends{}, fmt.Errorf("load admin trend offline ports: %w", err)
 		}
 		points = append(points, model.AdminTrendPoint{
 			Start: bucket.start, End: bucket.end,
 			Requests: metrics.Requests, RemoteAttempts: metrics.Remote,
 			RemoteSuccesses: metrics.RemoteOK, RemoteFailures: metrics.RemoteFailed,
 			RemoteSuccessRate: metricSuccessRate(metrics.RemoteOK, metrics.Remote),
-			ActiveUsers:       metrics.ActiveUsers, OfflinePorts: offlinePorts,
+			ActiveUsers:       metrics.ActiveUsers, OfflinePorts: offlineCounts[index],
 		})
 	}
 
@@ -56,9 +58,9 @@ func (m *Manager) adminTrendsAt(rangeName, timezone string, now time.Time) (mode
 	if err != nil {
 		return model.AdminTrends{}, fmt.Errorf("load admin trend summary: %w", err)
 	}
-	offlinePorts, err := m.repository.OfflinePortCountAt(queryEnd)
-	if err != nil {
-		return model.AdminTrends{}, fmt.Errorf("load admin trend offline port summary: %w", err)
+	offlinePorts := 0
+	if len(offlineCounts) > 0 {
+		offlinePorts = offlineCounts[len(offlineCounts)-1]
 	}
 	return model.AdminTrends{
 		Window: window,

@@ -17,7 +17,8 @@ echo "1/8 OpenAPI 生成类型漂移检查"
   pnpm run check:api
 )
 
-echo "2/8 部署脚本检查"
+echo "2/8 项目脚本与发布版本检查"
+"$ROOT_DIR/scripts/check_release_version.sh"
 bash "$ROOT_DIR/scripts/deploy_test.sh"
 bash "$ROOT_DIR/scripts/deploy_git_test.sh"
 bash "$ROOT_DIR/scripts/dev_env_test.sh"

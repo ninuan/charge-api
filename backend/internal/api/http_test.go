@@ -92,6 +92,23 @@ func TestDevForceAuthExpiredIsConsumedOnce(t *testing.T) {
 	}
 }
 
+func TestHealthExposesReleaseVersion(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	server.handleHealth(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", recorder.Code)
+	}
+	var payload map[string]string
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if payload["status"] != "ok" || payload["version"] != "1.5.0" {
+		t.Fatalf("unexpected health response: %+v", payload)
+	}
+}
+
 func TestAdminHealthRequiresAdminAndReturnsRedactedServiceState(t *testing.T) {
 	server, manager, sessions := newTestServer(t)
 	admin := findUser(t, manager, "admin")

@@ -1,6 +1,7 @@
 # Charge Console
 
 [![CI](https://github.com/ninuan/charge-api/actions/workflows/ci.yml/badge.svg)](https://github.com/ninuan/charge-api/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ninuan/charge-api)](https://github.com/ninuan/charge-api/releases)
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
@@ -28,10 +29,12 @@
 - 主动刷新：由用户点击按钮后请求远端接口，不做自动高频轮询。
 - 刷新保护：短时间重复刷新会优先返回本地缓存，降低远端请求频率。
 - 状态持久化：重启后恢复已添加设备、最新快照、刷新时间和 Cookie。
+- 历史趋势：查看单个设备和端口最近 24 小时、7 天或 30 天的状态时间线、占用率、平均时长与繁忙时段。
 - 手动更新凭据：Cookie 失效时可在页面粘贴新的 Cookie 并立即验证；系统不会自动获取或续期 Cookie。
 - 自助注册：普通用户可以自行注册并维护自己的充电桩。
-- 管理后台：管理员只查看流量监控大屏，并可以添加、禁用、删除用户。
-- 流量统计：按用户统计访问次数、刷新次数、远端请求次数和失败次数。
+- 管理闭环：管理员可以从异常进入用户详情，处理账户、凭据和设备问题，并保留操作审计记录。
+- 运营趋势：按 24 小时、7 天或 30 天查看请求量、远端成功率、活跃用户和离线端口，并导出 CSV。
+- 运维状态：展示服务健康、数据库与备份状态、指标和端口历史保留情况。
 - 登录防护：Argon2id 密码哈希、Cloudflare Turnstile、人机验证失败锁定和 IP 限流。
 
 ## 技术栈
@@ -304,13 +307,18 @@ make deploy DEPLOY_HOST=root@<服务器IP>
 | GET | `/api/piles` | 获取看板快照 |
 | POST | `/api/piles` | 添加充电桩 |
 | DELETE | `/api/piles/:id` | 删除充电桩 |
+| GET | `/api/piles/:id/history` | 获取设备历史趋势 |
+| GET | `/api/piles/:id/ports/:port/history` | 获取单端口历史与时间线 |
 | POST | `/api/refresh` | 主动刷新远端状态 |
 | POST | `/api/session/cookie` | 更新并验证 Cookie |
 | GET | `/api/admin/users` | 管理员用户列表和统计 |
 | POST | `/api/admin/users` | 管理员添加用户 |
 | PATCH | `/api/admin/users/:id` | 管理员更新用户 |
 | DELETE | `/api/admin/users/:id` | 管理员删除用户 |
+| GET | `/api/admin/trends` | 获取管理员运营趋势 |
+| GET | `/api/admin/trends.csv` | 导出运营趋势 CSV |
 | GET | `/api/stream` | SSE 快照推送 |
+| GET | `/healthz` | 返回服务状态与当前版本 |
 
 ## 数据存储
 
@@ -321,6 +329,8 @@ charge_state.db
 ```
 
 用户、设备列表、看板快照和流量统计会按用户独立保存。Cookie 使用 AES-256-GCM 加密后写入数据库，密钥通过 `CHARGE_COOKIE_KEY` 提供。
+
+端口历史只在状态变化时写入，默认保留 90 天。1.5.0 的发布容量基线覆盖 100 个用户、1000 个端口和 36 万条保留期内事件；可用 `make capacity-baseline` 在目标机器上复测 SQLite 查询表现。
 
 ### 生产密钥
 

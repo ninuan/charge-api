@@ -1,4 +1,4 @@
-.PHONY: setup dev check generate-api deploy deploy-git reset-local
+.PHONY: setup dev check capacity-baseline generate-api deploy deploy-git reset-local
 
 setup:
 	cd backend && go mod download
@@ -9,6 +9,9 @@ dev:
 
 check:
 	bash scripts/check.sh
+
+capacity-baseline:
+	cd backend && GOCACHE="$${GOCACHE:-$${TMPDIR:-/tmp}/charge-go-capacity-cache}" CHARGE_RUN_CAPACITY_BASELINE=1 go test -count=1 -run '^TestSQLiteCapacityBaseline$$' -v ./internal/persistence
 
 generate-api:
 	cd frontend && pnpm run generate:api

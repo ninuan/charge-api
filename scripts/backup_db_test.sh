@@ -80,4 +80,16 @@ if ! gunzip -t "$latest"; then
   exit 1
 fi
 
+# 发布门禁不仅检查压缩包，还要证明它能恢复为可读且完整的 SQLite 数据库。
+restored="$workdir/restored.db"
+gzip -dc "$latest" > "$restored"
+if [[ "$(sqlite3 "$restored" "PRAGMA integrity_check;")" != "ok" ]]; then
+  echo "恢复后的数据库完整性检查失败"
+  exit 1
+fi
+if [[ "$(sqlite3 "$restored" "SELECT x FROM t;")" != "1" ]]; then
+  echo "恢复后的数据库数据不一致"
+  exit 1
+fi
+
 echo "backup_db 检查通过"

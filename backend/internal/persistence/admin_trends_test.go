@@ -87,4 +87,30 @@ func TestOfflinePortCountAtUsesLatestKnownPortState(t *testing.T) {
 			t.Fatalf("OfflinePortCountAt(%s) = %d, want %d", check.at, got, check.want)
 		}
 	}
+
+	instants := make([]time.Time, len(checks))
+	for index, check := range checks {
+		instants[index] = check.at
+	}
+	counts, err := store.OfflinePortCountsAt(instants)
+	if err != nil {
+		t.Fatalf("OfflinePortCountsAt: %v", err)
+	}
+	for index, check := range checks {
+		if counts[index] != check.want {
+			t.Fatalf("OfflinePortCountsAt(%s) = %d, want %d", check.at, counts[index], check.want)
+		}
+	}
+}
+
+func TestOfflinePortCountsAtRejectsUnorderedInstants(t *testing.T) {
+	store, err := OpenSQLite(t.TempDir()+"/state.db", bytes.Repeat([]byte{0x63}, CookieKeySize))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+	now := time.Now()
+	if _, err := store.OfflinePortCountsAt([]time.Time{now, now.Add(-time.Hour)}); err == nil {
+		t.Fatal("expected unordered instants to fail")
+	}
 }
