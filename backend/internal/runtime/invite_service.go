@@ -25,6 +25,34 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 	if settings.PortHistoryRetentionDays == 0 {
 		settings.PortHistoryRetentionDays = defaultHistoryRetentionDays
 	}
+	legacyReminderSettings := settings.WatchRefreshIntervalMinutes == 0
+	if legacyReminderSettings {
+		settings.BackgroundRemindersEnabled = true
+		settings.ScheduledPowerOffEnabled = true
+		settings.ScheduledPowerOffStartMinute = defaultPowerOffStartMinute
+		settings.ScheduledPowerOffEndMinute = defaultPowerOffEndMinute
+	}
+	if settings.WatchRefreshIntervalMinutes == 0 {
+		settings.WatchRefreshIntervalMinutes = defaultWatchIntervalMinutes
+	}
+	if settings.WatchRuleLimitPerUser == 0 {
+		settings.WatchRuleLimitPerUser = defaultWatchRuleLimit
+	}
+	if settings.WatchPileLimitPerUser == 0 {
+		settings.WatchPileLimitPerUser = defaultWatchPileLimit
+	}
+	if settings.WatchDailyRefreshQuota == 0 {
+		settings.WatchDailyRefreshQuota = defaultWatchDailyQuota
+	}
+	if settings.NotificationRetentionDays == 0 {
+		settings.NotificationRetentionDays = defaultNotificationDays
+	}
+	if settings.ScheduledPowerOffTimezone == "" {
+		settings.ScheduledPowerOffTimezone = defaultPowerOffTimezone
+	}
+	if settings.PowerRestoreJitterMinutes == 0 && legacyReminderSettings {
+		settings.PowerRestoreJitterMinutes = defaultPowerRestoreJitter
+	}
 	return settings
 }
 
@@ -37,6 +65,34 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	}
 	if settings.PortHistoryRetentionDays < 1 || settings.PortHistoryRetentionDays > 365 {
 		return fmt.Errorf("端口历史保留天数需要在 1 到 365 之间")
+	}
+	if settings.WatchRefreshIntervalMinutes < 5 || settings.WatchRefreshIntervalMinutes > 60 {
+		return fmt.Errorf("关注刷新间隔需要在 5 到 60 分钟之间")
+	}
+	if settings.WatchRuleLimitPerUser < 1 || settings.WatchRuleLimitPerUser > 100 {
+		return fmt.Errorf("单用户关注规则上限需要在 1 到 100 之间")
+	}
+	if settings.WatchPileLimitPerUser < 1 || settings.WatchPileLimitPerUser > 20 {
+		return fmt.Errorf("单用户关注充电桩上限需要在 1 到 20 之间")
+	}
+	if settings.WatchDailyRefreshQuota < 1 || settings.WatchDailyRefreshQuota > 10000 {
+		return fmt.Errorf("单用户每日关注刷新额度需要在 1 到 10000 之间")
+	}
+	if settings.NotificationRetentionDays < 7 || settings.NotificationRetentionDays > 365 {
+		return fmt.Errorf("通知保留天数需要在 7 到 365 之间")
+	}
+	if settings.ScheduledPowerOffStartMinute < 0 || settings.ScheduledPowerOffStartMinute >= 24*60 ||
+		settings.ScheduledPowerOffEndMinute < 0 || settings.ScheduledPowerOffEndMinute >= 24*60 {
+		return fmt.Errorf("计划断电时间需要在当天有效范围内")
+	}
+	if settings.ScheduledPowerOffEnabled && settings.ScheduledPowerOffStartMinute == settings.ScheduledPowerOffEndMinute {
+		return fmt.Errorf("计划断电开始和结束时间不能相同")
+	}
+	if _, err := time.LoadLocation(settings.ScheduledPowerOffTimezone); err != nil {
+		return fmt.Errorf("计划断电时区无效")
+	}
+	if settings.PowerRestoreJitterMinutes < 0 || settings.PowerRestoreJitterMinutes > 60 {
+		return fmt.Errorf("恢复供电抖动需要在 0 到 60 分钟之间")
 	}
 	m.mu.Lock()
 	previous := m.settings

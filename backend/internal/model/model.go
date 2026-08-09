@@ -260,12 +260,86 @@ type TemporaryPasswordResponse struct {
 }
 
 type RegistrationSettings struct {
-	OpenRegistration         bool `json:"openRegistration"`
-	InviteRequired           bool `json:"inviteRequired"`
-	DefaultDeviceLimit       int  `json:"defaultDeviceLimit"`
-	DefaultRefreshEnabled    bool `json:"defaultRefreshEnabled"`
-	StatsRetentionDays       int  `json:"statsRetentionDays"`
-	PortHistoryRetentionDays int  `json:"portHistoryRetentionDays"`
+	OpenRegistration             bool   `json:"openRegistration"`
+	InviteRequired               bool   `json:"inviteRequired"`
+	DefaultDeviceLimit           int    `json:"defaultDeviceLimit"`
+	DefaultRefreshEnabled        bool   `json:"defaultRefreshEnabled"`
+	StatsRetentionDays           int    `json:"statsRetentionDays"`
+	PortHistoryRetentionDays     int    `json:"portHistoryRetentionDays"`
+	BackgroundRemindersEnabled   bool   `json:"backgroundRemindersEnabled"`
+	WatchRefreshIntervalMinutes  int    `json:"watchRefreshIntervalMinutes"`
+	WatchRuleLimitPerUser        int    `json:"watchRuleLimitPerUser"`
+	WatchPileLimitPerUser        int    `json:"watchPileLimitPerUser"`
+	WatchDailyRefreshQuota       int    `json:"watchDailyRefreshQuota"`
+	NotificationRetentionDays    int    `json:"notificationRetentionDays"`
+	ScheduledPowerOffEnabled     bool   `json:"scheduledPowerOffEnabled"`
+	ScheduledPowerOffStartMinute int    `json:"scheduledPowerOffStartMinute"`
+	ScheduledPowerOffEndMinute   int    `json:"scheduledPowerOffEndMinute"`
+	ScheduledPowerOffTimezone    string `json:"scheduledPowerOffTimezone"`
+	PowerRestoreJitterMinutes    int    `json:"powerRestoreJitterMinutes"`
+}
+
+type WatchRule struct {
+	ID                string    `json:"id"`
+	UserID            string    `json:"userId"`
+	DeviceID          string    `json:"deviceId"`
+	PortID            *int      `json:"portId,omitempty"`
+	NotifyIdle        bool      `json:"notifyIdle"`
+	Enabled           bool      `json:"enabled"`
+	ActiveWeekdays    int       `json:"activeWeekdays"`
+	ActiveStartMinute int       `json:"activeStartMinute"`
+	ActiveEndMinute   int       `json:"activeEndMinute"`
+	Timezone          string    `json:"timezone"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type NotificationPreference struct {
+	UserID            string    `json:"userId"`
+	BrowserEnabled    bool      `json:"browserEnabled"`
+	QuietHoursEnabled bool      `json:"quietHoursEnabled"`
+	QuietStartMinute  int       `json:"quietStartMinute"`
+	QuietEndMinute    int       `json:"quietEndMinute"`
+	Timezone          string    `json:"timezone"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type NotificationType string
+
+const (
+	NotificationPortIdle          NotificationType = "port_idle"
+	NotificationCredentialExpired NotificationType = "credential_expired"
+	NotificationPileOffline       NotificationType = "pile_offline"
+	NotificationPileRecovered     NotificationType = "pile_recovered"
+)
+
+type Notification struct {
+	ID            string           `json:"id"`
+	UserID        string           `json:"userId"`
+	Type          NotificationType `json:"type"`
+	Severity      string           `json:"severity"`
+	Title         string           `json:"title"`
+	Message       string           `json:"message"`
+	DeviceID      string           `json:"deviceId,omitempty"`
+	PortID        *int             `json:"portId,omitempty"`
+	SourceEventID *int64           `json:"sourceEventId,omitempty"`
+	DedupeKey     string           `json:"-"`
+	ReadAt        *time.Time       `json:"readAt,omitempty"`
+	ResolvedAt    *time.Time       `json:"resolvedAt,omitempty"`
+	CreatedAt     time.Time        `json:"createdAt"`
+}
+
+type WatchRefreshState struct {
+	UserID              string     `json:"userId"`
+	DeviceID            string     `json:"deviceId"`
+	NextAttemptAt       time.Time  `json:"nextAttemptAt"`
+	LastAttemptAt       *time.Time `json:"lastAttemptAt,omitempty"`
+	LastSuccessAt       *time.Time `json:"lastSuccessAt,omitempty"`
+	ConsecutiveFailures int        `json:"consecutiveFailures"`
+	PausedReason        string     `json:"pausedReason,omitempty"`
+	QuotaDate           string     `json:"quotaDate"`
+	QuotaUsed           int        `json:"quotaUsed"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 type InviteCode struct {

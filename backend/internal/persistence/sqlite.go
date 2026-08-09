@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 type Store struct {
 	db     *sql.DB
@@ -127,6 +127,80 @@ func (s *Store) initialize() error {
 			ON port_status_events(user_id, changed_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS port_status_events_changed_at_idx
 			ON port_status_events(changed_at)`,
+		`CREATE TABLE IF NOT EXISTS watch_rules (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			device_id TEXT NOT NULL,
+			port_id INTEGER,
+			notify_idle INTEGER NOT NULL DEFAULT 0 CHECK(notify_idle IN (0, 1)),
+			enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+			active_weekdays INTEGER NOT NULL DEFAULT 127 CHECK(active_weekdays BETWEEN 1 AND 127),
+			active_start_minute INTEGER NOT NULL DEFAULT 0 CHECK(active_start_minute BETWEEN 0 AND 1439),
+			active_end_minute INTEGER NOT NULL DEFAULT 0 CHECK(active_end_minute BETWEEN 0 AND 1439),
+			timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai' CHECK(length(trim(timezone)) > 0),
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			CHECK(length(trim(device_id)) > 0),
+			CHECK(port_id IS NULL OR port_id > 0),
+			CHECK(notify_idle = 0 OR port_id IS NOT NULL)
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS watch_rules_user_target_unique_idx
+			ON watch_rules(user_id, device_id, COALESCE(port_id, 0))`,
+		`CREATE INDEX IF NOT EXISTS watch_rules_user_updated_idx
+			ON watch_rules(user_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS watch_rules_enabled_pile_idx
+			ON watch_rules(enabled, notify_idle, device_id)`,
+		`CREATE TABLE IF NOT EXISTS notification_preferences (
+			user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			browser_enabled INTEGER NOT NULL DEFAULT 0 CHECK(browser_enabled IN (0, 1)),
+			quiet_hours_enabled INTEGER NOT NULL DEFAULT 1 CHECK(quiet_hours_enabled IN (0, 1)),
+			quiet_start_minute INTEGER NOT NULL DEFAULT 1320 CHECK(quiet_start_minute BETWEEN 0 AND 1439),
+			quiet_end_minute INTEGER NOT NULL DEFAULT 480 CHECK(quiet_end_minute BETWEEN 0 AND 1439),
+			timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai' CHECK(length(trim(timezone)) > 0),
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			type TEXT NOT NULL CHECK(type IN ('port_idle', 'credential_expired', 'pile_offline', 'pile_recovered')),
+			severity TEXT NOT NULL CHECK(severity IN ('info', 'warning', 'critical')),
+			title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+			message TEXT NOT NULL CHECK(length(trim(message)) > 0),
+			device_id TEXT NOT NULL DEFAULT '',
+			port_id INTEGER,
+			source_event_id INTEGER REFERENCES port_status_events(id) ON DELETE SET NULL,
+			dedupe_key TEXT NOT NULL DEFAULT '',
+			read_at INTEGER,
+			resolved_at INTEGER,
+			created_at INTEGER NOT NULL,
+			CHECK(port_id IS NULL OR port_id > 0),
+			CHECK(type <> 'port_idle' OR (length(trim(device_id)) > 0 AND port_id IS NOT NULL))
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS notifications_source_event_unique_idx
+			ON notifications(source_event_id) WHERE source_event_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS notifications_active_dedupe_unique_idx
+			ON notifications(user_id, dedupe_key)
+			WHERE dedupe_key <> '' AND resolved_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS notifications_user_unread_time_idx
+			ON notifications(user_id, read_at, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS notifications_user_resolved_time_idx
+			ON notifications(user_id, resolved_at, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS watch_refresh_states (
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			device_id TEXT NOT NULL,
+			next_attempt_at INTEGER NOT NULL,
+			last_attempt_at INTEGER,
+			last_success_at INTEGER,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0),
+			paused_reason TEXT NOT NULL DEFAULT '',
+			quota_date TEXT NOT NULL DEFAULT '',
+			quota_used INTEGER NOT NULL DEFAULT 0 CHECK(quota_used >= 0),
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY(user_id, device_id),
+			CHECK(length(trim(device_id)) > 0)
+		)`,
+		`CREATE INDEX IF NOT EXISTS watch_refresh_states_due_idx
+			ON watch_refresh_states(next_attempt_at, paused_reason)`,
 		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			actor_id TEXT NOT NULL,

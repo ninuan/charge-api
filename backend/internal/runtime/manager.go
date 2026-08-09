@@ -38,6 +38,15 @@ const (
 	maxDevicesPerUser           = defaultDeviceLimit
 	defaultStatsRetentionDays   = 90
 	defaultHistoryRetentionDays = 90
+	defaultWatchIntervalMinutes = 10
+	defaultWatchRuleLimit       = 20
+	defaultWatchPileLimit       = 5
+	defaultWatchDailyQuota      = 480
+	defaultNotificationDays     = 90
+	defaultPowerOffStartMinute  = 23 * 60
+	defaultPowerOffEndMinute    = 7 * 60
+	defaultPowerOffTimezone     = "Asia/Shanghai"
+	defaultPowerRestoreJitter   = 10
 	maxRecoveryDiagnostics      = 20
 	diagnosticOperationRecovery = "credential_recovery"
 	diagnosticOperationAddPile  = "add_pile"
@@ -93,8 +102,19 @@ func NewManager(
 		settings: model.RegistrationSettings{
 			OpenRegistration: true, InviteRequired: true,
 			DefaultDeviceLimit: defaultDeviceLimit, DefaultRefreshEnabled: true,
-			StatsRetentionDays:       defaultStatsRetentionDays,
-			PortHistoryRetentionDays: defaultHistoryRetentionDays,
+			StatsRetentionDays:           defaultStatsRetentionDays,
+			PortHistoryRetentionDays:     defaultHistoryRetentionDays,
+			BackgroundRemindersEnabled:   true,
+			WatchRefreshIntervalMinutes:  defaultWatchIntervalMinutes,
+			WatchRuleLimitPerUser:        defaultWatchRuleLimit,
+			WatchPileLimitPerUser:        defaultWatchPileLimit,
+			WatchDailyRefreshQuota:       defaultWatchDailyQuota,
+			NotificationRetentionDays:    defaultNotificationDays,
+			ScheduledPowerOffEnabled:     true,
+			ScheduledPowerOffStartMinute: defaultPowerOffStartMinute,
+			ScheduledPowerOffEndMinute:   defaultPowerOffEndMinute,
+			ScheduledPowerOffTimezone:    defaultPowerOffTimezone,
+			PowerRestoreJitterMinutes:    defaultPowerRestoreJitter,
 		},
 	}
 

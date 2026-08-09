@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestSQLiteMigratesV7ToV8WithoutLosingData(t *testing.T) {
+func TestSQLiteMigratesV7ToV9WithoutLosingData(t *testing.T) {
 	path := t.TempDir() + "/state.db"
 	createV7MigrationFixture(t, path)
 	key := bytes.Repeat([]byte{0x61}, CookieKeySize)
@@ -16,7 +16,7 @@ func TestSQLiteMigratesV7ToV8WithoutLosingData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSQLite v7 fixture: %v", err)
 	}
-	assertV8MigrationData(t, store)
+	assertV9MigrationData(t, store)
 	if err := store.Close(); err != nil {
 		t.Fatalf("close migrated store: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestSQLiteMigratesV7ToV8WithoutLosingData(t *testing.T) {
 		t.Fatalf("reopen migrated store: %v", err)
 	}
 	defer reopened.Close()
-	assertV8MigrationData(t, reopened)
+	assertV9MigrationData(t, reopened)
 }
 
 func createV7MigrationFixture(t *testing.T, path string) {
@@ -92,19 +92,21 @@ func createV7MigrationFixture(t *testing.T, path string) {
 	}
 }
 
-func assertV8MigrationData(t *testing.T, store *Store) {
+func assertV9MigrationData(t *testing.T, store *Store) {
 	t.Helper()
 	var version string
 	if err := store.db.QueryRow(`SELECT value FROM metadata WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != "8" {
-		t.Fatalf("schema version = %s, want 8", version)
+	if version != "9" {
+		t.Fatalf("schema version = %s, want 9", version)
 	}
 
 	for table, want := range map[string]int{
 		"users": 1, "user_states": 1, "sessions": 1, "metrics": 1,
 		"admin_audit_logs": 1, "admin_incidents": 1, "port_status_events": 0,
+		"watch_rules": 0, "notification_preferences": 0, "notifications": 0,
+		"watch_refresh_states": 0,
 	} {
 		var count int
 		if err := store.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
