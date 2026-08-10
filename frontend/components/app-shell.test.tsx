@@ -1,4 +1,10 @@
-import { cleanup, render, screen, within } from "@testing-library/react"
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -74,9 +80,7 @@ describe("AppShell", () => {
       </AppShell>
     )
 
-    expect(
-      screen.getByText("当前使用的是管理员生成的临时密码")
-    ).toBeVisible()
+    expect(screen.getByText("当前使用的是管理员生成的临时密码")).toBeVisible()
     expect(screen.getByRole("button", { name: "修改密码" })).toBeVisible()
   })
 
@@ -113,5 +117,10 @@ describe("AppShell", () => {
     expect(
       within(drawer as HTMLElement).getByRole("button", { name: "退出登录" })
     ).toHaveClass("text-destructive")
+
+    await user.click(
+      within(drawer as HTMLElement).getByRole("button", { name: "使用说明" })
+    )
+    await waitFor(() => expect(drawer).not.toBeVisible())
   })
 })

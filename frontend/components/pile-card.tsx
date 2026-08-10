@@ -5,6 +5,10 @@ import {
   ArrowUpIcon,
   BatteryChargingIcon,
   BarChart3Icon,
+  BellIcon,
+  BellRingIcon,
+  BookmarkCheckIcon,
+  BookmarkIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   Clock3Icon,
@@ -46,6 +50,11 @@ type Props = {
   reordering: boolean
   onMove: (id: string, direction: "up" | "down") => void | Promise<void>
   onHistory: (id: string) => void
+  favorite: boolean
+  favoritePending: boolean
+  watchedPortIds: number[]
+  onToggleFavorite: (id: string) => void | Promise<void>
+  onConfigureWatch: (id: string, portId: number) => void
 }
 
 function portMeta(port: Port) {
@@ -70,7 +79,15 @@ function portMeta(port: Port) {
   }
 }
 
-function PortStatusCard({ port }: { port: Port }) {
+function PortStatusCard({
+  port,
+  watched,
+  onConfigureWatch,
+}: {
+  port: Port
+  watched: boolean
+  onConfigureWatch: (portId: number) => void
+}) {
   const cardRef = useRef<HTMLElement>(null)
   const mounted = useRef(false)
   const previousStatus = useRef(port.status)
@@ -122,7 +139,24 @@ function PortStatusCard({ port }: { port: Port }) {
         <span className="text-lg font-semibold tabular-nums">
           {String(port.id).padStart(2, "0")}
         </span>
-        <Icon className="size-4" />
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant={watched ? "secondary" : "ghost"}
+            size="icon-xs"
+            className="transition-[color,background-color,border-color,transform] duration-150 active:scale-95"
+            aria-label={
+              watched
+                ? `${port.id} 号充电口已设置提醒，点击编辑`
+                : `为 ${port.id} 号充电口设置空闲提醒`
+            }
+            aria-pressed={watched}
+            onClick={() => onConfigureWatch(port.id)}
+          >
+            {watched ? <BellRingIcon /> : <BellIcon />}
+          </Button>
+          <Icon className="size-4" aria-hidden />
+        </div>
       </div>
       <p className="mt-5 text-sm font-semibold">{meta.label}</p>
       <div className="mt-2 min-h-9 space-y-1 text-xs leading-4 opacity-80">
@@ -155,6 +189,11 @@ function PileCardComponent({
   reordering,
   onMove,
   onHistory,
+  favorite,
+  favoritePending,
+  watchedPortIds,
+  onToggleFavorite,
+  onConfigureWatch,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -241,15 +280,35 @@ function PileCardComponent({
                 个匹配端口
               </p>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-3"
-              onClick={() => onHistory(pile.id)}
-            >
-              <BarChart3Icon data-icon="inline-start" />
-              历史趋势
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onHistory(pile.id)}
+              >
+                <BarChart3Icon data-icon="inline-start" />
+                历史趋势
+              </Button>
+              <Button
+                variant={favorite ? "secondary" : "outline"}
+                size="sm"
+                className="transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.98]"
+                disabled={favoritePending}
+                aria-pressed={favorite}
+                onClick={() => void onToggleFavorite(pile.id)}
+              >
+                {favorite ? (
+                  <BookmarkCheckIcon data-icon="inline-start" />
+                ) : (
+                  <BookmarkIcon data-icon="inline-start" />
+                )}
+                {favoritePending
+                  ? "处理中…"
+                  : favorite
+                    ? "已收藏"
+                    : "收藏充电桩"}
+              </Button>
+            </div>
           </div>
           <div className="flex items-center justify-between gap-3 sm:justify-end">
             <div className="flex gap-4 text-right text-xs text-muted-foreground">
@@ -326,7 +385,12 @@ function PileCardComponent({
             className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5 lg:p-6"
           >
             {displayedPorts.map((port) => (
-              <PortStatusCard key={port.id} port={port} />
+              <PortStatusCard
+                key={port.id}
+                port={port}
+                watched={watchedPortIds.includes(port.id)}
+                onConfigureWatch={(portId) => onConfigureWatch(pile.id, portId)}
+              />
             ))}
           </CardContent>
         )}
@@ -471,9 +535,14 @@ export const PileCard = memo(
     prev.onUpdate === next.onUpdate &&
     prev.onMove === next.onMove &&
     prev.onHistory === next.onHistory &&
+    prev.onToggleFavorite === next.onToggleFavorite &&
+    prev.onConfigureWatch === next.onConfigureWatch &&
+    prev.favorite === next.favorite &&
+    prev.favoritePending === next.favoritePending &&
     prev.canMoveUp === next.canMoveUp &&
     prev.canMoveDown === next.canMoveDown &&
     prev.reordering === next.reordering &&
     samePortIds(prev.visiblePortIds, next.visiblePortIds) &&
+    samePortIds(prev.watchedPortIds, next.watchedPortIds) &&
     samePile(prev.pile, next.pile)
 )

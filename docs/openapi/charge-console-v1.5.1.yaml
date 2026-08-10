@@ -4,7 +4,7 @@ info:
   version: 1.5.1
   description: |
     Charge Console 1.5.1 用户端历史、管理员趋势、关注规则与站内通知契约。
-    关注规则本身不会在本阶段触发后台刷新；调度器将在后续阶段接入。
+    启用的端口空闲提醒会由受控后台调度器按整桩低频刷新。
 servers:
   - url: /
 security:
@@ -128,6 +128,29 @@ paths:
           $ref: "#/components/responses/OrdinaryUserRequired"
         "404":
           $ref: "#/components/responses/WatchRuleNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/WatchUnavailable"
+  /api/watch-overview:
+    get:
+      operationId: getWatchOverview
+      summary: 获取当前用户的关注额度与后台提醒策略摘要
+      tags: [Watch Rules]
+      responses:
+        "200":
+          description: 仅包含当前用户用量和管理员公开给普通用户的提醒策略
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchOverview"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
         "503":
@@ -687,6 +710,66 @@ components:
             code: NOTIFICATION_UNAVAILABLE
             error: 通知功能暂时不可用，请稍后重试
   schemas:
+    WatchOverview:
+      type: object
+      additionalProperties: false
+      required:
+        - ruleCount
+        - ruleLimit
+        - reminderPileCount
+        - reminderPileLimit
+        - dailyQuotaUsed
+        - dailyQuotaLimit
+        - quotaDate
+        - refreshIntervalMinutes
+        - backgroundRemindersEnabled
+        - accountRefreshEnabled
+        - scheduledPowerOffEnabled
+        - scheduledPowerOffStartMinute
+        - scheduledPowerOffEndMinute
+        - scheduledPowerOffTimezone
+      properties:
+        ruleCount:
+          type: integer
+          minimum: 0
+        ruleLimit:
+          type: integer
+          minimum: 1
+        reminderPileCount:
+          type: integer
+          minimum: 0
+        reminderPileLimit:
+          type: integer
+          minimum: 1
+        dailyQuotaUsed:
+          type: integer
+          minimum: 0
+        dailyQuotaLimit:
+          type: integer
+          minimum: 1
+        quotaDate:
+          type: string
+          format: date
+        refreshIntervalMinutes:
+          type: integer
+          minimum: 1
+        backgroundRemindersEnabled:
+          type: boolean
+        accountRefreshEnabled:
+          type: boolean
+        scheduledPowerOffEnabled:
+          type: boolean
+        scheduledPowerOffStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        scheduledPowerOffEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        scheduledPowerOffTimezone:
+          type: string
+          maxLength: 64
     WatchRule:
       type: object
       additionalProperties: false

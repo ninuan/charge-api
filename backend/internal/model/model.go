@@ -376,6 +376,23 @@ type WatchRefreshState struct {
 	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
+type WatchOverview struct {
+	RuleCount                    int    `json:"ruleCount"`
+	RuleLimit                    int    `json:"ruleLimit"`
+	ReminderPileCount            int    `json:"reminderPileCount"`
+	ReminderPileLimit            int    `json:"reminderPileLimit"`
+	DailyQuotaUsed               int    `json:"dailyQuotaUsed"`
+	DailyQuotaLimit              int    `json:"dailyQuotaLimit"`
+	QuotaDate                    string `json:"quotaDate"`
+	RefreshIntervalMinutes       int    `json:"refreshIntervalMinutes"`
+	BackgroundRemindersEnabled   bool   `json:"backgroundRemindersEnabled"`
+	AccountRefreshEnabled        bool   `json:"accountRefreshEnabled"`
+	ScheduledPowerOffEnabled     bool   `json:"scheduledPowerOffEnabled"`
+	ScheduledPowerOffStartMinute int    `json:"scheduledPowerOffStartMinute"`
+	ScheduledPowerOffEndMinute   int    `json:"scheduledPowerOffEndMinute"`
+	ScheduledPowerOffTimezone    string `json:"scheduledPowerOffTimezone"`
+}
+
 type InviteCode struct {
 	ID        string     `json:"id"`
 	Code      string     `json:"code"`

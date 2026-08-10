@@ -123,6 +123,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/piles/", s.handlePileActions)
 	mux.HandleFunc("/api/watch-rules", s.handleWatchRules)
 	mux.HandleFunc("/api/watch-rules/", s.handleWatchRuleActions)
+	mux.HandleFunc("/api/watch-overview", s.handleWatchOverview)
 	mux.HandleFunc("/api/notification-preferences", s.handleNotificationPreference)
 	mux.HandleFunc("/api/notifications", s.handleNotifications)
 	mux.HandleFunc("/api/notifications/", s.handleNotificationActions)

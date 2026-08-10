@@ -21,6 +21,15 @@ const publicErrorMessages: Record<string, string> = {
   HISTORY_UNAVAILABLE: "历史数据暂时不可用，请稍后重试",
   ADMIN_TREND_QUERY_INVALID: "趋势范围或时区参数无效",
   ADMIN_TRENDS_UNAVAILABLE: "运营趋势暂时不可用，请稍后重试",
+  WATCH_RULE_INVALID: "关注规则内容无效",
+  WATCH_TARGET_NOT_FOUND: "未找到当前账户下的充电桩或端口",
+  WATCH_RULE_NOT_FOUND: "未找到关注规则",
+  WATCH_RULE_CONFLICT: "该充电桩或充电口已在关注列表中",
+  WATCH_RULE_LIMIT_REACHED: "已达到当前账户的关注规则上限",
+  WATCH_PILE_LIMIT_REACHED: "已达到当前账户的提醒充电桩上限",
+  WATCH_UNAVAILABLE: "关注功能暂时不可用，请稍后重试",
+  NOTIFICATION_PREFERENCE_INVALID: "免打扰设置无效",
+  NOTIFICATION_UNAVAILABLE: "通知设置暂时不可用，请稍后重试",
 }
 
 export async function responseErrorMessage(

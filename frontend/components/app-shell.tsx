@@ -163,7 +163,18 @@ export function AppShell({
                   <p className="text-xs font-medium text-muted-foreground">
                     当前页面
                   </p>
-                  <div className="grid gap-2">{actions}</div>
+                  <div
+                    className="grid gap-2"
+                    onClick={(event) => {
+                      if (
+                        event.target instanceof Element &&
+                        event.target.closest("button, a")
+                      )
+                        setMenuOpen(false)
+                    }}
+                  >
+                    {actions}
+                  </div>
                 </section>
                 <section className="grid gap-2">
                   <p className="text-xs font-medium text-muted-foreground">

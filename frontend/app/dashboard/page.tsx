@@ -3,6 +3,7 @@
 import {
   ActivityIcon,
   BatteryChargingIcon,
+  BellRingIcon,
   BookOpenCheckIcon,
   PlugZapIcon,
   PlusIcon,
@@ -26,6 +27,7 @@ import { toast } from "sonner"
 import { AppShell } from "@/components/app-shell"
 import { MetricCard } from "@/components/metric-card"
 import { PileCard } from "@/components/pile-card"
+import type { WatchEditorTarget } from "@/components/watch-rule-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -45,6 +47,7 @@ import {
   parseDashboardQuery,
   serializeDashboardQuery,
 } from "@/lib/dashboard-query"
+import { useWatch } from "@/lib/watch-context"
 
 // 三个对话框只在点击后才需要，从首包拆出；占位按钮与真实触发按钮
 // 同样式同尺寸，chunk 加载完成前后不产生布局跳动。
@@ -92,6 +95,17 @@ const DeviceHistorySheet = dynamic(
     ),
   { ssr: false }
 )
+const WatchManagementSheet = dynamic(
+  () =>
+    import("@/components/watch-management-sheet").then(
+      (m) => m.WatchManagementSheet
+    ),
+  { ssr: false }
+)
+const WatchRuleDialog = dynamic(
+  () => import("@/components/watch-rule-dialog").then((m) => m.WatchRuleDialog),
+  { ssr: false }
+)
 
 function formatTime(value?: string) {
   return value
@@ -125,12 +139,23 @@ export default function DashboardPage() {
     updatePile,
     reorderPiles,
   } = useDashboard()
+  const {
+    rules: watchRules,
+    load: loadWatch,
+    createRule: createWatchRule,
+    deleteRule: deleteWatchRule,
+  } = useWatch()
   const [refreshing, setRefreshing] = useState(false)
   const [reordering, setReordering] = useState(false)
   const [initialLoadFinished, setInitialLoadFinished] = useState(false)
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<PortFilter>("all")
   const [historyPileId, setHistoryPileId] = useState<string | null>(null)
+  const [watchManagementOpen, setWatchManagementOpen] = useState(false)
+  const [watchTarget, setWatchTarget] = useState<WatchEditorTarget | null>(null)
+  const [favoritePendingIds, setFavoritePendingIds] = useState<Set<string>>(
+    () => new Set()
+  )
   const [queryReady, setQueryReady] = useState(false)
   // 输入框即时回显，筛选计算滞后一拍，键入时不再同步重渲染整个卡片列表。
   const deferredSearch = useDeferredValue(search)
@@ -185,7 +210,10 @@ export default function DashboardPage() {
       if (!user) return router.replace("/login")
       if (user.role === "admin") return router.replace("/admin")
       try {
-        await fetchSnapshot()
+        await Promise.all([
+          fetchSnapshot(),
+          loadWatch().catch((reason) => handleError(reason)),
+        ])
         if (active) connectStream()
       } catch (reason) {
         handleError(reason)
@@ -253,6 +281,69 @@ export default function DashboardPage() {
     [historyPileId, snapshot.piles]
   )
   const openHistory = useCallback((id: string) => setHistoryPileId(id), [])
+  const rulesByPile = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { favoriteRuleId?: string; watchedPortIds: number[] }
+    >()
+    for (const rule of watchRules) {
+      const current = grouped.get(rule.deviceId) ?? { watchedPortIds: [] }
+      if (rule.portId == null) current.favoriteRuleId = rule.id
+      else if (rule.enabled && rule.notifyIdle)
+        current.watchedPortIds.push(rule.portId)
+      grouped.set(rule.deviceId, current)
+    }
+    return grouped
+  }, [watchRules])
+
+  const toggleFavorite = useCallback(
+    async (pileId: string) => {
+      setFavoritePendingIds((current) => new Set(current).add(pileId))
+      try {
+        const existing = watchRules.find(
+          (rule) => rule.deviceId === pileId && rule.portId == null
+        )
+        if (existing) {
+          await deleteWatchRule(existing.id)
+          toast.success("已取消收藏")
+        } else {
+          await createWatchRule({
+            deviceId: pileId,
+            notifyIdle: false,
+            enabled: true,
+            activeWeekdays: 127,
+            activeStartMinute: 0,
+            activeEndMinute: 0,
+            timezone: "Asia/Shanghai",
+          })
+          toast.success("已收藏充电桩")
+        }
+      } catch (reason) {
+        handleError(reason)
+      } finally {
+        setFavoritePendingIds((current) => {
+          const next = new Set(current)
+          next.delete(pileId)
+          return next
+        })
+      }
+    },
+    [createWatchRule, deleteWatchRule, handleError, watchRules]
+  )
+
+  const configureWatch = useCallback(
+    (pileId: string, portId: number) => {
+      const existing = watchRules.find(
+        (rule) => rule.deviceId === pileId && rule.portId === portId
+      )
+      setWatchTarget({ pileId, portId, ruleId: existing?.id })
+    },
+    [watchRules]
+  )
+  const openWatchEditor = useCallback((target: WatchEditorTarget) => {
+    setWatchManagementOpen(false)
+    setWatchTarget(target)
+  }, [])
   const visiblePortCount = entries.reduce(
     (total, entry) => total + entry.portIds.length,
     0
@@ -303,6 +394,13 @@ export default function DashboardPage() {
             实时连接：{streamLabel}
           </span>
           <UsageGuideDialog />
+          <Button
+            variant="outline"
+            onClick={() => setWatchManagementOpen(true)}
+          >
+            <BellRingIcon />
+            关注管理
+          </Button>
           <YybLoginDialog />
           <AddPileDialog />
           <Button
@@ -436,6 +534,15 @@ export default function DashboardPage() {
                   reordering={reordering}
                   onMove={handleMove}
                   onHistory={openHistory}
+                  favorite={Boolean(
+                    rulesByPile.get(entry.pile.id)?.favoriteRuleId
+                  )}
+                  favoritePending={favoritePendingIds.has(entry.pile.id)}
+                  watchedPortIds={
+                    rulesByPile.get(entry.pile.id)?.watchedPortIds ?? []
+                  }
+                  onToggleFavorite={toggleFavorite}
+                  onConfigureWatch={configureWatch}
                 />
               </div>
             ))}
@@ -484,6 +591,22 @@ export default function DashboardPage() {
           }}
         />
       )}
+      <WatchManagementSheet
+        piles={snapshot.piles}
+        open={watchManagementOpen}
+        onOpenChange={setWatchManagementOpen}
+        onEditRule={openWatchEditor}
+      />
+      {watchTarget ? (
+        <WatchRuleDialog
+          piles={snapshot.piles}
+          target={watchTarget}
+          open
+          onOpenChange={(next) => {
+            if (!next) setWatchTarget(null)
+          }}
+        />
+      ) : null}
     </AppShell>
   )
 }

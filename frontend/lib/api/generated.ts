@@ -161,6 +161,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/watch-overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取当前用户的关注额度与后台提醒策略摘要 */
+        get: operations["getWatchOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/watch-rules": {
         parameters: {
             query?: never;
@@ -423,6 +440,23 @@ export interface components {
         UpdatedCount: {
             /** Format: int64 */
             updated: number;
+        };
+        WatchOverview: {
+            accountRefreshEnabled: boolean;
+            backgroundRemindersEnabled: boolean;
+            dailyQuotaLimit: number;
+            dailyQuotaUsed: number;
+            /** Format: date */
+            quotaDate: string;
+            refreshIntervalMinutes: number;
+            reminderPileCount: number;
+            reminderPileLimit: number;
+            ruleCount: number;
+            ruleLimit: number;
+            scheduledPowerOffEnabled: boolean;
+            scheduledPowerOffEndMinute: number;
+            scheduledPowerOffStartMinute: number;
+            scheduledPowerOffTimezone: string;
         };
         WatchRule: {
             /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
@@ -802,6 +836,7 @@ export type PortHistorySummary = components['schemas']['PortHistorySummary'];
 export type PortHistoryTimelineItem = components['schemas']['PortHistoryTimelineItem'];
 export type PortStatus = components['schemas']['PortStatus'];
 export type UpdatedCount = components['schemas']['UpdatedCount'];
+export type WatchOverview = components['schemas']['WatchOverview'];
 export type WatchRule = components['schemas']['WatchRule'];
 export type WatchRuleCreateRequest = components['schemas']['WatchRuleCreateRequest'];
 export type WatchRuleUpdateRequest = components['schemas']['WatchRuleUpdateRequest'];
@@ -1133,6 +1168,31 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             422: components["responses"]["HistoryRangeTooLarge"];
             503: components["responses"]["HistoryUnavailable"];
+        };
+    };
+    getWatchOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 仅包含当前用户用量和管理员公开给普通用户的提醒策略 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchOverview"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["WatchUnavailable"];
         };
     };
     listWatchRules: {

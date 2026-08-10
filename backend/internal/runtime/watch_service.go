@@ -41,6 +41,41 @@ func (m *Manager) WatchRules(userID string) ([]model.WatchRule, error) {
 	return rules, nil
 }
 
+func (m *Manager) WatchOverview(userID string) (model.WatchOverview, error) {
+	if _, err := m.runtimeFor(userID); err != nil {
+		return model.WatchOverview{}, err
+	}
+	user, ok := m.User(userID)
+	if !ok {
+		return model.WatchOverview{}, ErrWatchTargetNotFound
+	}
+	rules, err := m.repository.ListWatchRules(userID)
+	if err != nil {
+		return model.WatchOverview{}, fmt.Errorf("list watch rules for overview: %w", err)
+	}
+	settings := normalizeRegistrationSettings(m.Settings())
+	quotaDate, err := reminderQuotaDate(time.Now(), settings.ScheduledPowerOffTimezone)
+	if err != nil {
+		return model.WatchOverview{}, err
+	}
+	quotaUsed, err := m.repository.WatchRefreshQuotaUsed(userID, quotaDate)
+	if err != nil {
+		return model.WatchOverview{}, fmt.Errorf("load watch quota for overview: %w", err)
+	}
+	return model.WatchOverview{
+		RuleCount: len(rules), RuleLimit: settings.WatchRuleLimitPerUser,
+		ReminderPileCount: activeReminderPileCount(rules), ReminderPileLimit: settings.WatchPileLimitPerUser,
+		DailyQuotaUsed: quotaUsed, DailyQuotaLimit: settings.WatchDailyRefreshQuota, QuotaDate: quotaDate,
+		RefreshIntervalMinutes:       settings.WatchRefreshIntervalMinutes,
+		BackgroundRemindersEnabled:   settings.BackgroundRemindersEnabled,
+		AccountRefreshEnabled:        user.RefreshEnabled,
+		ScheduledPowerOffEnabled:     settings.ScheduledPowerOffEnabled,
+		ScheduledPowerOffStartMinute: settings.ScheduledPowerOffStartMinute,
+		ScheduledPowerOffEndMinute:   settings.ScheduledPowerOffEndMinute,
+		ScheduledPowerOffTimezone:    settings.ScheduledPowerOffTimezone,
+	}, nil
+}
+
 func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRequest) (model.WatchRule, error) {
 	m.watchMu.Lock()
 	defer m.watchMu.Unlock()

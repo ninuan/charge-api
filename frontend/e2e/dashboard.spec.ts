@@ -1,12 +1,15 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 import type {
   AdminTrendRange,
   AdminTrendsResponse,
   DeviceHistoryResponse,
+  NotificationPreference,
   PortHistoryMetrics,
   PortHistoryResponse,
   PortStatus,
+  WatchOverview,
+  WatchRule,
 } from "@/lib/api/generated"
 
 function adminTrends(range: AdminTrendRange): AdminTrendsResponse {
@@ -118,6 +121,47 @@ const snapshot = {
     message: "已更新 1 台充电桩",
     lastRemoteAt: "2026-07-15T09:00:00Z",
   },
+}
+
+async function mockEmptyWatchResources(page: Page) {
+  await page.route("**/api/watch-rules", (route) =>
+    route.fulfill({ status: 200, json: [] })
+  )
+  await page.route("**/api/watch-overview", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        ruleCount: 0,
+        ruleLimit: 20,
+        reminderPileCount: 0,
+        reminderPileLimit: 5,
+        dailyQuotaUsed: 0,
+        dailyQuotaLimit: 480,
+        quotaDate: "2026-08-10",
+        refreshIntervalMinutes: 10,
+        backgroundRemindersEnabled: true,
+        accountRefreshEnabled: true,
+        scheduledPowerOffEnabled: true,
+        scheduledPowerOffStartMinute: 1380,
+        scheduledPowerOffEndMinute: 420,
+        scheduledPowerOffTimezone: "Asia/Shanghai",
+      },
+    })
+  )
+  await page.route("**/api/notification-preferences", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        userId: user.id,
+        browserEnabled: false,
+        quietHoursEnabled: true,
+        quietStartMinute: 1320,
+        quietEndMinute: 480,
+        timezone: "Asia/Shanghai",
+        updatedAt: "2026-08-10T00:00:00Z",
+      },
+    })
+  )
 }
 
 const historyMetrics: PortHistoryMetrics = {
@@ -443,6 +487,7 @@ test("dashboard restores URL filters and keeps the mobile controls clear", async
   await page.route("**/api/piles", (route) =>
     route.fulfill({ status: 200, json: snapshot })
   )
+  await mockEmptyWatchResources(page)
 
   await page.goto("/dashboard?q=03&status=idle")
 
@@ -544,6 +589,7 @@ test("dashboard fades in every port card at the same time", async ({
   await page.route("**/api/piles", (route) =>
     route.fulfill({ status: 200, json: snapshot })
   )
+  await mockEmptyWatchResources(page)
 
   await page.goto("/dashboard")
   await expect(page.locator('[aria-label$="号充电口"]')).toHaveCount(10)
@@ -589,6 +635,141 @@ test("dashboard fades in every port card at the same time", async ({
   })
 })
 
+test("dashboard creates and manages favorites and cross-midnight reminders", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.addInitScript(() => {
+    class LocalEventSource {
+      static OPEN = 1
+      readyState = LocalEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor() {
+        setTimeout(() => this.onopen?.(new Event("open")), 0)
+      }
+
+      addEventListener() {}
+      close() {}
+    }
+    Object.defineProperty(window, "EventSource", {
+      configurable: true,
+      value: LocalEventSource,
+    })
+  })
+
+  const rules: WatchRule[] = []
+  const overview: WatchOverview = {
+    ruleCount: 0,
+    ruleLimit: 20,
+    reminderPileCount: 0,
+    reminderPileLimit: 5,
+    dailyQuotaUsed: 7,
+    dailyQuotaLimit: 480,
+    quotaDate: "2026-08-10",
+    refreshIntervalMinutes: 10,
+    backgroundRemindersEnabled: true,
+    accountRefreshEnabled: true,
+    scheduledPowerOffEnabled: true,
+    scheduledPowerOffStartMinute: 1380,
+    scheduledPowerOffEndMinute: 420,
+    scheduledPowerOffTimezone: "Asia/Shanghai",
+  }
+  const preference: NotificationPreference = {
+    userId: user.id,
+    browserEnabled: false,
+    quietHoursEnabled: true,
+    quietStartMinute: 1320,
+    quietEndMinute: 480,
+    timezone: "Asia/Shanghai",
+    updatedAt: "2026-08-10T00:00:00Z",
+  }
+
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({ status: 200, json: user })
+  )
+  await page.route("**/api/piles", (route) =>
+    route.fulfill({ status: 200, json: snapshot })
+  )
+  await page.route("**/api/watch-overview", (route) =>
+    route.fulfill({ status: 200, json: overview })
+  )
+  await page.route("**/api/notification-preferences", async (route) => {
+    if (route.request().method() === "PATCH") {
+      Object.assign(preference, route.request().postDataJSON())
+      preference.updatedAt = "2026-08-10T00:01:00Z"
+    }
+    await route.fulfill({ status: 200, json: preference })
+  })
+  await page.route("**/api/watch-rules", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, json: rules })
+      return
+    }
+    const payload = route.request().postDataJSON()
+    const created: WatchRule = {
+      id: `rule-${rules.length + 1}`,
+      userId: user.id,
+      deviceId: payload.deviceId,
+      portId: payload.portId ?? null,
+      notifyIdle: payload.notifyIdle ?? false,
+      enabled: payload.enabled ?? true,
+      activeWeekdays: payload.activeWeekdays ?? 127,
+      activeStartMinute: payload.activeStartMinute ?? 0,
+      activeEndMinute: payload.activeEndMinute ?? 0,
+      timezone: payload.timezone ?? "Asia/Shanghai",
+      createdAt: "2026-08-10T00:00:00Z",
+      updatedAt: "2026-08-10T00:00:00Z",
+    }
+    rules.push(created)
+    await route.fulfill({ status: 201, json: created })
+  })
+
+  await page.goto("/dashboard")
+  await page.getByRole("button", { name: "收藏充电桩" }).click()
+  await expect(page.getByRole("button", { name: "已收藏" })).toBeVisible()
+
+  await page.getByRole("button", { name: "为 3 号充电口设置空闲提醒" }).click()
+  await page.getByLabel("开始时间").fill("22:30")
+  await page.getByLabel("结束时间").fill("06:30")
+  await expect(page.getByText(/22:30–06:30（跨午夜）/)).toBeVisible()
+  await page.getByRole("button", { name: "创建规则" }).click()
+  await expect(
+    page.getByRole("button", { name: "3 号充电口已设置提醒，点击编辑" })
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: "关注管理" }).click()
+  const sheet = page.getByRole("dialog", { name: "关注与空闲提醒" })
+  await expect(sheet.getByText("2/20")).toBeVisible()
+  await expect(sheet.getByText("每天 · 22:30–06:30（跨午夜）")).toBeVisible()
+  await expect(sheet.getByText("7/480")).toBeVisible()
+
+  await sheet.getByRole("button", { name: "添加关注" }).click()
+  const editor = page.getByRole("dialog", { name: "添加关注规则" })
+  await expect(editor).toBeVisible()
+  await expect(sheet).toBeHidden()
+  await editor.getByRole("button", { name: "关闭" }).click()
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.getByRole("button", { name: "打开菜单" }).click()
+  await page
+    .locator("[data-slot=sheet-content]")
+    .getByRole("button", { name: "关注管理" })
+    .click()
+  await expect(sheet.getByText("关注与空闲提醒")).toBeVisible()
+  await page.waitForTimeout(250)
+  const sheetBox = await sheet.boundingBox()
+  expect(sheetBox?.x).toBeGreaterThanOrEqual(0)
+  expect((sheetBox?.x ?? 0) + (sheetBox?.width ?? 0)).toBeLessThanOrEqual(376)
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(375)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.1-watch-mobile.png",
+    fullPage: false,
+  })
+})
+
 test("dashboard history sheet supports port navigation and mobile layout", async ({
   page,
 }) => {
@@ -618,6 +799,7 @@ test("dashboard history sheet supports port navigation and mobile layout", async
   await page.route("**/api/piles", (route) =>
     route.fulfill({ status: 200, json: snapshot })
   )
+  await mockEmptyWatchResources(page)
   await page.route("**/api/piles/*/ports/*/history**", (route) => {
     const pathname = new URL(route.request().url()).pathname
     const portId = Number(pathname.match(/ports\/(\d+)\/history/)?.[1] ?? 1)

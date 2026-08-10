@@ -42,6 +42,14 @@ const pile: Pile = {
 
 afterEach(cleanup)
 
+const watchProps = {
+  favorite: false,
+  favoritePending: false,
+  watchedPortIds: [] as number[],
+  onToggleFavorite: vi.fn(),
+  onConfigureWatch: vi.fn(),
+}
+
 describe("PileCard", () => {
   it("shows distinct idle and offline guidance", () => {
     render(
@@ -56,6 +64,7 @@ describe("PileCard", () => {
         onHistory={vi.fn()}
         onRemove={vi.fn()}
         onUpdate={vi.fn()}
+        {...watchProps}
       />
     )
 
@@ -77,6 +86,7 @@ describe("PileCard", () => {
         onHistory={vi.fn()}
         onRemove={vi.fn()}
         onUpdate={vi.fn()}
+        {...watchProps}
       />
     )
 
@@ -96,6 +106,7 @@ describe("PileCard", () => {
       onHistory: vi.fn(),
       onRemove: vi.fn(),
       onUpdate: vi.fn(),
+      ...watchProps,
     }
     const { rerender } = render(<PileCard pile={pile} {...props} />)
     const firstPort = screen.getByLabelText("1 号充电口")
@@ -134,10 +145,47 @@ describe("PileCard", () => {
         onHistory={onHistory}
         onRemove={vi.fn()}
         onUpdate={vi.fn()}
+        {...watchProps}
       />
     )
 
     await userEvent.click(screen.getByRole("button", { name: "历史趋势" }))
     expect(onHistory).toHaveBeenCalledWith("pile-1")
+  })
+
+  it("offers pile favorites and per-port reminder entry points", async () => {
+    const onToggleFavorite = vi.fn()
+    const onConfigureWatch = vi.fn()
+    render(
+      <PileCard
+        pile={pile}
+        visiblePortIds={[1, 2]}
+        filtering={false}
+        canMoveUp={false}
+        canMoveDown
+        reordering={false}
+        onMove={vi.fn()}
+        onHistory={vi.fn()}
+        onRemove={vi.fn()}
+        onUpdate={vi.fn()}
+        favorite
+        favoritePending={false}
+        watchedPortIds={[1]}
+        onToggleFavorite={onToggleFavorite}
+        onConfigureWatch={onConfigureWatch}
+      />
+    )
+
+    const favoriteButton = screen.getByRole("button", { name: "已收藏" })
+    expect(favoriteButton).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(favoriteButton)
+    expect(onToggleFavorite).toHaveBeenCalledWith("pile-1")
+
+    const reminderButton = screen.getByRole("button", {
+      name: "1 号充电口已设置提醒，点击编辑",
+    })
+    expect(reminderButton).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(reminderButton)
+    expect(onConfigureWatch).toHaveBeenCalledWith("pile-1", 1)
   })
 })

@@ -42,6 +42,25 @@ func (s *Server) handleWatchRules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleWatchOverview(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	overview, err := s.manager.WatchOverview(user.ID)
+	if err != nil {
+		s.writeWatchError(w, "load_watch_overview", err)
+		return
+	}
+	s.setHealthDegraded("watch", "")
+	writeJSON(w, http.StatusOK, overview)
+}
+
 func (s *Server) handleWatchRuleActions(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.requireDashboardUser(w, r)
 	if !ok {

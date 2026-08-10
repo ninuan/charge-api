@@ -169,6 +169,49 @@ func TestNotificationAPIManagesPreferencesInboxAndOwnership(t *testing.T) {
 	}
 }
 
+func TestWatchOverviewReturnsOnlyCurrentUserPolicyAndQuota(t *testing.T) {
+	fixture := newHistoryAPIFixture(t)
+	const deviceID = "2601201412385560088"
+	created := watchAPIRequest(
+		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
+		`{"deviceId":"`+deviceID+`","portId":1,"notifyIdle":true}`,
+	)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create reminder = %d: %s", created.Code, created.Body.String())
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load timezone: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := fixture.repository.SaveWatchRefreshState(model.WatchRefreshState{
+		UserID: fixture.owner.ID, DeviceID: deviceID,
+		NextAttemptAt: now.Add(time.Minute), QuotaDate: now.In(location).Format("2006-01-02"),
+		QuotaUsed: 7, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed watch quota: %v", err)
+	}
+
+	overviewResponse := watchAPIRequest(t, fixture, fixture.owner.ID, http.MethodGet, "/api/watch-overview", "")
+	if overviewResponse.Code != http.StatusOK || overviewResponse.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("watch overview = %d: %s", overviewResponse.Code, overviewResponse.Body.String())
+	}
+	var overview model.WatchOverview
+	if err := json.NewDecoder(overviewResponse.Body).Decode(&overview); err != nil {
+		t.Fatalf("decode watch overview: %v", err)
+	}
+	if overview.RuleCount != 1 || overview.ReminderPileCount != 1 || overview.DailyQuotaUsed != 7 ||
+		overview.RuleLimit != 20 || overview.ReminderPileLimit != 5 || overview.DailyQuotaLimit != 480 ||
+		!overview.BackgroundRemindersEnabled || !overview.AccountRefreshEnabled {
+		t.Fatalf("unexpected watch overview: %+v", overview)
+	}
+	otherResponse := watchAPIRequest(t, fixture, fixture.other.ID, http.MethodGet, "/api/watch-overview", "")
+	if otherResponse.Code != http.StatusOK || strings.Contains(otherResponse.Body.String(), deviceID) ||
+		!strings.Contains(otherResponse.Body.String(), `"dailyQuotaUsed":0`) {
+		t.Fatalf("other user overview = %d: %s", otherResponse.Code, otherResponse.Body.String())
+	}
+}
+
 func TestWatchAndNotificationAPIsRejectUnsupportedMethodsAndBodies(t *testing.T) {
 	fixture := newHistoryAPIFixture(t)
 	tests := []struct {
@@ -178,6 +221,7 @@ func TestWatchAndNotificationAPIsRejectUnsupportedMethodsAndBodies(t *testing.T)
 		status int
 	}{
 		{method: http.MethodPut, path: "/api/watch-rules", status: http.StatusMethodNotAllowed},
+		{method: http.MethodPost, path: "/api/watch-overview", status: http.StatusMethodNotAllowed},
 		{method: http.MethodPost, path: "/api/notification-preferences", status: http.StatusMethodNotAllowed},
 		{method: http.MethodPost, path: "/api/notifications", status: http.StatusMethodNotAllowed},
 		{method: http.MethodPost, path: "/api/watch-rules", body: `{"unknown":true}`, status: http.StatusBadRequest},
