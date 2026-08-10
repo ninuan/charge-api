@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"bytes"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -27,34 +28,19 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		t.Fatalf("Save user: %v", err)
 	}
 
-	favorite := model.WatchRule{
+	reminder := model.WatchRule{
 		ID: "watch-pile", UserID: user.ID, DeviceID: "pile-1",
 		Enabled: true, ActiveWeekdays: 127, Timezone: "Asia/Shanghai",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := store.SaveWatchRule(favorite); err != nil {
-		t.Fatalf("SaveWatchRule favorite: %v", err)
-	}
-	portID := 1
-	reminder := model.WatchRule{
-		ID: "watch-port", UserID: user.ID, DeviceID: "pile-1", PortID: &portID,
-		NotifyIdle: true, Enabled: true, ActiveWeekdays: 127,
-		ActiveStartMinute: 420, ActiveEndMinute: 1380, Timezone: "Asia/Shanghai",
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.SaveWatchRule(reminder); err != nil {
 		t.Fatalf("SaveWatchRule reminder: %v", err)
 	}
+	portID := 1
 	duplicate := reminder
-	duplicate.ID = "watch-port-duplicate"
+	duplicate.ID = "watch-pile-duplicate"
 	if err := store.SaveWatchRule(duplicate); err == nil {
-		t.Fatal("duplicate user/pile/port watch target was accepted")
-	}
-	invalidPileReminder := favorite
-	invalidPileReminder.ID = "invalid-pile-reminder"
-	invalidPileReminder.NotifyIdle = true
-	if err := store.SaveWatchRule(invalidPileReminder); err == nil {
-		t.Fatal("pile-level idle reminder without a port was accepted")
+		t.Fatal("duplicate user/pile watch target was accepted")
 	}
 	foreignUpdate := reminder
 	foreignUpdate.UserID = "user-2"
@@ -65,8 +51,8 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWatchRules: %v", err)
 	}
-	if len(rules) != 2 {
-		t.Fatalf("watch rule count = %d, want 2", len(rules))
+	if len(rules) != 1 {
+		t.Fatalf("watch rule count = %d, want 1", len(rules))
 	}
 
 	preference := model.NotificationPreference{
@@ -96,8 +82,8 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		t.Fatalf("read source event: %v", err)
 	}
 	idleNotification := model.Notification{
-		ID: "notification-idle", UserID: user.ID, Type: model.NotificationPortIdle,
-		Severity: "info", Title: "充电口已空闲", Message: "1 号端口现在可以使用",
+		ID: "notification-idle", UserID: user.ID, Type: model.NotificationPileAvailable,
+		Severity: "info", Title: "充电桩有空闲口", Message: "充电桩现在有空闲端口",
 		DeviceID: "pile-1", PortID: &portID, SourceEventID: &sourceEventID,
 		CreatedAt: now,
 	}
@@ -190,6 +176,7 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		NextAttemptAt: now.Add(10 * time.Minute), LastAttemptAt: &lastAttemptAt,
 		LastSuccessAt: &lastSuccessAt, ConsecutiveFailures: 2,
 		PausedReason: "backoff", QuotaDate: "2026-08-09", QuotaUsed: 12,
+		AvailabilityKnown: true, HadIdlePort: true, AvailabilityEventID: 42,
 		UpdatedAt: now.Add(3 * time.Minute),
 	}
 	if err := store.SaveWatchRefreshState(refreshState); err != nil {
@@ -200,7 +187,8 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		t.Fatalf("LoadWatchRefreshState: %v", err)
 	}
 	if !ok || loadedRefreshState.QuotaUsed != 12 || loadedRefreshState.ConsecutiveFailures != 2 ||
-		loadedRefreshState.LastSuccessAt == nil || !loadedRefreshState.LastSuccessAt.Equal(lastSuccessAt) {
+		loadedRefreshState.LastSuccessAt == nil || !loadedRefreshState.LastSuccessAt.Equal(lastSuccessAt) ||
+		!loadedRefreshState.AvailabilityKnown || !loadedRefreshState.HadIdlePort || loadedRefreshState.AvailabilityEventID != 42 {
 		t.Fatalf("watch refresh state did not round-trip: %+v", loadedRefreshState)
 	}
 	secondRefreshState := refreshState
@@ -261,5 +249,63 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("%s retained %d rows after user deletion", table, count)
 		}
+	}
+}
+
+func TestLegacyFavoritesAndPortRulesNormalizeToOnePileReminder(t *testing.T) {
+	path := t.TempDir() + "/legacy-watch.db"
+	key := bytes.Repeat([]byte{0x72}, CookieKeySize)
+	store, err := OpenSQLite(path, key)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	user := model.User{
+		ID: "legacy-user", Username: "legacy-user", PasswordHash: "hash",
+		Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Save(State{
+		Version: schemaVersion, Users: []model.User{user},
+		UserStates: map[string]UserState{user.ID: {}},
+	}); err != nil {
+		t.Fatalf("Save legacy user: %v", err)
+	}
+	statements := []string{
+		`DELETE FROM metadata WHERE key='watch_rules_pile_level'`,
+		`DROP INDEX IF EXISTS watch_rules_user_pile_unique_idx`,
+		`DROP INDEX IF EXISTS watch_rules_enabled_pile_idx`,
+		`CREATE UNIQUE INDEX watch_rules_user_target_unique_idx ON watch_rules(user_id, device_id, COALESCE(port_id, 0))`,
+		`INSERT INTO watch_rules(id,user_id,device_id,port_id,notify_idle,enabled,active_weekdays,active_start_minute,active_end_minute,timezone,created_at,updated_at) VALUES('favorite','legacy-user','pile-1',NULL,0,1,127,0,0,'Asia/Shanghai',1,1)`,
+		`INSERT INTO watch_rules(id,user_id,device_id,port_id,notify_idle,enabled,active_weekdays,active_start_minute,active_end_minute,timezone,created_at,updated_at) VALUES('reminder-old','legacy-user','pile-1',1,1,1,127,0,0,'Asia/Shanghai',2,2)`,
+		`INSERT INTO watch_rules(id,user_id,device_id,port_id,notify_idle,enabled,active_weekdays,active_start_minute,active_end_minute,timezone,created_at,updated_at) VALUES('reminder-new','legacy-user','pile-1',2,1,1,31,480,1320,'Asia/Shanghai',3,3)`,
+	}
+	for _, statement := range statements {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatalf("seed legacy watch data: %v\n%s", err, statement)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close legacy store: %v", err)
+	}
+
+	reopened, err := OpenSQLite(path, key)
+	if err != nil {
+		t.Fatalf("reopen legacy store: %v", err)
+	}
+	defer reopened.Close()
+	rules, err := reopened.ListWatchRules(user.ID)
+	if err != nil || len(rules) != 1 || rules[0].ID != "reminder-new" || rules[0].ActiveWeekdays != 31 {
+		t.Fatalf("normalized pile rules = %+v, err %v", rules, err)
+	}
+	var portID sql.NullInt64
+	var notifyIdle int
+	if err := reopened.db.QueryRow(`SELECT port_id, notify_idle FROM watch_rules WHERE id='reminder-new'`).Scan(&portID, &notifyIdle); err != nil {
+		t.Fatalf("read normalized physical rule: %v", err)
+	}
+	if portID.Valid || notifyIdle != 0 {
+		t.Fatalf("legacy target fields were not cleared: port=%v notify=%d", portID, notifyIdle)
+	}
+	if _, ok, err := reopened.metadata("watch_rules_pile_level"); err != nil || !ok {
+		t.Fatalf("pile normalization marker missing: ok %v, err %v", ok, err)
 	}
 }

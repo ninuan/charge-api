@@ -161,8 +161,8 @@ func (m *Manager) runReminderSchedulerOnce(ctx context.Context, now time.Time) e
 		return err
 	}
 	now = now.UTC()
-	if err := m.recoverPendingIdleNotifications(defaultPortStatusEventRecoveryLimit); err != nil {
-		return fmt.Errorf("recover idle notifications: %w", err)
+	if err := m.recoverPendingPileAvailabilityNotifications(defaultPortStatusEventRecoveryLimit); err != nil {
+		return fmt.Errorf("recover pile availability notifications: %w", err)
 	}
 	settings := normalizeRegistrationSettings(m.Settings())
 	targets, err := m.reminderTargets()
@@ -254,7 +254,7 @@ func (m *Manager) reminderTargets() ([]reminderTarget, error) {
 		}
 		byPile := make(map[string][]model.WatchRule)
 		for _, rule := range rules {
-			if rule.Enabled && rule.NotifyIdle && rule.PortID != nil {
+			if rule.Enabled {
 				byPile[rule.DeviceID] = append(byPile[rule.DeviceID], rule)
 			}
 		}
@@ -640,7 +640,7 @@ func (m *Manager) currentReminderPileRules(userID, deviceID string) ([]model.Wat
 	}
 	current := make([]model.WatchRule, 0)
 	for _, rule := range rules {
-		if rule.DeviceID == deviceID && rule.Enabled && rule.NotifyIdle && rule.PortID != nil {
+		if rule.DeviceID == deviceID && rule.Enabled {
 			current = append(current, rule)
 		}
 	}

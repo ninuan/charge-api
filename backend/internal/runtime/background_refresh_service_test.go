@@ -216,7 +216,7 @@ func TestRefreshWatchedPileCoalescesValidatedUsersByWholePile(t *testing.T) {
 	}
 }
 
-func TestRefreshWatchedPileRejectsFavoritesAndUnownedPilesWithoutTraffic(t *testing.T) {
+func TestRefreshWatchedPileRejectsDisabledRulesAndUnownedPilesWithoutTraffic(t *testing.T) {
 	var requestCount int32
 	manager, owner, _ := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
@@ -231,14 +231,15 @@ func TestRefreshWatchedPileRejectsFavoritesAndUnownedPilesWithoutTraffic(t *test
 			t.Fatalf("DeleteWatchRule: %v", err)
 		}
 	}
-	portID := 1
-	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testBackgroundPileID, PortID: &portID, NotifyIdle: false,
-	}); err != nil {
-		t.Fatalf("CreateWatchRule favorite: %v", err)
+	disabled := false
+	rule, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: testBackgroundPileID, Enabled: &disabled,
+	})
+	if err != nil {
+		t.Fatalf("CreateWatchRule disabled: %v", err)
 	}
 	if _, err := manager.RefreshWatchedPile(owner.ID, testBackgroundPileID); !errors.Is(err, ErrWatchRefreshNotEnabled) {
-		t.Fatalf("favorite-only refresh error = %v", err)
+		t.Fatalf("disabled-rule refresh error = %v (rule %+v)", err, rule)
 	}
 	if _, err := manager.RefreshWatchedPile(owner.ID, "2601201412385560999"); !errors.Is(err, ErrWatchPileNotOwned) {
 		t.Fatalf("unowned-pile refresh error = %v", err)
@@ -319,9 +320,8 @@ func newBackgroundRefreshTestManager(t *testing.T, handler http.Handler) (*Manag
 		t.Fatalf("NewManager: %v", err)
 	}
 	for _, user := range []model.User{owner, other} {
-		portID := 1
 		if _, err := manager.CreateWatchRule(user.ID, model.WatchRuleCreateRequest{
-			DeviceID: testBackgroundPileID, PortID: &portID, NotifyIdle: true,
+			DeviceID: testBackgroundPileID,
 		}); err != nil {
 			t.Fatalf("CreateWatchRule for %s: %v", user.ID, err)
 		}

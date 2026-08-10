@@ -328,9 +328,14 @@ func (s *Store) UnnotifiedIdleTransitions(limit int) ([]model.PortStatusEvent, e
 			SELECT 1
 			FROM watch_rules r
 			WHERE r.user_id = e.user_id AND r.device_id = e.device_id
-			  AND r.port_id = e.port_id AND r.enabled = 1 AND r.notify_idle = 1
+			  AND r.enabled = 1
 			  AND r.created_at <= e.changed_at
 		  )
+		  AND e.id > COALESCE((
+			SELECT s.availability_event_id
+			FROM watch_refresh_states s
+			WHERE s.user_id = e.user_id AND s.device_id = e.device_id
+		  ), 0)
 		ORDER BY e.changed_at DESC, e.id DESC
 		LIMIT ?
 	`, string(model.PortInUse), string(model.PortIdle), limit)

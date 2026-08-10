@@ -41,7 +41,7 @@ func TestReminderSchedulerDoesNotRequestWithoutEnabledReminderRules(t *testing.T
 	}
 }
 
-func TestReminderSchedulerAggregatesTenPortRulesAndEnforcesDailyQuota(t *testing.T) {
+func TestReminderSchedulerRefreshesOneWholePileAndEnforcesDailyQuota(t *testing.T) {
 	var requests int32
 	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requests, 1)
@@ -49,14 +49,6 @@ func TestReminderSchedulerAggregatesTenPortRulesAndEnforcesDailyQuota(t *testing
 		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[3]}`, testBackgroundPileID)
 	}))
 	deleteReminderRulesForUser(t, manager, other.ID)
-	for portID := 2; portID <= 10; portID++ {
-		port := portID
-		if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-			DeviceID: testBackgroundPileID, PortID: &port, NotifyIdle: true,
-		}); err != nil {
-			t.Fatalf("CreateWatchRule port %d: %v", portID, err)
-		}
-	}
 	settings := manager.Settings()
 	settings.WatchDailyRefreshQuota = 1
 	if err := manager.UpdateSettings(settings); err != nil {
@@ -69,7 +61,7 @@ func TestReminderSchedulerAggregatesTenPortRulesAndEnforcesDailyQuota(t *testing
 		t.Fatalf("first scheduler cycle: %v", err)
 	}
 	if got := atomic.LoadInt32(&requests); got != 1 {
-		t.Fatalf("ten port rules produced %d requests, want one whole-pile request", got)
+		t.Fatalf("one pile rule produced %d requests, want one whole-pile request", got)
 	}
 	state, ok, err := manager.repository.LoadWatchRefreshState(owner.ID, testBackgroundPileID)
 	if err != nil || !ok {
@@ -385,9 +377,8 @@ func TestReminderSchedulerLimitsGlobalRemoteConcurrency(t *testing.T) {
 	if err := manager.Save(); err != nil {
 		t.Fatalf("Save third scheduler user: %v", err)
 	}
-	portID := 1
 	if _, err := manager.CreateWatchRule(third.ID, model.WatchRuleCreateRequest{
-		DeviceID: testBackgroundPileID, PortID: &portID, NotifyIdle: true,
+		DeviceID: testBackgroundPileID,
 	}); err != nil {
 		t.Fatalf("CreateWatchRule third user: %v", err)
 	}

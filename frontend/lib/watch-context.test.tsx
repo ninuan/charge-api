@@ -22,12 +22,10 @@ const { watchApiMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/watch-api", () => ({ watchApi: watchApiMock }))
 
-const favorite: WatchRule = {
-  id: "rule-favorite",
+const pileRule: WatchRule = {
+  id: "rule-pile-1",
   userId: "user-1",
   deviceId: "pile-1",
-  portId: null,
-  notifyIdle: false,
   enabled: true,
   activeWeekdays: 127,
   activeStartMinute: 0,
@@ -38,9 +36,7 @@ const favorite: WatchRule = {
 }
 
 const overview: WatchOverview = {
-  ruleCount: 1,
-  ruleLimit: 20,
-  reminderPileCount: 0,
+  reminderPileCount: 1,
   reminderPileLimit: 5,
   dailyQuotaUsed: 3,
   dailyQuotaLimit: 480,
@@ -71,14 +67,13 @@ afterEach(() => {
 
 describe("WatchProvider", () => {
   it("deduplicates parallel loads and updates quota counts locally", async () => {
-    watchApiMock.rules.mockResolvedValue([favorite])
+    watchApiMock.rules.mockResolvedValue([pileRule])
     watchApiMock.overview.mockResolvedValue(overview)
     watchApiMock.preference.mockResolvedValue(preference)
     const reminder: WatchRule = {
-      ...favorite,
-      id: "rule-port",
-      portId: 3,
-      notifyIdle: true,
+      ...pileRule,
+      id: "rule-pile-2",
+      deviceId: "pile-2",
       updatedAt: "2026-08-10T00:01:00Z",
     }
     watchApiMock.createRule.mockResolvedValue(reminder)
@@ -98,19 +93,16 @@ describe("WatchProvider", () => {
 
     await act(async () => {
       await result.current.createRule({
-        deviceId: "pile-1",
-        portId: 3,
-        notifyIdle: true,
+        deviceId: "pile-2",
       })
     })
 
     expect(result.current.rules.map((rule) => rule.id)).toEqual([
-      "rule-port",
-      "rule-favorite",
+      "rule-pile-2",
+      "rule-pile-1",
     ])
     expect(result.current.overview).toMatchObject({
-      ruleCount: 2,
-      reminderPileCount: 1,
+      reminderPileCount: 2,
     })
     expect(watchApiMock.overview).toHaveBeenCalledTimes(1)
   })

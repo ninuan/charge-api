@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,66 +119,181 @@ func (m *Manager) resolveNotificationLocked(userID, dedupeKey string, at time.Ti
 	return notification, resolved, nil
 }
 
-func (m *Manager) processPortStatusEvents(events []model.PortStatusEvent) error {
-	if len(events) == 0 {
+func (m *Manager) processPileAvailability(userID string, piles []model.Pile, events []model.PortStatusEvent) error {
+	if len(piles) == 0 {
 		return nil
 	}
-	rulesByUser := make(map[string][]model.WatchRule)
+	rules, err := m.repository.ListWatchRules(userID)
+	if err != nil {
+		return fmt.Errorf("list pile availability rules: %w", err)
+	}
+	rulesByPile := make(map[string]model.WatchRule, len(rules))
+	for _, rule := range rules {
+		if rule.Enabled {
+			rulesByPile[rule.DeviceID] = rule
+		}
+	}
+	eventsByPile := make(map[string][]model.PortStatusEvent)
 	for _, event := range events {
-		if event.FromStatus == nil || *event.FromStatus != model.PortInUse || event.ToStatus != model.PortIdle {
-			continue
+		if event.UserID == userID {
+			eventsByPile[event.DeviceID] = append(eventsByPile[event.DeviceID], event)
 		}
-		rules, ok := rulesByUser[event.UserID]
+	}
+	for _, pile := range piles {
+		rule, ok := rulesByPile[pile.ID]
 		if !ok {
-			var err error
-			rules, err = m.repository.ListWatchRules(event.UserID)
-			if err != nil {
-				return fmt.Errorf("list idle notification rules: %w", err)
-			}
-			rulesByUser[event.UserID] = rules
-		}
-		eligible := false
-		for _, rule := range rules {
-			if !rule.Enabled || !rule.NotifyIdle || rule.PortID == nil ||
-				rule.DeviceID != event.DeviceID || *rule.PortID != event.PortID ||
-				rule.CreatedAt.After(event.ChangedAt) {
-				continue
-			}
-			active, _, err := reminderRuleActiveAt(rule, event.ChangedAt)
-			if err != nil {
-				return err
-			}
-			if active {
-				eligible = true
-				break
-			}
-		}
-		if !eligible {
 			continue
 		}
-		portID := event.PortID
-		sourceEventID := event.ID
-		pileLabel := m.notificationPileLabel(event.UserID, event.DeviceID)
-		_, _, err := m.recordNotificationOnce(model.Notification{
-			UserID: event.UserID, Type: model.NotificationPortIdle, Severity: "info",
-			Title:    "关注的充电口已空闲",
-			Message:  fmt.Sprintf("%s的 %d 号充电口现在可以使用。", pileLabel, event.PortID),
-			DeviceID: event.DeviceID, PortID: &portID, SourceEventID: &sourceEventID,
-			DedupeKey: fmt.Sprintf("port_idle:%d", event.ID), CreatedAt: event.ChangedAt,
-		})
+		observedAt := pile.UpdatedAt.UTC()
+		if observedAt.IsZero() {
+			observedAt = time.Now().UTC().Truncate(time.Second)
+		}
+		active, _, err := reminderRuleActiveAt(rule, observedAt)
 		if err != nil {
+			return err
+		}
+		if !active || rule.CreatedAt.After(observedAt) {
+			continue
+		}
+		if err := m.processOnePileAvailability(userID, rule, pile, eventsByPile[pile.ID], observedAt); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m *Manager) recoverPendingIdleNotifications(limit int) error {
+func (m *Manager) processOnePileAvailability(
+	userID string,
+	rule model.WatchRule,
+	pile model.Pile,
+	events []model.PortStatusEvent,
+	observedAt time.Time,
+) error {
+	idlePortIDs := pileIdlePortIDs(pile)
+	hasIdlePort := len(idlePortIDs) > 0
+	availabilityEventID := latestPortStatusEventID(events)
+
+	m.notificationMu.Lock()
+	defer m.notificationMu.Unlock()
+	state, found, err := m.repository.LoadWatchRefreshState(userID, pile.ID)
+	if err != nil {
+		return fmt.Errorf("load pile availability state: %w", err)
+	}
+	if !found || !state.AvailabilityKnown {
+		return m.repository.SavePileAvailabilityState(userID, pile.ID, true, hasIdlePort, availabilityEventID, observedAt)
+	}
+	availabilityEventID = max(state.AvailabilityEventID, availabilityEventID)
+	if state.HadIdlePort == hasIdlePort {
+		if availabilityEventID > state.AvailabilityEventID {
+			return m.repository.SavePileAvailabilityState(userID, pile.ID, true, hasIdlePort, availabilityEventID, observedAt)
+		}
+		return nil
+	}
+	if !hasIdlePort {
+		return m.repository.SavePileAvailabilityState(userID, pile.ID, true, false, availabilityEventID, observedAt)
+	}
+
+	event, ok, err := eligiblePileAvailabilityEvent(rule, events)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// A pile that becomes available outside the configured active window, or
+		// comes back after the nightly power cut, establishes a new baseline but
+		// must not create a delayed notification.
+		return m.repository.SavePileAvailabilityState(userID, pile.ID, true, true, availabilityEventID, observedAt)
+	}
+	portID := event.PortID
+	sourceEventID := event.ID
+	_, _, err = m.recordNotificationOnceLocked(model.Notification{
+		UserID: userID, Type: model.NotificationPileAvailable, Severity: "info",
+		Title:    "关注的充电桩有空闲口",
+		Message:  pileAvailabilityMessage(m.notificationPileLabel(userID, pile.ID), idlePortIDs),
+		DeviceID: pile.ID, PortID: &portID, SourceEventID: &sourceEventID,
+		DedupeKey: fmt.Sprintf("pile_available:%d", event.ID), CreatedAt: event.ChangedAt,
+	})
+	if err != nil {
+		return err
+	}
+	return m.repository.SavePileAvailabilityState(userID, pile.ID, true, true, availabilityEventID, observedAt)
+}
+
+func latestPortStatusEventID(events []model.PortStatusEvent) int64 {
+	var latest int64
+	for _, event := range events {
+		latest = max(latest, event.ID)
+	}
+	return latest
+}
+
+func eligiblePileAvailabilityEvent(rule model.WatchRule, events []model.PortStatusEvent) (model.PortStatusEvent, bool, error) {
+	sort.Slice(events, func(i, j int) bool { return events[i].ID < events[j].ID })
+	for _, event := range events {
+		if event.FromStatus == nil || *event.FromStatus != model.PortInUse || event.ToStatus != model.PortIdle ||
+			rule.CreatedAt.After(event.ChangedAt) {
+			continue
+		}
+		active, _, err := reminderRuleActiveAt(rule, event.ChangedAt)
+		if err != nil {
+			return model.PortStatusEvent{}, false, err
+		}
+		if active {
+			return event, true, nil
+		}
+	}
+	return model.PortStatusEvent{}, false, nil
+}
+
+func pileIdlePortIDs(pile model.Pile) []int {
+	ids := make([]int, 0, len(pile.Ports))
+	if !pile.Online {
+		return ids
+	}
+	for _, port := range pile.Ports {
+		if port.Status == model.PortIdle {
+			ids = append(ids, port.ID)
+		}
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func pileAvailabilityMessage(pileLabel string, idlePortIDs []int) string {
+	ports := make([]string, 0, len(idlePortIDs))
+	for _, portID := range idlePortIDs {
+		ports = append(ports, strconv.Itoa(portID)+" 号")
+	}
+	return fmt.Sprintf("%s目前有 %d 个空闲充电口：%s。", strings.TrimSpace(pileLabel), len(ports), strings.Join(ports, "、"))
+}
+
+func (m *Manager) recoverPendingPileAvailabilityNotifications(limit int) error {
 	events, err := m.repository.UnnotifiedIdleTransitions(limit)
 	if err != nil {
 		return err
 	}
-	return m.processPortStatusEvents(events)
+	byUserAndPile := make(map[string]map[string][]model.PortStatusEvent)
+	for _, event := range events {
+		if byUserAndPile[event.UserID] == nil {
+			byUserAndPile[event.UserID] = make(map[string][]model.PortStatusEvent)
+		}
+		byUserAndPile[event.UserID][event.DeviceID] = append(byUserAndPile[event.UserID][event.DeviceID], event)
+	}
+	for userID, byPile := range byUserAndPile {
+		runtime, err := m.runtimeFor(userID)
+		if err != nil {
+			continue
+		}
+		for _, pile := range runtime.store.Snapshot().Piles {
+			pileEvents, ok := byPile[pile.ID]
+			if !ok {
+				continue
+			}
+			if err := m.processPileAvailability(userID, []model.Pile{pile}, pileEvents); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Manager) notificationPileLabel(userID, deviceID string) string {

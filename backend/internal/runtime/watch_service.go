@@ -23,7 +23,6 @@ var (
 	ErrWatchTargetNotFound      = errors.New("watch target not found")
 	ErrWatchRuleNotFound        = errors.New("watch rule not found")
 	ErrWatchRuleConflict        = errors.New("watch rule conflict")
-	ErrWatchRuleLimit           = errors.New("watch rule limit reached")
 	ErrWatchPileLimit           = errors.New("watch pile limit reached")
 	ErrNotificationQueryInvalid = errors.New("notification query invalid")
 	ErrNotificationNotFound     = errors.New("notification not found")
@@ -63,8 +62,7 @@ func (m *Manager) WatchOverview(userID string) (model.WatchOverview, error) {
 		return model.WatchOverview{}, fmt.Errorf("load watch quota for overview: %w", err)
 	}
 	return model.WatchOverview{
-		RuleCount: len(rules), RuleLimit: settings.WatchRuleLimitPerUser,
-		ReminderPileCount: activeReminderPileCount(rules), ReminderPileLimit: settings.WatchPileLimitPerUser,
+		ReminderPileCount: len(rules), ReminderPileLimit: settings.WatchPileLimitPerUser,
 		DailyQuotaUsed: quotaUsed, DailyQuotaLimit: settings.WatchDailyRefreshQuota, QuotaDate: quotaDate,
 		RefreshIntervalMinutes:       settings.WatchRefreshIntervalMinutes,
 		BackgroundRemindersEnabled:   settings.BackgroundRemindersEnabled,
@@ -83,8 +81,8 @@ func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRe
 	now := time.Now().UTC().Truncate(time.Second)
 	rule := model.WatchRule{
 		ID: randomID("wtr"), UserID: strings.TrimSpace(userID),
-		DeviceID: strings.TrimSpace(request.DeviceID), PortID: request.PortID,
-		NotifyIdle: request.NotifyIdle, Enabled: true, ActiveWeekdays: 127,
+		DeviceID: strings.TrimSpace(request.DeviceID),
+		Enabled:  true, ActiveWeekdays: 127,
 		ActiveStartMinute: 0, ActiveEndMinute: 0, Timezone: defaultWatchTimezone,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -111,15 +109,12 @@ func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRe
 		return model.WatchRule{}, fmt.Errorf("list watch rules before create: %w", err)
 	}
 	settings := normalizeRegistrationSettings(m.Settings())
-	if len(rules) >= settings.WatchRuleLimitPerUser {
-		return model.WatchRule{}, ErrWatchRuleLimit
-	}
 	for _, existing := range rules {
 		if sameWatchTarget(existing, rule) {
 			return model.WatchRule{}, ErrWatchRuleConflict
 		}
 	}
-	if activeReminderPileCount(append(rules, rule)) > settings.WatchPileLimitPerUser {
+	if len(rules) >= settings.WatchPileLimitPerUser {
 		return model.WatchRule{}, ErrWatchPileLimit
 	}
 	if err := m.repository.SaveWatchRule(rule); err != nil {
@@ -151,9 +146,6 @@ func (m *Manager) UpdateWatchRule(userID, ruleID string, request model.WatchRule
 		return model.WatchRule{}, ErrWatchRuleNotFound
 	}
 	rule := rules[position]
-	if request.NotifyIdle != nil {
-		rule.NotifyIdle = *request.NotifyIdle
-	}
 	if request.Enabled != nil {
 		rule.Enabled = *request.Enabled
 	}
@@ -172,11 +164,6 @@ func (m *Manager) UpdateWatchRule(userID, ruleID string, request model.WatchRule
 	rule.UpdatedAt = time.Now().UTC().Truncate(time.Second)
 	if err := m.validateWatchRuleTarget(rule); err != nil {
 		return model.WatchRule{}, err
-	}
-	rules[position] = rule
-	settings := normalizeRegistrationSettings(m.Settings())
-	if activeReminderPileCount(rules) > settings.WatchPileLimitPerUser {
-		return model.WatchRule{}, ErrWatchPileLimit
 	}
 	if err := m.repository.SaveWatchRule(rule); err != nil {
 		return model.WatchRule{}, fmt.Errorf("update watch rule: %w", err)
@@ -355,12 +342,6 @@ func (m *Manager) validateWatchRuleTarget(rule model.WatchRule) error {
 	if _, err := time.LoadLocation(rule.Timezone); err != nil {
 		return ErrWatchRuleInvalid
 	}
-	if rule.NotifyIdle && rule.PortID == nil {
-		return ErrWatchRuleInvalid
-	}
-	if rule.PortID != nil && *rule.PortID <= 0 {
-		return ErrWatchRuleInvalid
-	}
 	runtime, err := m.runtimeFor(rule.UserID)
 	if err != nil {
 		return ErrWatchTargetNotFound
@@ -375,21 +356,7 @@ func (m *Manager) validateWatchRuleTarget(rule model.WatchRule) error {
 	if !owned {
 		return ErrWatchTargetNotFound
 	}
-	if rule.PortID == nil {
-		return nil
-	}
-	for _, pile := range runtime.store.Snapshot().Piles {
-		if pile.ID != rule.DeviceID {
-			continue
-		}
-		for _, port := range pile.Ports {
-			if port.ID == *rule.PortID {
-				return nil
-			}
-		}
-		break
-	}
-	return ErrWatchTargetNotFound
+	return nil
 }
 
 func defaultNotificationPreference(userID string, now time.Time) model.NotificationPreference {
@@ -403,7 +370,7 @@ func defaultNotificationPreference(userID string, now time.Time) model.Notificat
 func activeReminderPileCount(rules []model.WatchRule) int {
 	piles := make(map[string]struct{})
 	for _, rule := range rules {
-		if rule.Enabled && rule.NotifyIdle {
+		if rule.Enabled {
 			piles[rule.DeviceID] = struct{}{}
 		}
 	}
@@ -411,13 +378,7 @@ func activeReminderPileCount(rules []model.WatchRule) int {
 }
 
 func sameWatchTarget(left, right model.WatchRule) bool {
-	if left.UserID != right.UserID || left.DeviceID != right.DeviceID {
-		return false
-	}
-	if left.PortID == nil || right.PortID == nil {
-		return left.PortID == nil && right.PortID == nil
-	}
-	return *left.PortID == *right.PortID
+	return left.UserID == right.UserID && left.DeviceID == right.DeviceID
 }
 
 func validWatchDeviceID(value string) bool {
@@ -451,7 +412,7 @@ func validMinute(value int) bool {
 }
 
 func watchUpdateEmpty(request model.WatchRuleUpdateRequest) bool {
-	return request.NotifyIdle == nil && request.Enabled == nil && request.ActiveWeekdays == nil &&
+	return request.Enabled == nil && request.ActiveWeekdays == nil &&
 		request.ActiveStartMinute == nil && request.ActiveEndMinute == nil && request.Timezone == nil
 }
 

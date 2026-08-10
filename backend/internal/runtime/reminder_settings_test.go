@@ -58,7 +58,6 @@ func TestNormalizeRegistrationSettingsPreservesExplicitlyDisabledReminders(t *te
 		DefaultDeviceLimit: 10, StatsRetentionDays: 90, PortHistoryRetentionDays: 90,
 		BackgroundRemindersEnabled:   false,
 		WatchRefreshIntervalMinutes:  defaultWatchIntervalMinutes,
-		WatchRuleLimitPerUser:        defaultWatchRuleLimit,
 		WatchPileLimitPerUser:        defaultWatchPileLimit,
 		WatchDailyRefreshQuota:       defaultWatchDailyQuota,
 		NotificationRetentionDays:    defaultNotificationDays,
@@ -77,7 +76,6 @@ func assertReminderSettingDefaults(t *testing.T, settings model.RegistrationSett
 	t.Helper()
 	if !settings.BackgroundRemindersEnabled ||
 		settings.WatchRefreshIntervalMinutes != 10 ||
-		settings.WatchRuleLimitPerUser != 20 ||
 		settings.WatchPileLimitPerUser != 5 ||
 		settings.WatchDailyRefreshQuota != 480 ||
 		settings.NotificationRetentionDays != 90 ||

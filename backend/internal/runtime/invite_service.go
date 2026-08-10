@@ -35,9 +35,6 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 	if settings.WatchRefreshIntervalMinutes == 0 {
 		settings.WatchRefreshIntervalMinutes = defaultWatchIntervalMinutes
 	}
-	if settings.WatchRuleLimitPerUser == 0 {
-		settings.WatchRuleLimitPerUser = defaultWatchRuleLimit
-	}
 	if settings.WatchPileLimitPerUser == 0 {
 		settings.WatchPileLimitPerUser = defaultWatchPileLimit
 	}
@@ -68,9 +65,6 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	}
 	if settings.WatchRefreshIntervalMinutes < 5 || settings.WatchRefreshIntervalMinutes > 60 {
 		return fmt.Errorf("关注刷新间隔需要在 5 到 60 分钟之间")
-	}
-	if settings.WatchRuleLimitPerUser < 1 || settings.WatchRuleLimitPerUser > 100 {
-		return fmt.Errorf("单用户关注规则上限需要在 1 到 100 之间")
 	}
 	if settings.WatchPileLimitPerUser < 1 || settings.WatchPileLimitPerUser > 20 {
 		return fmt.Errorf("单用户关注充电桩上限需要在 1 到 20 之间")

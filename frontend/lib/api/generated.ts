@@ -188,7 +188,7 @@ export interface paths {
         /** 获取当前用户的全部关注规则 */
         get: operations["listWatchRules"];
         put?: never;
-        /** 创建充电桩收藏或端口提醒规则 */
+        /** 为充电桩创建空闲提醒规则 */
         post: operations["createWatchRule"];
         delete?: never;
         options?: never;
@@ -269,7 +269,7 @@ export interface components {
         };
         CodedErrorResponse: {
             /** @enum {string} */
-            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE" | "WATCH_RULE_INVALID" | "WATCH_TARGET_NOT_FOUND" | "WATCH_RULE_NOT_FOUND" | "WATCH_RULE_CONFLICT" | "WATCH_RULE_LIMIT_REACHED" | "WATCH_PILE_LIMIT_REACHED" | "WATCH_UNAVAILABLE" | "NOTIFICATION_PREFERENCE_INVALID" | "NOTIFICATION_QUERY_INVALID" | "NOTIFICATION_NOT_FOUND" | "NOTIFICATION_UNAVAILABLE";
+            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE" | "WATCH_RULE_INVALID" | "WATCH_TARGET_NOT_FOUND" | "WATCH_RULE_NOT_FOUND" | "WATCH_RULE_CONFLICT" | "WATCH_PILE_LIMIT_REACHED" | "WATCH_UNAVAILABLE" | "NOTIFICATION_PREFERENCE_INVALID" | "NOTIFICATION_QUERY_INVALID" | "NOTIFICATION_NOT_FOUND" | "NOTIFICATION_UNAVAILABLE";
             error: string;
         };
         DeletedCount: {
@@ -387,7 +387,7 @@ export interface components {
          */
         NotificationStatusFilter: "all" | "unread" | "resolved";
         /** @enum {string} */
-        NotificationType: "port_idle" | "credential_expired" | "pile_offline" | "pile_recovered";
+        NotificationType: "pile_available" | "credential_expired" | "pile_offline" | "pile_recovered";
         PortHistoryMetrics: {
             /** Format: int64 */
             averageSessionSeconds: number | null;
@@ -451,8 +451,6 @@ export interface components {
             refreshIntervalMinutes: number;
             reminderPileCount: number;
             reminderPileLimit: number;
-            ruleCount: number;
-            ruleLimit: number;
             scheduledPowerOffEnabled: boolean;
             scheduledPowerOffEndMinute: number;
             scheduledPowerOffStartMinute: number;
@@ -470,8 +468,6 @@ export interface components {
             deviceId: string;
             enabled: boolean;
             id: string;
-            notifyIdle: boolean;
-            portId?: number | null;
             timezone: string;
             /** Format: date-time */
             updatedAt: string;
@@ -486,8 +482,6 @@ export interface components {
             activeWeekdays?: number;
             deviceId: string;
             enabled?: boolean;
-            notifyIdle?: boolean;
-            portId?: number | null;
             timezone?: string;
         };
         WatchRuleUpdateRequest: {
@@ -498,7 +492,6 @@ export interface components {
             /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays?: number;
             enabled?: boolean;
-            notifyIdle?: boolean;
             timezone?: string;
         };
     };

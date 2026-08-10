@@ -18,8 +18,6 @@ const { watchContextMock } = vi.hoisted(() => ({
         id: "rule-1",
         userId: "user-1",
         deviceId: "pile-1",
-        portId: 2,
-        notifyIdle: true,
         enabled: true,
         activeWeekdays: 31,
         activeStartMinute: 480,
@@ -30,8 +28,6 @@ const { watchContextMock } = vi.hoisted(() => ({
       },
     ],
     overview: {
-      ruleCount: 1,
-      ruleLimit: 20,
       reminderPileCount: 1,
       reminderPileLimit: 5,
       dailyQuotaUsed: 7,
@@ -117,7 +113,7 @@ describe("WatchManagementSheet", () => {
       />
     )
 
-    expect(screen.getByText("1/20")).toBeInTheDocument()
+    expect(screen.getByText("1/5")).toBeInTheDocument()
     expect(screen.getByText("7/480")).toBeInTheDocument()
     expect(screen.getByText("工作日 · 08:00–22:00")).toBeInTheDocument()
 
@@ -145,9 +141,9 @@ describe("WatchManagementSheet", () => {
       })
     )
 
-    await user.click(screen.getByRole("tab", { name: "关注列表" }))
+    await user.click(screen.getByRole("tab", { name: "提醒列表" }))
     await user.click(screen.getByRole("button", { name: "删除" }))
-    expect(screen.getByText("删除这条关注规则？")).toBeVisible()
+    expect(screen.getByText("删除这条空闲提醒？")).toBeVisible()
     await user.click(screen.getByRole("button", { name: "确认删除" }))
     await waitFor(() =>
       expect(watchContextMock.deleteRule).toHaveBeenCalledWith("rule-1")

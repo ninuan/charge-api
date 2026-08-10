@@ -131,8 +131,6 @@ async function mockEmptyWatchResources(page: Page) {
     route.fulfill({
       status: 200,
       json: {
-        ruleCount: 0,
-        ruleLimit: 20,
         reminderPileCount: 0,
         reminderPileLimit: 5,
         dailyQuotaUsed: 0,
@@ -635,7 +633,7 @@ test("dashboard fades in every port card at the same time", async ({
   })
 })
 
-test("dashboard creates and manages favorites and cross-midnight reminders", async ({
+test("dashboard creates and manages whole-pile cross-midnight reminders", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -661,8 +659,6 @@ test("dashboard creates and manages favorites and cross-midnight reminders", asy
 
   const rules: WatchRule[] = []
   const overview: WatchOverview = {
-    ruleCount: 0,
-    ruleLimit: 20,
     reminderPileCount: 0,
     reminderPileLimit: 5,
     dailyQuotaUsed: 7,
@@ -712,8 +708,6 @@ test("dashboard creates and manages favorites and cross-midnight reminders", asy
       id: `rule-${rules.length + 1}`,
       userId: user.id,
       deviceId: payload.deviceId,
-      portId: payload.portId ?? null,
-      notifyIdle: payload.notifyIdle ?? false,
       enabled: payload.enabled ?? true,
       activeWeekdays: payload.activeWeekdays ?? 127,
       activeStartMinute: payload.activeStartMinute ?? 0,
@@ -727,26 +721,21 @@ test("dashboard creates and manages favorites and cross-midnight reminders", asy
   })
 
   await page.goto("/dashboard")
-  await page.getByRole("button", { name: "收藏充电桩" }).click()
-  await expect(page.getByRole("button", { name: "已收藏" })).toBeVisible()
-
-  await page.getByRole("button", { name: "为 3 号充电口设置空闲提醒" }).click()
+  await page.getByRole("button", { name: "设置空闲提醒" }).click()
   await page.getByLabel("开始时间").fill("22:30")
   await page.getByLabel("结束时间").fill("06:30")
   await expect(page.getByText(/22:30–06:30（跨午夜）/)).toBeVisible()
   await page.getByRole("button", { name: "创建规则" }).click()
-  await expect(
-    page.getByRole("button", { name: "3 号充电口已设置提醒，点击编辑" })
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "已设置空闲提醒" })).toBeVisible()
 
-  await page.getByRole("button", { name: "关注管理" }).click()
-  const sheet = page.getByRole("dialog", { name: "关注与空闲提醒" })
-  await expect(sheet.getByText("2/20")).toBeVisible()
+  await page.getByRole("button", { name: "空闲提醒", exact: true }).click()
+  const sheet = page.getByRole("dialog", { name: "空闲提醒管理" })
+  await expect(sheet.getByText("1/5")).toBeVisible()
   await expect(sheet.getByText("每天 · 22:30–06:30（跨午夜）")).toBeVisible()
   await expect(sheet.getByText("7/480")).toBeVisible()
 
-  await sheet.getByRole("button", { name: "添加关注" }).click()
-  const editor = page.getByRole("dialog", { name: "添加关注规则" })
+  await sheet.getByRole("button", { name: "添加提醒" }).click()
+  const editor = page.getByRole("dialog", { name: "添加空闲提醒" })
   await expect(editor).toBeVisible()
   await expect(sheet).toBeHidden()
   await editor.getByRole("button", { name: "关闭" }).click()
@@ -754,9 +743,9 @@ test("dashboard creates and manages favorites and cross-midnight reminders", asy
   await page.getByRole("button", { name: "打开菜单" }).click()
   await page
     .locator("[data-slot=sheet-content]")
-    .getByRole("button", { name: "关注管理" })
+    .getByRole("button", { name: "空闲提醒", exact: true })
     .click()
-  await expect(sheet.getByText("关注与空闲提醒")).toBeVisible()
+  await expect(sheet.getByText("空闲提醒管理")).toBeVisible()
   await page.waitForTimeout(250)
   const sheetBox = await sheet.boundingBox()
   expect(sheetBox?.x).toBeGreaterThanOrEqual(0)

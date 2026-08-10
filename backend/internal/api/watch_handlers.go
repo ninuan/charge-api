@@ -218,21 +218,19 @@ func (s *Server) handleNotificationActions(w http.ResponseWriter, r *http.Reques
 func (s *Server) writeWatchError(w http.ResponseWriter, operation string, err error) {
 	switch {
 	case errors.Is(err, appruntime.ErrWatchRuleInvalid):
-		writeCodedError(w, http.StatusBadRequest, "WATCH_RULE_INVALID", "关注规则内容无效")
+		writeCodedError(w, http.StatusBadRequest, "WATCH_RULE_INVALID", "空闲提醒内容无效")
 	case errors.Is(err, appruntime.ErrWatchTargetNotFound):
-		writeCodedError(w, http.StatusNotFound, "WATCH_TARGET_NOT_FOUND", "未找到当前账户下的充电桩或端口")
+		writeCodedError(w, http.StatusNotFound, "WATCH_TARGET_NOT_FOUND", "未找到当前账户下的充电桩")
 	case errors.Is(err, appruntime.ErrWatchRuleNotFound):
 		writeCodedError(w, http.StatusNotFound, "WATCH_RULE_NOT_FOUND", "未找到关注规则")
 	case errors.Is(err, appruntime.ErrWatchRuleConflict):
-		writeCodedError(w, http.StatusConflict, "WATCH_RULE_CONFLICT", "该充电桩或端口已经在关注列表中")
-	case errors.Is(err, appruntime.ErrWatchRuleLimit):
-		writeCodedError(w, http.StatusConflict, "WATCH_RULE_LIMIT_REACHED", "已达到当前账户的关注规则上限")
+		writeCodedError(w, http.StatusConflict, "WATCH_RULE_CONFLICT", "该充电桩已设置空闲提醒")
 	case errors.Is(err, appruntime.ErrWatchPileLimit):
-		writeCodedError(w, http.StatusConflict, "WATCH_PILE_LIMIT_REACHED", "已达到当前账户的提醒充电桩上限")
+		writeCodedError(w, http.StatusConflict, "WATCH_PILE_LIMIT_REACHED", "已达到当前账户的空闲提醒充电桩上限")
 	default:
-		s.setHealthDegraded("watch", "关注规则存储异常")
+		s.setHealthDegraded("watch", "空闲提醒存储异常")
 		logStructuredError(operation, "watch", err)
-		writeCodedError(w, http.StatusServiceUnavailable, "WATCH_UNAVAILABLE", "关注功能暂时不可用，请稍后重试")
+		writeCodedError(w, http.StatusServiceUnavailable, "WATCH_UNAVAILABLE", "空闲提醒功能暂时不可用，请稍后重试")
 	}
 }
 

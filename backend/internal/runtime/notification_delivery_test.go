@@ -20,15 +20,15 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 	changedAt := time.Now().UTC().Truncate(time.Second).Add(time.Minute)
 	ports := make([]model.Port, 0, 10)
 	for portID := 1; portID <= 10; portID++ {
-		status := model.PortIdle
-		if portID == 1 {
-			status = model.PortInUse
-		}
+		status := model.PortInUse
 		ports = append(ports, model.Port{ID: portID, Status: status, UpdatedAt: changedAt})
 	}
 	pile := model.Pile{ID: testBackgroundPileID, Online: true, UpdatedAt: changedAt, Ports: ports}
 	if _, err := manager.repository.RecordPortStatusTransitions(owner.ID, []model.Pile{pile}); err != nil {
 		t.Fatalf("record in-use baseline: %v", err)
+	}
+	if err := manager.repository.SavePileAvailabilityState(owner.ID, pile.ID, true, false, 0, changedAt); err != nil {
+		t.Fatalf("save unavailable baseline: %v", err)
 	}
 	pile.Ports[0].Status = model.PortIdle
 	pile.Ports[0].UpdatedAt = changedAt.Add(5 * time.Minute)
@@ -36,18 +36,22 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("record idle transition = %+v, err %v", events, err)
 	}
+	manager.runtimes[owner.ID].store.MergeCapturePiles([]model.Pile{pile})
+	if err := manager.Save(); err != nil {
+		t.Fatalf("persist idle snapshot before recovery: %v", err)
+	}
 
 	stream, err := manager.SubscribeNotifications(owner.ID)
 	if err != nil {
 		t.Fatalf("SubscribeNotifications: %v", err)
 	}
 	defer manager.UnsubscribeNotifications(owner.ID, stream)
-	if err := manager.recoverPendingIdleNotifications(100); err != nil {
-		t.Fatalf("recover pending notification: %v", err)
+	if err := manager.recoverPendingPileAvailabilityNotifications(100); err != nil {
+		t.Fatalf("recover pending pile availability: %v", err)
 	}
 	select {
 	case notification := <-stream:
-		if notification.Type != model.NotificationPortIdle || notification.SourceEventID == nil || *notification.SourceEventID != events[0].ID {
+		if notification.Type != model.NotificationPileAvailable || notification.SourceEventID == nil || *notification.SourceEventID != events[0].ID {
 			t.Fatalf("unexpected streamed notification: %+v", notification)
 		}
 	case <-time.After(time.Second):
@@ -58,23 +62,48 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restart manager: %v", err)
 	}
-	if err := restarted.recoverPendingIdleNotifications(100); err != nil {
-		t.Fatalf("repeat recovery: %v", err)
+	if err := restarted.recoverPendingPileAvailabilityNotifications(100); err != nil {
+		t.Fatalf("repeat availability recovery: %v", err)
 	}
 	notifications, err := restarted.repository.ListNotifications(owner.ID, 20)
 	if err != nil || len(notifications) != 1 || notifications[0].SourceEventID == nil || *notifications[0].SourceEventID != events[0].ID {
 		t.Fatalf("durable idle notifications = %+v, err %v", notifications, err)
 	}
 
+	// A second port becoming idle while the pile already has an idle port must
+	// not create another notification.
+	pile.Ports[1].Status = model.PortIdle
+	pile.Ports[1].UpdatedAt = changedAt.Add(6 * time.Minute)
+	additionalEvents, err := manager.repository.RecordPortStatusTransitions(owner.ID, []model.Pile{pile})
+	if err != nil || len(additionalEvents) != 1 {
+		t.Fatalf("record additional idle transition = %+v, err %v", additionalEvents, err)
+	}
+	if err := manager.processPileAvailability(owner.ID, []model.Pile{pile}, additionalEvents); err != nil {
+		t.Fatalf("process additional idle transition: %v", err)
+	}
+	notifications, err = manager.repository.ListNotifications(owner.ID, 20)
+	if err != nil || len(notifications) != 1 {
+		t.Fatalf("additional idle port repeated notification: %+v, err %v", notifications, err)
+	}
+	pending, err := manager.repository.UnnotifiedIdleTransitions(100)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("processed aggregate events remained on recovery cursor: %+v, err %v", pending, err)
+	}
+
 	// Two live manager instances may both recover the same later event during a
 	// rolling restart. The database source-event key must still admit one row.
 	pile.Ports[0].Status = model.PortInUse
-	pile.Ports[0].UpdatedAt = changedAt.Add(6 * time.Minute)
+	pile.Ports[0].UpdatedAt = changedAt.Add(7 * time.Minute)
+	pile.Ports[1].Status = model.PortInUse
+	pile.Ports[1].UpdatedAt = changedAt.Add(7 * time.Minute)
 	if _, err := manager.repository.RecordPortStatusTransitions(owner.ID, []model.Pile{pile}); err != nil {
 		t.Fatalf("record second in-use transition: %v", err)
 	}
+	if err := manager.processPileAvailability(owner.ID, []model.Pile{pile}, nil); err != nil {
+		t.Fatalf("record second unavailable aggregate: %v", err)
+	}
 	pile.Ports[0].Status = model.PortIdle
-	pile.Ports[0].UpdatedAt = changedAt.Add(7 * time.Minute)
+	pile.Ports[0].UpdatedAt = changedAt.Add(8 * time.Minute)
 	secondEvents, err := manager.repository.RecordPortStatusTransitions(owner.ID, []model.Pile{pile})
 	if err != nil || len(secondEvents) != 1 {
 		t.Fatalf("record second idle transition = %+v, err %v", secondEvents, err)
@@ -85,7 +114,7 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 		wait.Add(1)
 		go func(current *Manager) {
 			defer wait.Done()
-			errorsByWorker <- current.processPortStatusEvents(secondEvents)
+			errorsByWorker <- current.processPileAvailability(owner.ID, []model.Pile{pile}, secondEvents)
 		}(current)
 	}
 	wait.Wait()
@@ -102,6 +131,36 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 	unchanged, err := manager.repository.RecordPortStatusTransitions(owner.ID, []model.Pile{pile})
 	if err != nil || len(unchanged) != 0 {
 		t.Fatalf("unchanged idle status created events = %+v, err %v", unchanged, err)
+	}
+}
+
+func TestPowerRestoreAvailabilityEstablishesBaselineWithoutNotification(t *testing.T) {
+	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	deleteReminderRulesForUser(t, manager, other.ID)
+	now := time.Now().UTC().Truncate(time.Second).Add(time.Minute)
+	offline := model.PortOffline
+	pile := model.Pile{
+		ID: testBackgroundPileID, Online: true, UpdatedAt: now,
+		Ports: []model.Port{{ID: 1, Status: model.PortIdle, UpdatedAt: now}},
+	}
+	if err := manager.repository.SavePileAvailabilityState(owner.ID, pile.ID, true, false, 0, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("save power-off baseline: %v", err)
+	}
+	if err := manager.processPileAvailability(owner.ID, []model.Pile{pile}, []model.PortStatusEvent{{
+		ID: 1, UserID: owner.ID, DeviceID: pile.ID, PortID: 1,
+		FromStatus: &offline, ToStatus: model.PortIdle, ChangedAt: now,
+	}}); err != nil {
+		t.Fatalf("process power restore availability: %v", err)
+	}
+	notifications, err := manager.repository.ListNotifications(owner.ID, 20)
+	if err != nil || len(notifications) != 0 {
+		t.Fatalf("power restore created notifications: %+v, err %v", notifications, err)
+	}
+	state, ok, err := manager.repository.LoadWatchRefreshState(owner.ID, pile.ID)
+	if err != nil || !ok || !state.AvailabilityKnown || !state.HadIdlePort {
+		t.Fatalf("power restore baseline = %+v, ok %v, err %v", state, ok, err)
 	}
 }
 

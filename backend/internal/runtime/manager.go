@@ -39,7 +39,6 @@ const (
 	defaultStatsRetentionDays   = 90
 	defaultHistoryRetentionDays = 90
 	defaultWatchIntervalMinutes = 10
-	defaultWatchRuleLimit       = 20
 	defaultWatchPileLimit       = 5
 	defaultWatchDailyQuota      = 480
 	defaultNotificationDays     = 90
@@ -111,7 +110,6 @@ func NewManager(
 			PortHistoryRetentionDays:     defaultHistoryRetentionDays,
 			BackgroundRemindersEnabled:   true,
 			WatchRefreshIntervalMinutes:  defaultWatchIntervalMinutes,
-			WatchRuleLimitPerUser:        defaultWatchRuleLimit,
 			WatchPileLimitPerUser:        defaultWatchPileLimit,
 			WatchDailyRefreshQuota:       defaultWatchDailyQuota,
 			NotificationRetentionDays:    defaultNotificationDays,

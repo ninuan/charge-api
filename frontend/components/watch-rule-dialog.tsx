@@ -1,6 +1,6 @@
 "use client"
 
-import { BellRingIcon, BookmarkIcon, LoaderCircleIcon } from "lucide-react"
+import { BellRingIcon, LoaderCircleIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
@@ -45,14 +45,11 @@ import {
 
 export type WatchEditorTarget = {
   pileId?: string
-  portId?: number
   ruleId?: string
 }
 
 type FormState = {
   pileId: string
-  portValue: string
-  notifyIdle: boolean
   enabled: boolean
   activeWeekdays: number
   start: string
@@ -66,8 +63,6 @@ function initialForm(
 ): FormState {
   return {
     pileId: rule?.deviceId ?? target.pileId ?? piles[0]?.id ?? "",
-    portValue: String(rule?.portId ?? target.portId ?? "pile"),
-    notifyIdle: rule?.notifyIdle ?? target.portId != null,
     enabled: rule?.enabled ?? true,
     activeWeekdays: rule?.activeWeekdays ?? 127,
     start: minutesToTime(rule?.activeStartMinute ?? 0),
@@ -97,17 +92,6 @@ export function WatchRuleDialog({
   const [saving, setSaving] = useState(false)
   const startMinute = timeToMinutes(form.start)
   const endMinute = timeToMinutes(form.end)
-  const selectedPile = piles.find((pile) => pile.id === form.pileId)
-  const portOptions = useMemo(
-    () => [
-      { value: "pile", label: "整台充电桩" },
-      ...(selectedPile?.ports.map((port) => ({
-        value: String(port.id),
-        label: `${port.id} 号充电口`,
-      })) ?? []),
-    ],
-    [selectedPile]
-  )
   const pileOptions = useMemo(
     () =>
       piles.map((pile) => ({
@@ -117,7 +101,6 @@ export function WatchRuleDialog({
     [piles]
   )
 
-  const isPileFavorite = form.portValue === "pile"
   const invalid =
     !form.pileId ||
     form.activeWeekdays === 0 ||
@@ -129,29 +112,25 @@ export function WatchRuleDialog({
     if (invalid || startMinute == null || endMinute == null) return
     setSaving(true)
     try {
-      const portId = isPileFavorite ? undefined : Number(form.portValue)
       if (rule) {
         await updateRule(rule.id, {
-          notifyIdle: isPileFavorite ? false : form.notifyIdle,
           enabled: form.enabled,
           activeWeekdays: form.activeWeekdays,
           activeStartMinute: startMinute,
           activeEndMinute: endMinute,
           timezone: "Asia/Shanghai",
         })
-        toast.success("关注规则已更新")
+        toast.success("空闲提醒已更新")
       } else {
         await createRule({
           deviceId: form.pileId,
-          portId,
-          notifyIdle: isPileFavorite ? false : form.notifyIdle,
           enabled: form.enabled,
           activeWeekdays: form.activeWeekdays,
           activeStartMinute: startMinute,
           activeEndMinute: endMinute,
           timezone: "Asia/Shanghai",
         })
-        toast.success(form.notifyIdle ? "空闲提醒已创建" : "已加入关注")
+        toast.success("整桩空闲提醒已创建")
       }
       onOpenChange(false)
     } catch (reason) {
@@ -165,14 +144,14 @@ export function WatchRuleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{rule ? "编辑关注规则" : "添加关注规则"}</DialogTitle>
+          <DialogTitle>{rule ? "编辑空闲提醒" : "添加空闲提醒"}</DialogTitle>
           <DialogDescription>
-            整桩可作为常用收藏；选择具体端口后可以开启空闲提醒。
+            以整台充电桩为单位检查；只要任意充电口从占用变为空闲，就发送一次提醒。
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
           <FieldGroup>
-            <FieldGroup className="grid gap-4 sm:grid-cols-2">
+            <FieldGroup>
               <Field data-disabled={Boolean(rule)}>
                 <FieldLabel htmlFor="watch-pile">充电桩</FieldLabel>
                 <Select
@@ -184,8 +163,6 @@ export function WatchRuleDialog({
                     setForm((current) => ({
                       ...current,
                       pileId: value,
-                      portValue: "pile",
-                      notifyIdle: false,
                     }))
                   }
                 >
@@ -203,61 +180,18 @@ export function WatchRuleDialog({
                   </SelectContent>
                 </Select>
               </Field>
-              <Field data-disabled={Boolean(rule)}>
-                <FieldLabel htmlFor="watch-port">关注目标</FieldLabel>
-                <Select
-                  items={portOptions}
-                  value={form.portValue}
-                  disabled={Boolean(rule)}
-                  onValueChange={(value) =>
-                    value &&
-                    setForm((current) => ({
-                      ...current,
-                      portValue: value,
-                      notifyIdle: value !== "pile",
-                    }))
-                  }
-                >
-                  <SelectTrigger id="watch-port" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {portOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
             </FieldGroup>
 
-            <Field orientation="horizontal" data-disabled={isPileFavorite}>
+            <Field orientation="horizontal">
               <FieldContent>
-                <FieldLabel htmlFor="notify-idle">
-                  {isPileFavorite ? (
-                    <BookmarkIcon className="size-4" />
-                  ) : (
-                    <BellRingIcon className="size-4" />
-                  )}
-                  {isPileFavorite ? "收藏充电桩" : "端口空闲提醒"}
+                <FieldLabel>
+                  <BellRingIcon className="size-4" />
+                  整桩空闲提醒
                 </FieldLabel>
                 <FieldDescription>
-                  {isPileFavorite
-                    ? "整桩收藏不会产生任何后台请求。"
-                    : "仅在所选时段低频刷新整桩，一次同时读取十个端口。"}
+                  仅在所选时段低频请求该桩号，一次同时读取全部十个端口；已有空闲口时不会重复提醒。
                 </FieldDescription>
               </FieldContent>
-              <Switch
-                id="notify-idle"
-                checked={!isPileFavorite && form.notifyIdle}
-                disabled={isPileFavorite}
-                onCheckedChange={(checked) =>
-                  setForm((current) => ({ ...current, notifyIdle: checked }))
-                }
-              />
             </Field>
 
             <FieldSet>

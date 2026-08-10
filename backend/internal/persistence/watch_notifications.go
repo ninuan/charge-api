@@ -33,8 +33,6 @@ func (s *Store) SaveWatchRule(rule model.WatchRule) error {
 		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			device_id = excluded.device_id,
-			port_id = excluded.port_id,
-			notify_idle = excluded.notify_idle,
 			enabled = excluded.enabled,
 			active_weekdays = excluded.active_weekdays,
 			active_start_minute = excluded.active_start_minute,
@@ -46,8 +44,8 @@ func (s *Store) SaveWatchRule(rule model.WatchRule) error {
 		rule.ID,
 		rule.UserID,
 		rule.DeviceID,
-		rule.PortID,
-		rule.NotifyIdle,
+		nil,
+		false,
 		rule.Enabled,
 		rule.ActiveWeekdays,
 		rule.ActiveStartMinute,
@@ -75,7 +73,7 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 		return nil, fmt.Errorf("watch rules require a user")
 	}
 	rows, err := s.db.Query(`
-		SELECT id, user_id, device_id, port_id, notify_idle, enabled,
+		SELECT id, user_id, device_id, enabled,
 		       active_weekdays, active_start_minute, active_end_minute, timezone,
 		       created_at, updated_at
 		FROM watch_rules
@@ -90,15 +88,12 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 	rules := make([]model.WatchRule, 0)
 	for rows.Next() {
 		var rule model.WatchRule
-		var portID sql.NullInt64
-		var notifyIdle, enabled int
+		var enabled int
 		var createdAt, updatedAt int64
 		if err := rows.Scan(
 			&rule.ID,
 			&rule.UserID,
 			&rule.DeviceID,
-			&portID,
-			&notifyIdle,
 			&enabled,
 			&rule.ActiveWeekdays,
 			&rule.ActiveStartMinute,
@@ -109,11 +104,6 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 		); err != nil {
 			return nil, fmt.Errorf("scan watch rule: %w", err)
 		}
-		if portID.Valid {
-			port := int(portID.Int64)
-			rule.PortID = &port
-		}
-		rule.NotifyIdle = notifyIdle != 0
 		rule.Enabled = enabled != 0
 		rule.CreatedAt = time.Unix(createdAt, 0).UTC()
 		rule.UpdatedAt = time.Unix(updatedAt, 0).UTC()
@@ -239,7 +229,7 @@ func (s *Store) SaveNotification(notification model.Notification) error {
 	`,
 		notification.ID,
 		notification.UserID,
-		string(notification.Type),
+		storedNotificationType(notification.Type),
 		notification.Severity,
 		notification.Title,
 		notification.Message,
@@ -273,7 +263,7 @@ func (s *Store) InsertNotificationIfAbsent(notification model.Notification) (boo
 	`,
 		notification.ID,
 		notification.UserID,
-		string(notification.Type),
+		storedNotificationType(notification.Type),
 		notification.Severity,
 		notification.Title,
 		notification.Message,
@@ -518,8 +508,9 @@ func (s *Store) SaveWatchRefreshState(state model.WatchRefreshState) error {
 	_, err := s.db.Exec(`
 		INSERT INTO watch_refresh_states(
 			user_id, device_id, next_attempt_at, last_attempt_at, last_success_at,
-			consecutive_failures, paused_reason, quota_date, quota_used, updated_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			consecutive_failures, paused_reason, quota_date, quota_used,
+			availability_known, had_idle_port, availability_event_id, updated_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, device_id) DO UPDATE SET
 			next_attempt_at = excluded.next_attempt_at,
 			last_attempt_at = excluded.last_attempt_at,
@@ -539,6 +530,9 @@ func (s *Store) SaveWatchRefreshState(state model.WatchRefreshState) error {
 		state.PausedReason,
 		state.QuotaDate,
 		state.QuotaUsed,
+		state.AvailabilityKnown,
+		state.HadIdlePort,
+		state.AvailabilityEventID,
 		state.UpdatedAt.UTC().Unix(),
 	)
 	if err != nil {
@@ -556,9 +550,11 @@ func (s *Store) LoadWatchRefreshState(userID, deviceID string) (model.WatchRefre
 	var state model.WatchRefreshState
 	var nextAttemptAt, updatedAt int64
 	var lastAttemptAt, lastSuccessAt sql.NullInt64
+	var availabilityKnown, hadIdlePort int
 	err := s.db.QueryRow(`
 		SELECT user_id, device_id, next_attempt_at, last_attempt_at, last_success_at,
-		       consecutive_failures, paused_reason, quota_date, quota_used, updated_at
+		       consecutive_failures, paused_reason, quota_date, quota_used,
+		       availability_known, had_idle_port, availability_event_id, updated_at
 		FROM watch_refresh_states
 		WHERE user_id = ? AND device_id = ?
 	`, userID, deviceID).Scan(
@@ -571,6 +567,9 @@ func (s *Store) LoadWatchRefreshState(userID, deviceID string) (model.WatchRefre
 		&state.PausedReason,
 		&state.QuotaDate,
 		&state.QuotaUsed,
+		&availabilityKnown,
+		&hadIdlePort,
+		&state.AvailabilityEventID,
 		&updatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -582,6 +581,8 @@ func (s *Store) LoadWatchRefreshState(userID, deviceID string) (model.WatchRefre
 	state.NextAttemptAt = time.Unix(nextAttemptAt, 0).UTC()
 	state.LastAttemptAt = nullableUnixTime(lastAttemptAt)
 	state.LastSuccessAt = nullableUnixTime(lastSuccessAt)
+	state.AvailabilityKnown = availabilityKnown != 0
+	state.HadIdlePort = hadIdlePort != 0
 	state.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return state, true, nil
 }
@@ -590,7 +591,8 @@ func (s *Store) ListWatchRefreshStates(userID string) ([]model.WatchRefreshState
 	userID = strings.TrimSpace(userID)
 	query := `
 		SELECT user_id, device_id, next_attempt_at, last_attempt_at, last_success_at,
-		       consecutive_failures, paused_reason, quota_date, quota_used, updated_at
+		       consecutive_failures, paused_reason, quota_date, quota_used,
+		       availability_known, had_idle_port, availability_event_id, updated_at
 		FROM watch_refresh_states
 	`
 	var (
@@ -633,6 +635,28 @@ func (s *Store) DeleteWatchRefreshState(userID, deviceID string) error {
 	return nil
 }
 
+func (s *Store) SavePileAvailabilityState(userID, deviceID string, known, hadIdle bool, eventID int64, at time.Time) error {
+	userID = strings.TrimSpace(userID)
+	deviceID = strings.TrimSpace(deviceID)
+	if userID == "" || deviceID == "" || eventID < 0 || at.IsZero() {
+		return fmt.Errorf("pile availability state requires user, pile, and time")
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO watch_refresh_states(
+			user_id, device_id, next_attempt_at, availability_known,
+			had_idle_port, availability_event_id, updated_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, device_id) DO UPDATE SET
+			availability_known = excluded.availability_known,
+			had_idle_port = excluded.had_idle_port,
+			availability_event_id = MAX(watch_refresh_states.availability_event_id, excluded.availability_event_id)
+	`, userID, deviceID, at.UTC().Unix(), known, hadIdle, eventID, at.UTC().Unix())
+	if err != nil {
+		return fmt.Errorf("save pile availability state: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) WatchRefreshQuotaUsed(userID, quotaDate string) (int, error) {
 	userID = strings.TrimSpace(userID)
 	quotaDate = strings.TrimSpace(quotaDate)
@@ -654,6 +678,7 @@ func scanWatchRefreshState(scanner interface{ Scan(...any) error }) (model.Watch
 	var state model.WatchRefreshState
 	var nextAttemptAt, updatedAt int64
 	var lastAttemptAt, lastSuccessAt sql.NullInt64
+	var availabilityKnown, hadIdlePort int
 	if err := scanner.Scan(
 		&state.UserID,
 		&state.DeviceID,
@@ -664,6 +689,9 @@ func scanWatchRefreshState(scanner interface{ Scan(...any) error }) (model.Watch
 		&state.PausedReason,
 		&state.QuotaDate,
 		&state.QuotaUsed,
+		&availabilityKnown,
+		&hadIdlePort,
+		&state.AvailabilityEventID,
 		&updatedAt,
 	); err != nil {
 		return model.WatchRefreshState{}, fmt.Errorf("scan watch refresh state: %w", err)
@@ -671,6 +699,8 @@ func scanWatchRefreshState(scanner interface{ Scan(...any) error }) (model.Watch
 	state.NextAttemptAt = time.Unix(nextAttemptAt, 0).UTC()
 	state.LastAttemptAt = nullableUnixTime(lastAttemptAt)
 	state.LastSuccessAt = nullableUnixTime(lastSuccessAt)
+	state.AvailabilityKnown = availabilityKnown != 0
+	state.HadIdlePort = hadIdlePort != 0
 	state.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return state, nil
 }
@@ -678,12 +708,6 @@ func scanWatchRefreshState(scanner interface{ Scan(...any) error }) (model.Watch
 func validateWatchRule(rule model.WatchRule) error {
 	if strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.UserID) == "" || strings.TrimSpace(rule.DeviceID) == "" {
 		return fmt.Errorf("watch rule requires id, user, and pile")
-	}
-	if rule.PortID != nil && *rule.PortID <= 0 {
-		return fmt.Errorf("watch rule port must be positive")
-	}
-	if rule.NotifyIdle && rule.PortID == nil {
-		return fmt.Errorf("idle notification requires a port")
 	}
 	if rule.ActiveWeekdays < 1 || rule.ActiveWeekdays > 127 {
 		return fmt.Errorf("watch rule weekdays are invalid")
@@ -723,7 +747,7 @@ func validateNotification(notification model.Notification) error {
 		return fmt.Errorf("notification requires id and user")
 	}
 	switch notification.Type {
-	case model.NotificationPortIdle, model.NotificationCredentialExpired,
+	case model.NotificationPileAvailable, model.NotificationCredentialExpired,
 		model.NotificationPileOffline, model.NotificationPileRecovered:
 	default:
 		return fmt.Errorf("notification type is invalid")
@@ -739,7 +763,7 @@ func validateNotification(notification model.Notification) error {
 	if notification.PortID != nil && *notification.PortID <= 0 {
 		return fmt.Errorf("notification port must be positive")
 	}
-	if notification.Type == model.NotificationPortIdle &&
+	if notification.Type == model.NotificationPileAvailable &&
 		(strings.TrimSpace(notification.DeviceID) == "" || notification.PortID == nil || notification.SourceEventID == nil) {
 		return fmt.Errorf("idle notification requires pile, port, and source event")
 	}
@@ -749,6 +773,16 @@ func validateNotification(notification model.Notification) error {
 	return nil
 }
 
+// Existing v9 databases store the former port-level type name. The public and
+// runtime model is pile-level; keeping this storage alias avoids rewriting
+// durable notifications while the API consistently exposes pile_available.
+func storedNotificationType(value model.NotificationType) string {
+	if value == model.NotificationPileAvailable {
+		return "port_idle"
+	}
+	return string(value)
+}
+
 func validateWatchRefreshState(state model.WatchRefreshState) error {
 	if strings.TrimSpace(state.UserID) == "" || strings.TrimSpace(state.DeviceID) == "" {
 		return fmt.Errorf("watch refresh state requires user and pile")
@@ -756,7 +790,7 @@ func validateWatchRefreshState(state model.WatchRefreshState) error {
 	if state.NextAttemptAt.IsZero() || state.UpdatedAt.IsZero() {
 		return fmt.Errorf("watch refresh state requires timestamps")
 	}
-	if state.ConsecutiveFailures < 0 || state.QuotaUsed < 0 {
+	if state.ConsecutiveFailures < 0 || state.QuotaUsed < 0 || state.AvailabilityEventID < 0 {
 		return fmt.Errorf("watch refresh state counters cannot be negative")
 	}
 	return nil
@@ -784,7 +818,11 @@ func scanNotification(scanner interface{ Scan(...any) error }) (model.Notificati
 	); err != nil {
 		return model.Notification{}, fmt.Errorf("scan notification: %w", err)
 	}
-	notification.Type = model.NotificationType(notificationType)
+	if notificationType == "port_idle" {
+		notification.Type = model.NotificationPileAvailable
+	} else {
+		notification.Type = model.NotificationType(notificationType)
+	}
 	if portID.Valid {
 		value := int(portID.Int64)
 		notification.PortID = &value

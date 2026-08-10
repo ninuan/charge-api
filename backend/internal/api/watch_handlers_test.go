@@ -21,7 +21,7 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 	}
 	create := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`","portId":1,"notifyIdle":true}`,
+		`{"deviceId":"`+deviceID+`"}`,
 	)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create status = %d: %s", create.Code, create.Body.String())
@@ -33,7 +33,7 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 	if err := json.NewDecoder(create.Body).Decode(&rule); err != nil {
 		t.Fatalf("decode created watch rule: %v", err)
 	}
-	if rule.UserID != fixture.owner.ID || rule.DeviceID != deviceID || rule.PortID == nil || *rule.PortID != 1 || !rule.NotifyIdle {
+	if rule.UserID != fixture.owner.ID || rule.DeviceID != deviceID || !rule.Enabled {
 		t.Fatalf("unexpected created rule: %+v", rule)
 	}
 
@@ -52,17 +52,17 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 
 	duplicate := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`","portId":1,"notifyIdle":false}`,
+		`{"deviceId":"`+deviceID+`"}`,
 	)
 	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), "WATCH_RULE_CONFLICT") {
 		t.Fatalf("duplicate status = %d: %s", duplicate.Code, duplicate.Body.String())
 	}
-	unknownPort := watchAPIRequest(
+	legacyPortTarget := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`","portId":10,"notifyIdle":true}`,
+		`{"deviceId":"`+deviceID+`","portId":10}`,
 	)
-	if unknownPort.Code != http.StatusNotFound || !strings.Contains(unknownPort.Body.String(), "WATCH_TARGET_NOT_FOUND") {
-		t.Fatalf("unknown port status = %d: %s", unknownPort.Code, unknownPort.Body.String())
+	if legacyPortTarget.Code != http.StatusBadRequest || !strings.Contains(legacyPortTarget.Body.String(), "invalid json body") {
+		t.Fatalf("legacy port target status = %d: %s", legacyPortTarget.Code, legacyPortTarget.Body.String())
 	}
 
 	disabled := watchAPIRequest(
@@ -174,7 +174,7 @@ func TestWatchOverviewReturnsOnlyCurrentUserPolicyAndQuota(t *testing.T) {
 	const deviceID = "2601201412385560088"
 	created := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`","portId":1,"notifyIdle":true}`,
+		`{"deviceId":"`+deviceID+`"}`,
 	)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create reminder = %d: %s", created.Code, created.Body.String())
@@ -200,8 +200,8 @@ func TestWatchOverviewReturnsOnlyCurrentUserPolicyAndQuota(t *testing.T) {
 	if err := json.NewDecoder(overviewResponse.Body).Decode(&overview); err != nil {
 		t.Fatalf("decode watch overview: %v", err)
 	}
-	if overview.RuleCount != 1 || overview.ReminderPileCount != 1 || overview.DailyQuotaUsed != 7 ||
-		overview.RuleLimit != 20 || overview.ReminderPileLimit != 5 || overview.DailyQuotaLimit != 480 ||
+	if overview.ReminderPileCount != 1 || overview.DailyQuotaUsed != 7 ||
+		overview.ReminderPileLimit != 5 || overview.DailyQuotaLimit != 480 ||
 		!overview.BackgroundRemindersEnabled || !overview.AccountRefreshEnabled {
 		t.Fatalf("unexpected watch overview: %+v", overview)
 	}

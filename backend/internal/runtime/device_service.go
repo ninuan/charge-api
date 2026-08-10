@@ -312,7 +312,7 @@ func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) er
 	if err != nil {
 		return fmt.Errorf("record remote port status transitions: %w", err)
 	}
-	if err := m.processPortStatusEvents(events); err != nil {
+	if err := m.processPileAvailability(userID, piles, events); err != nil {
 		return fmt.Errorf("deliver remote port notifications: %w", err)
 	}
 	now := time.Now().UTC()

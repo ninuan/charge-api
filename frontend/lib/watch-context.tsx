@@ -41,11 +41,7 @@ type WatchContextValue = {
 const WatchContext = createContext<WatchContextValue | null>(null)
 
 function reminderPileCount(rules: WatchRule[]) {
-  return new Set(
-    rules
-      .filter((rule) => rule.enabled && rule.notifyIdle && rule.portId != null)
-      .map((rule) => rule.deviceId)
-  ).size
+  return new Set(rules.map((rule) => rule.deviceId)).size
 }
 
 export function WatchProvider({ children }: { children: ReactNode }) {
@@ -69,7 +65,6 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       current
         ? {
             ...current,
-            ruleCount: sorted.length,
             reminderPileCount: reminderPileCount(sorted),
           }
         : current

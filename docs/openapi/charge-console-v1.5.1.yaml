@@ -3,8 +3,8 @@ info:
   title: Charge Console API
   version: 1.5.1
   description: |
-    Charge Console 1.5.1 用户端历史、管理员趋势、关注规则与站内通知契约。
-    启用的端口空闲提醒会由受控后台调度器按整桩低频刷新。
+    Charge Console 1.5.1 用户端历史、管理员趋势、整桩空闲提醒与站内通知契约。
+    每个充电桩最多一条提醒规则；后台按桩号低频刷新，一次读取该桩全部端口。
 servers:
   - url: /
 security:
@@ -15,7 +15,7 @@ tags:
   - name: Admin Trends
     description: 管理员运营趋势分析
   - name: Watch Rules
-    description: 当前普通用户的充电桩收藏与端口空闲提醒规则
+    description: 当前普通用户按充电桩设置的空闲提醒规则
   - name: Notifications
     description: 当前普通用户的通知偏好与站内通知箱
 paths:
@@ -46,7 +46,7 @@ paths:
           $ref: "#/components/responses/WatchUnavailable"
     post:
       operationId: createWatchRule
-      summary: 创建充电桩收藏或端口提醒规则
+      summary: 为充电桩创建空闲提醒规则
       tags: [Watch Rules]
       requestBody:
         required: true
@@ -714,8 +714,6 @@ components:
       type: object
       additionalProperties: false
       required:
-        - ruleCount
-        - ruleLimit
         - reminderPileCount
         - reminderPileLimit
         - dailyQuotaUsed
@@ -729,12 +727,6 @@ components:
         - scheduledPowerOffEndMinute
         - scheduledPowerOffTimezone
       properties:
-        ruleCount:
-          type: integer
-          minimum: 0
-        ruleLimit:
-          type: integer
-          minimum: 1
         reminderPileCount:
           type: integer
           minimum: 0
@@ -777,7 +769,6 @@ components:
         - id
         - userId
         - deviceId
-        - notifyIdle
         - enabled
         - activeWeekdays
         - activeStartMinute
@@ -793,12 +784,6 @@ components:
         deviceId:
           type: string
           pattern: "^[0-9]{6,64}$"
-        portId:
-          type: integer
-          minimum: 1
-          nullable: true
-        notifyIdle:
-          type: boolean
         enabled:
           type: boolean
         activeWeekdays:
@@ -833,12 +818,6 @@ components:
         deviceId:
           type: string
           pattern: "^[0-9]{6,64}$"
-        portId:
-          type: integer
-          minimum: 1
-          nullable: true
-        notifyIdle:
-          type: boolean
         enabled:
           type: boolean
         activeWeekdays:
@@ -864,8 +843,6 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        notifyIdle:
-          type: boolean
         enabled:
           type: boolean
         activeWeekdays:
@@ -940,7 +917,7 @@ components:
           maxLength: 64
     NotificationType:
       type: string
-      enum: [port_idle, credential_expired, pile_offline, pile_recovered]
+      enum: [pile_available, credential_expired, pile_offline, pile_recovered]
     NotificationSeverity:
       type: string
       enum: [info, warning, critical]
@@ -1059,7 +1036,6 @@ components:
             - WATCH_TARGET_NOT_FOUND
             - WATCH_RULE_NOT_FOUND
             - WATCH_RULE_CONFLICT
-            - WATCH_RULE_LIMIT_REACHED
             - WATCH_PILE_LIMIT_REACHED
             - WATCH_UNAVAILABLE
             - NOTIFICATION_PREFERENCE_INVALID

@@ -5,10 +5,7 @@ import {
   ArrowUpIcon,
   BatteryChargingIcon,
   BarChart3Icon,
-  BellIcon,
   BellRingIcon,
-  BookmarkCheckIcon,
-  BookmarkIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   Clock3Icon,
@@ -50,11 +47,8 @@ type Props = {
   reordering: boolean
   onMove: (id: string, direction: "up" | "down") => void | Promise<void>
   onHistory: (id: string) => void
-  favorite: boolean
-  favoritePending: boolean
-  watchedPortIds: number[]
-  onToggleFavorite: (id: string) => void | Promise<void>
-  onConfigureWatch: (id: string, portId: number) => void
+  reminderEnabled: boolean
+  onConfigureReminder: (id: string) => void
 }
 
 function portMeta(port: Port) {
@@ -81,12 +75,8 @@ function portMeta(port: Port) {
 
 function PortStatusCard({
   port,
-  watched,
-  onConfigureWatch,
 }: {
   port: Port
-  watched: boolean
-  onConfigureWatch: (portId: number) => void
 }) {
   const cardRef = useRef<HTMLElement>(null)
   const mounted = useRef(false)
@@ -140,21 +130,6 @@ function PortStatusCard({
           {String(port.id).padStart(2, "0")}
         </span>
         <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant={watched ? "secondary" : "ghost"}
-            size="icon-xs"
-            className="transition-[color,background-color,border-color,transform] duration-150 active:scale-95"
-            aria-label={
-              watched
-                ? `${port.id} 号充电口已设置提醒，点击编辑`
-                : `为 ${port.id} 号充电口设置空闲提醒`
-            }
-            aria-pressed={watched}
-            onClick={() => onConfigureWatch(port.id)}
-          >
-            {watched ? <BellRingIcon /> : <BellIcon />}
-          </Button>
           <Icon className="size-4" aria-hidden />
         </div>
       </div>
@@ -189,11 +164,8 @@ function PileCardComponent({
   reordering,
   onMove,
   onHistory,
-  favorite,
-  favoritePending,
-  watchedPortIds,
-  onToggleFavorite,
-  onConfigureWatch,
+  reminderEnabled,
+  onConfigureReminder,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -290,23 +262,14 @@ function PileCardComponent({
                 历史趋势
               </Button>
               <Button
-                variant={favorite ? "secondary" : "outline"}
+                variant={reminderEnabled ? "secondary" : "outline"}
                 size="sm"
                 className="transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.98]"
-                disabled={favoritePending}
-                aria-pressed={favorite}
-                onClick={() => void onToggleFavorite(pile.id)}
+                aria-pressed={reminderEnabled}
+                onClick={() => onConfigureReminder(pile.id)}
               >
-                {favorite ? (
-                  <BookmarkCheckIcon data-icon="inline-start" />
-                ) : (
-                  <BookmarkIcon data-icon="inline-start" />
-                )}
-                {favoritePending
-                  ? "处理中…"
-                  : favorite
-                    ? "已收藏"
-                    : "收藏充电桩"}
+                <BellRingIcon data-icon="inline-start" />
+                {reminderEnabled ? "已设置空闲提醒" : "设置空闲提醒"}
               </Button>
             </div>
           </div>
@@ -388,8 +351,6 @@ function PileCardComponent({
               <PortStatusCard
                 key={port.id}
                 port={port}
-                watched={watchedPortIds.includes(port.id)}
-                onConfigureWatch={(portId) => onConfigureWatch(pile.id, portId)}
               />
             ))}
           </CardContent>
@@ -535,14 +496,11 @@ export const PileCard = memo(
     prev.onUpdate === next.onUpdate &&
     prev.onMove === next.onMove &&
     prev.onHistory === next.onHistory &&
-    prev.onToggleFavorite === next.onToggleFavorite &&
-    prev.onConfigureWatch === next.onConfigureWatch &&
-    prev.favorite === next.favorite &&
-    prev.favoritePending === next.favoritePending &&
+    prev.onConfigureReminder === next.onConfigureReminder &&
+    prev.reminderEnabled === next.reminderEnabled &&
     prev.canMoveUp === next.canMoveUp &&
     prev.canMoveDown === next.canMoveDown &&
     prev.reordering === next.reordering &&
     samePortIds(prev.visiblePortIds, next.visiblePortIds) &&
-    samePortIds(prev.watchedPortIds, next.watchedPortIds) &&
     samePile(prev.pile, next.pile)
 )

@@ -15,35 +15,22 @@ const (
 	testWatchPileTwo = "2601201412385560102"
 )
 
-func TestWatchRulesValidateOwnershipTargetsLimitsAndUpdates(t *testing.T) {
+func TestWatchRulesValidatePileOwnershipConflictAndUpdates(t *testing.T) {
 	manager, owner, other := newWatchTestManager(t)
 
-	favorite, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
+	rule, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
 		DeviceID: testWatchPileOne,
 	})
 	if err != nil {
-		t.Fatalf("CreateWatchRule favorite: %v", err)
+		t.Fatalf("CreateWatchRule: %v", err)
 	}
-	if favorite.PortID != nil || favorite.NotifyIdle || !favorite.Enabled {
-		t.Fatalf("unexpected favorite defaults: %+v", favorite)
-	}
-	portOne := 1
-	reminder, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testWatchPileOne, PortID: &portOne, NotifyIdle: true,
-	})
-	if err != nil {
-		t.Fatalf("CreateWatchRule reminder: %v", err)
+	if !rule.Enabled || rule.DeviceID != testWatchPileOne {
+		t.Fatalf("unexpected whole-pile defaults: %+v", rule)
 	}
 	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testWatchPileOne, PortID: &portOne,
+		DeviceID: testWatchPileOne,
 	}); !errors.Is(err, ErrWatchRuleConflict) {
 		t.Fatalf("duplicate target error = %v", err)
-	}
-	unknownPort := 10
-	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testWatchPileOne, PortID: &unknownPort,
-	}); !errors.Is(err, ErrWatchTargetNotFound) {
-		t.Fatalf("unknown port error = %v", err)
 	}
 	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
 		DeviceID: "2601201412385560999",
@@ -54,7 +41,7 @@ func TestWatchRulesValidateOwnershipTargetsLimitsAndUpdates(t *testing.T) {
 	disabled := false
 	start := 420
 	end := 1380
-	updated, err := manager.UpdateWatchRule(owner.ID, reminder.ID, model.WatchRuleUpdateRequest{
+	updated, err := manager.UpdateWatchRule(owner.ID, rule.ID, model.WatchRuleUpdateRequest{
 		Enabled: &disabled, ActiveStartMinute: &start, ActiveEndMinute: &end,
 	})
 	if err != nil {
@@ -63,61 +50,39 @@ func TestWatchRulesValidateOwnershipTargetsLimitsAndUpdates(t *testing.T) {
 	if updated.Enabled || updated.ActiveStartMinute != 420 || updated.ActiveEndMinute != 1380 {
 		t.Fatalf("watch rule update did not apply: %+v", updated)
 	}
-	if _, err := manager.UpdateWatchRule(other.ID, reminder.ID, model.WatchRuleUpdateRequest{
+	if _, err := manager.UpdateWatchRule(other.ID, rule.ID, model.WatchRuleUpdateRequest{
 		Enabled: &disabled,
 	}); !errors.Is(err, ErrWatchRuleNotFound) {
 		t.Fatalf("cross-user update error = %v", err)
 	}
-	if err := manager.DeleteWatchRule(other.ID, favorite.ID); !errors.Is(err, ErrWatchRuleNotFound) {
+	if err := manager.DeleteWatchRule(other.ID, rule.ID); !errors.Is(err, ErrWatchRuleNotFound) {
 		t.Fatalf("cross-user delete error = %v", err)
-	}
-	if err := manager.DeleteWatchRule(owner.ID, favorite.ID); err != nil {
-		t.Fatalf("DeleteWatchRule: %v", err)
-	}
-	rules, err := manager.WatchRules(owner.ID)
-	if err != nil || len(rules) != 1 || rules[0].ID != reminder.ID {
-		t.Fatalf("WatchRules after delete = %+v, err %v", rules, err)
 	}
 	if err := manager.DeletePile(owner.ID, testWatchPileOne); err != nil {
 		t.Fatalf("DeletePile with watch rule: %v", err)
 	}
-	rules, err = manager.WatchRules(owner.ID)
+	rules, err := manager.WatchRules(owner.ID)
 	if err != nil || len(rules) != 0 {
 		t.Fatalf("watch rules remained after pile deletion: %+v, err %v", rules, err)
 	}
 }
 
-func TestWatchRulesLimitEnabledReminderPilesButNotFavorites(t *testing.T) {
+func TestWatchRulesEnforceWholePileLimit(t *testing.T) {
 	manager, owner, _ := newWatchTestManager(t)
-	portOne := 1
+	settings := manager.Settings()
+	settings.WatchPileLimitPerUser = 1
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("UpdateSettings pile limit: %v", err)
+	}
 	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testWatchPileOne, PortID: &portOne, NotifyIdle: true,
+		DeviceID: testWatchPileOne,
 	}); err != nil {
 		t.Fatalf("create first pile reminder: %v", err)
 	}
-	portTwo := 1
-	secondPileFavorite, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testWatchPileTwo, PortID: &portTwo,
-	})
-	if err != nil {
-		t.Fatalf("create second pile favorite: %v", err)
-	}
-	notifyIdle := true
-	if _, err := manager.UpdateWatchRule(owner.ID, secondPileFavorite.ID, model.WatchRuleUpdateRequest{
-		NotifyIdle: &notifyIdle,
-	}); !errors.Is(err, ErrWatchPileLimit) {
-		t.Fatalf("second active reminder pile error = %v", err)
-	}
-
-	settings := manager.Settings()
-	settings.WatchRuleLimitPerUser = 2
-	if err := manager.UpdateSettings(settings); err != nil {
-		t.Fatalf("UpdateSettings rule limit: %v", err)
-	}
 	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
 		DeviceID: testWatchPileTwo,
-	}); !errors.Is(err, ErrWatchRuleLimit) {
-		t.Fatalf("rule limit error = %v", err)
+	}); !errors.Is(err, ErrWatchPileLimit) {
+		t.Fatalf("pile limit error = %v", err)
 	}
 }
 

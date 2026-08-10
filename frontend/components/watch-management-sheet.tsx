@@ -2,7 +2,6 @@
 
 import {
   BellRingIcon,
-  BookmarkIcon,
   CalendarClockIcon,
   GaugeIcon,
   LoaderCircleIcon,
@@ -82,9 +81,8 @@ function pileLabel(piles: Pile[], deviceId: string) {
   return pile?.name || pile?.number || deviceId
 }
 
-function ruleLabel(rule: WatchRule) {
-  if (rule.portId == null) return "整桩收藏"
-  return `${rule.portId} 号充电口`
+function ruleLabel() {
+  return "整桩任意端口空闲时提醒"
 }
 
 function QuietHoursForm({
@@ -220,8 +218,7 @@ export function WatchManagementSheet({
           pileLabel(piles, right.deviceId),
           "zh-CN"
         )
-        if (pileCompare !== 0) return pileCompare
-        return (left.portId ?? 0) - (right.portId ?? 0)
+        return pileCompare
       }),
     [piles, rules]
   )
@@ -239,7 +236,7 @@ export function WatchManagementSheet({
     setRulePending(rule.id, true)
     try {
       await updateRule(rule.id, { enabled })
-      toast.success(enabled ? "关注规则已启用" : "关注规则已停用")
+      toast.success(enabled ? "空闲提醒已启用" : "空闲提醒已停用")
     } catch (reason) {
       toast.error((reason as Error).message)
     } finally {
@@ -254,7 +251,7 @@ export function WatchManagementSheet({
     try {
       await deleteRule(candidate.id)
       setDeleteCandidate(null)
-      toast.success("关注规则已删除")
+      toast.success("空闲提醒已删除")
     } catch (reason) {
       toast.error((reason as Error).message)
     } finally {
@@ -274,9 +271,9 @@ export function WatchManagementSheet({
           className="w-[calc(100vw-0.5rem)] max-w-2xl overflow-y-auto p-0 sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl [&_[data-slot=sheet-close]]:z-20"
         >
           <SheetHeader className="sticky top-0 z-10 border-b bg-popover/95 py-4 pr-14 pl-5 backdrop-blur sm:pr-14 sm:pl-6">
-            <SheetTitle>关注与空闲提醒</SheetTitle>
+            <SheetTitle>空闲提醒管理</SheetTitle>
             <SheetDescription>
-              收藏常用设备，或在指定时段等待端口空闲通知。
+              按充电桩设置时段；任意端口从占用变为空闲时提醒一次。
             </SheetDescription>
           </SheetHeader>
 
@@ -288,15 +285,7 @@ export function WatchManagementSheet({
                 <Skeleton className="h-24" />
               </div>
             ) : overview ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <Card size="sm">
-                  <CardHeader>
-                    <CardDescription>关注规则</CardDescription>
-                    <CardTitle className="text-xl tabular-nums">
-                      {overview.ruleCount}/{overview.ruleLimit}
-                    </CardTitle>
-                  </CardHeader>
-                </Card>
+              <div className="grid grid-cols-2 gap-3">
                 <Card size="sm">
                   <CardHeader>
                     <CardDescription>提醒充电桩</CardDescription>
@@ -305,7 +294,7 @@ export function WatchManagementSheet({
                     </CardTitle>
                   </CardHeader>
                 </Card>
-                <Card size="sm" className="col-span-2 sm:col-span-1">
+                <Card size="sm">
                   <CardHeader>
                     <CardDescription>今日后台检查</CardDescription>
                     <CardTitle className="text-xl tabular-nums">
@@ -322,7 +311,7 @@ export function WatchManagementSheet({
                 <AlertTitle>后台提醒当前已暂停</AlertTitle>
                 <AlertDescription>
                   {overview.accountRefreshEnabled
-                    ? "管理员关闭了全局后台提醒，收藏和规则仍会保留。"
+                    ? "管理员关闭了全局后台提醒，规则仍会保留。"
                     : "管理员暂停了当前账户的远端刷新，规则恢复后才会继续检查。"}
                 </AlertDescription>
               </Alert>
@@ -331,8 +320,8 @@ export function WatchManagementSheet({
             <Tabs defaultValue="rules">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="rules">
-                  <BookmarkIcon data-icon="inline-start" />
-                  关注列表
+                  <BellRingIcon data-icon="inline-start" />
+                  提醒列表
                 </TabsTrigger>
                 <TabsTrigger value="settings">
                   <Settings2Icon data-icon="inline-start" />
@@ -343,7 +332,7 @@ export function WatchManagementSheet({
               <TabsContent value="rules" className="flex flex-col gap-3 pt-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="font-medium">已关注的目标</h3>
+                    <h3 className="font-medium">已设置提醒的充电桩</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
                       停用会保留时段设置，删除才会移出列表。
                     </p>
@@ -354,7 +343,7 @@ export function WatchManagementSheet({
                     onClick={() => onEditRule({})}
                   >
                     <PlusIcon data-icon="inline-start" />
-                    添加关注
+                    添加提醒
                   </Button>
                 </div>
 
@@ -364,9 +353,9 @@ export function WatchManagementSheet({
                       <EmptyMedia variant="icon">
                         <BellRingIcon />
                       </EmptyMedia>
-                      <EmptyTitle>还没有关注规则</EmptyTitle>
+                      <EmptyTitle>还没有空闲提醒</EmptyTitle>
                       <EmptyDescription>
-                        收藏常用充电桩不会请求远端；为空闲端口开启提醒后才会低频检查。
+                        选择一台充电桩和生效时段，系统会按桩号低频检查全部端口。
                       </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
@@ -375,7 +364,7 @@ export function WatchManagementSheet({
                         onClick={() => onEditRule({})}
                       >
                         <PlusIcon data-icon="inline-start" />
-                        添加第一个关注
+                        添加第一个提醒
                       </Button>
                     </EmptyContent>
                   </Empty>
@@ -392,7 +381,7 @@ export function WatchManagementSheet({
                           <CardTitle>
                             {pileLabel(piles, rule.deviceId)}
                           </CardTitle>
-                          <CardDescription>{ruleLabel(rule)}</CardDescription>
+                          <CardDescription>{ruleLabel()}</CardDescription>
                           <CardAction>
                             <Switch
                               size="sm"
@@ -408,15 +397,9 @@ export function WatchManagementSheet({
                           </CardAction>
                         </CardHeader>
                         <CardContent className="flex flex-wrap items-center gap-2">
-                          <Badge
-                            variant={rule.notifyIdle ? "default" : "outline"}
-                          >
-                            {rule.notifyIdle ? (
-                              <BellRingIcon />
-                            ) : (
-                              <BookmarkIcon />
-                            )}
-                            {rule.notifyIdle ? "空闲提醒" : "仅收藏"}
+                          <Badge variant="default">
+                            <BellRingIcon />
+                            整桩空闲提醒
                           </Badge>
                           <Badge
                             variant={rule.enabled ? "secondary" : "outline"}
@@ -538,12 +521,12 @@ export function WatchManagementSheet({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除这条关注规则？</DialogTitle>
+            <DialogTitle>删除这条空闲提醒？</DialogTitle>
             <DialogDescription>
               {deleteCandidate
-                ? `${pileLabel(piles, deleteCandidate.deviceId)} · ${ruleLabel(deleteCandidate)}，`
+                ? `${pileLabel(piles, deleteCandidate.deviceId)} · ${ruleLabel()}，`
                 : "该规则"}
-              将从关注列表移除，已有站内通知不会删除。
+              将从提醒列表移除，已有站内通知不会删除。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

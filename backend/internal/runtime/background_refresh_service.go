@@ -108,7 +108,7 @@ func (m *Manager) refreshWatchedPile(userID, deviceID string, beforeRemoteReques
 	if err != nil {
 		return result, fmt.Errorf("record watched pile status transitions: %w", err)
 	}
-	if err := m.processPortStatusEvents(events); err != nil {
+	if err := m.processPileAvailability(userID, []model.Pile{result.Pile}, events); err != nil {
 		return result, fmt.Errorf("deliver watched pile notifications: %w", err)
 	}
 	return result, nil
@@ -120,7 +120,7 @@ func (m *Manager) hasEnabledPileReminder(userID, deviceID string) (bool, error) 
 		return false, fmt.Errorf("list watch rules for background refresh: %w", err)
 	}
 	for _, rule := range rules {
-		if rule.DeviceID == deviceID && rule.PortID != nil && rule.Enabled && rule.NotifyIdle {
+		if rule.DeviceID == deviceID && rule.Enabled {
 			return true, nil
 		}
 	}

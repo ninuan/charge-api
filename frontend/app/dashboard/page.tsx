@@ -142,8 +142,6 @@ export default function DashboardPage() {
   const {
     rules: watchRules,
     load: loadWatch,
-    createRule: createWatchRule,
-    deleteRule: deleteWatchRule,
   } = useWatch()
   const [refreshing, setRefreshing] = useState(false)
   const [reordering, setReordering] = useState(false)
@@ -153,9 +151,6 @@ export default function DashboardPage() {
   const [historyPileId, setHistoryPileId] = useState<string | null>(null)
   const [watchManagementOpen, setWatchManagementOpen] = useState(false)
   const [watchTarget, setWatchTarget] = useState<WatchEditorTarget | null>(null)
-  const [favoritePendingIds, setFavoritePendingIds] = useState<Set<string>>(
-    () => new Set()
-  )
   const [queryReady, setQueryReady] = useState(false)
   // 输入框即时回显，筛选计算滞后一拍，键入时不再同步重渲染整个卡片列表。
   const deferredSearch = useDeferredValue(search)
@@ -281,62 +276,10 @@ export default function DashboardPage() {
     [historyPileId, snapshot.piles]
   )
   const openHistory = useCallback((id: string) => setHistoryPileId(id), [])
-  const rulesByPile = useMemo(() => {
-    const grouped = new Map<
-      string,
-      { favoriteRuleId?: string; watchedPortIds: number[] }
-    >()
-    for (const rule of watchRules) {
-      const current = grouped.get(rule.deviceId) ?? { watchedPortIds: [] }
-      if (rule.portId == null) current.favoriteRuleId = rule.id
-      else if (rule.enabled && rule.notifyIdle)
-        current.watchedPortIds.push(rule.portId)
-      grouped.set(rule.deviceId, current)
-    }
-    return grouped
-  }, [watchRules])
-
-  const toggleFavorite = useCallback(
-    async (pileId: string) => {
-      setFavoritePendingIds((current) => new Set(current).add(pileId))
-      try {
-        const existing = watchRules.find(
-          (rule) => rule.deviceId === pileId && rule.portId == null
-        )
-        if (existing) {
-          await deleteWatchRule(existing.id)
-          toast.success("已取消收藏")
-        } else {
-          await createWatchRule({
-            deviceId: pileId,
-            notifyIdle: false,
-            enabled: true,
-            activeWeekdays: 127,
-            activeStartMinute: 0,
-            activeEndMinute: 0,
-            timezone: "Asia/Shanghai",
-          })
-          toast.success("已收藏充电桩")
-        }
-      } catch (reason) {
-        handleError(reason)
-      } finally {
-        setFavoritePendingIds((current) => {
-          const next = new Set(current)
-          next.delete(pileId)
-          return next
-        })
-      }
-    },
-    [createWatchRule, deleteWatchRule, handleError, watchRules]
-  )
-
-  const configureWatch = useCallback(
-    (pileId: string, portId: number) => {
-      const existing = watchRules.find(
-        (rule) => rule.deviceId === pileId && rule.portId === portId
-      )
-      setWatchTarget({ pileId, portId, ruleId: existing?.id })
+  const configureReminder = useCallback(
+    (pileId: string) => {
+      const existing = watchRules.find((rule) => rule.deviceId === pileId)
+      setWatchTarget({ pileId, ruleId: existing?.id })
     },
     [watchRules]
   )
@@ -375,7 +318,7 @@ export default function DashboardPage() {
     <AppShell
       compact
       title="充电桩运营看板"
-      description="端口占用、刷新状态与筛选结果一处查看；仅在主动刷新时请求远端接口。"
+      description="端口占用、刷新状态与筛选结果一处查看；已启用提醒的充电桩会按设定时段低频检查。"
       actions={
         <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center [&_button]:w-full md:[&_button]:w-auto">
           <span className="hidden items-center gap-1.5 text-xs text-muted-foreground lg:inline-flex">
@@ -399,7 +342,7 @@ export default function DashboardPage() {
             onClick={() => setWatchManagementOpen(true)}
           >
             <BellRingIcon />
-            关注管理
+            空闲提醒
           </Button>
           <YybLoginDialog />
           <AddPileDialog />
@@ -534,15 +477,11 @@ export default function DashboardPage() {
                   reordering={reordering}
                   onMove={handleMove}
                   onHistory={openHistory}
-                  favorite={Boolean(
-                    rulesByPile.get(entry.pile.id)?.favoriteRuleId
+                  reminderEnabled={watchRules.some(
+                    (rule) =>
+                      rule.deviceId === entry.pile.id && rule.enabled
                   )}
-                  favoritePending={favoritePendingIds.has(entry.pile.id)}
-                  watchedPortIds={
-                    rulesByPile.get(entry.pile.id)?.watchedPortIds ?? []
-                  }
-                  onToggleFavorite={toggleFavorite}
-                  onConfigureWatch={configureWatch}
+                  onConfigureReminder={configureReminder}
                 />
               </div>
             ))}

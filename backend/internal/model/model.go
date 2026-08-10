@@ -268,7 +268,6 @@ type RegistrationSettings struct {
 	PortHistoryRetentionDays     int    `json:"portHistoryRetentionDays"`
 	BackgroundRemindersEnabled   bool   `json:"backgroundRemindersEnabled"`
 	WatchRefreshIntervalMinutes  int    `json:"watchRefreshIntervalMinutes"`
-	WatchRuleLimitPerUser        int    `json:"watchRuleLimitPerUser"`
 	WatchPileLimitPerUser        int    `json:"watchPileLimitPerUser"`
 	WatchDailyRefreshQuota       int    `json:"watchDailyRefreshQuota"`
 	NotificationRetentionDays    int    `json:"notificationRetentionDays"`
@@ -283,8 +282,6 @@ type WatchRule struct {
 	ID                string    `json:"id"`
 	UserID            string    `json:"userId"`
 	DeviceID          string    `json:"deviceId"`
-	PortID            *int      `json:"portId,omitempty"`
-	NotifyIdle        bool      `json:"notifyIdle"`
 	Enabled           bool      `json:"enabled"`
 	ActiveWeekdays    int       `json:"activeWeekdays"`
 	ActiveStartMinute int       `json:"activeStartMinute"`
@@ -296,8 +293,6 @@ type WatchRule struct {
 
 type WatchRuleCreateRequest struct {
 	DeviceID          string  `json:"deviceId"`
-	PortID            *int    `json:"portId,omitempty"`
-	NotifyIdle        bool    `json:"notifyIdle"`
 	Enabled           *bool   `json:"enabled,omitempty"`
 	ActiveWeekdays    *int    `json:"activeWeekdays,omitempty"`
 	ActiveStartMinute *int    `json:"activeStartMinute,omitempty"`
@@ -306,7 +301,6 @@ type WatchRuleCreateRequest struct {
 }
 
 type WatchRuleUpdateRequest struct {
-	NotifyIdle        *bool   `json:"notifyIdle,omitempty"`
 	Enabled           *bool   `json:"enabled,omitempty"`
 	ActiveWeekdays    *int    `json:"activeWeekdays,omitempty"`
 	ActiveStartMinute *int    `json:"activeStartMinute,omitempty"`
@@ -335,7 +329,7 @@ type NotificationPreferenceUpdateRequest struct {
 type NotificationType string
 
 const (
-	NotificationPortIdle          NotificationType = "port_idle"
+	NotificationPileAvailable     NotificationType = "pile_available"
 	NotificationCredentialExpired NotificationType = "credential_expired"
 	NotificationPileOffline       NotificationType = "pile_offline"
 	NotificationPileRecovered     NotificationType = "pile_recovered"
@@ -373,12 +367,13 @@ type WatchRefreshState struct {
 	PausedReason        string     `json:"pausedReason,omitempty"`
 	QuotaDate           string     `json:"quotaDate"`
 	QuotaUsed           int        `json:"quotaUsed"`
+	AvailabilityKnown   bool       `json:"availabilityKnown"`
+	HadIdlePort         bool       `json:"hadIdlePort"`
+	AvailabilityEventID int64      `json:"availabilityEventId"`
 	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 type WatchOverview struct {
-	RuleCount                    int    `json:"ruleCount"`
-	RuleLimit                    int    `json:"ruleLimit"`
 	ReminderPileCount            int    `json:"reminderPileCount"`
 	ReminderPileLimit            int    `json:"reminderPileLimit"`
 	DailyQuotaUsed               int    `json:"dailyQuotaUsed"`

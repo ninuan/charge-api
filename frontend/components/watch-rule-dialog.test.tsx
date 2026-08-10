@@ -63,7 +63,7 @@ afterEach(() => {
 })
 
 describe("WatchRuleDialog", () => {
-  it("creates a port reminder with an explicit cross-midnight window", async () => {
+  it("creates a whole-pile reminder with an explicit cross-midnight window", async () => {
     const user = userEvent.setup()
     watchContextMock.createRule.mockResolvedValue({ id: "rule-1" })
     const onOpenChange = vi.fn()
@@ -71,7 +71,7 @@ describe("WatchRuleDialog", () => {
     render(
       <WatchRuleDialog
         piles={[pile]}
-        target={{ pileId: "pile-1", portId: 2 }}
+        target={{ pileId: "pile-1" }}
         open
         onOpenChange={onOpenChange}
       />
@@ -90,8 +90,6 @@ describe("WatchRuleDialog", () => {
     await waitFor(() =>
       expect(watchContextMock.createRule).toHaveBeenCalledWith({
         deviceId: "pile-1",
-        portId: 2,
-        notifyIdle: true,
         enabled: true,
         activeWeekdays: 127,
         activeStartMinute: 1350,

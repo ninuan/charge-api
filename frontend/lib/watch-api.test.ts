@@ -31,7 +31,7 @@ describe("watchApi", () => {
     )
   })
 
-  it("writes a whole-pile favorite without inventing a port request", async () => {
+  it("writes one whole-pile reminder without a port target", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({})))
@@ -39,7 +39,6 @@ describe("watchApi", () => {
 
     await watchApi.createRule({
       deviceId: "pile-1",
-      notifyIdle: false,
       activeWeekdays: 127,
       activeStartMinute: 0,
       activeEndMinute: 0,
@@ -51,7 +50,6 @@ describe("watchApi", () => {
         method: "POST",
         body: JSON.stringify({
           deviceId: "pile-1",
-          notifyIdle: false,
           activeWeekdays: 127,
           activeStartMinute: 0,
           activeEndMinute: 0,

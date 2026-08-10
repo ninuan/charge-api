@@ -144,12 +144,8 @@ func (s *Store) initialize() error {
 			CHECK(port_id IS NULL OR port_id > 0),
 			CHECK(notify_idle = 0 OR port_id IS NOT NULL)
 		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS watch_rules_user_target_unique_idx
-			ON watch_rules(user_id, device_id, COALESCE(port_id, 0))`,
 		`CREATE INDEX IF NOT EXISTS watch_rules_user_updated_idx
 			ON watch_rules(user_id, updated_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS watch_rules_enabled_pile_idx
-			ON watch_rules(enabled, notify_idle, device_id)`,
 		`CREATE TABLE IF NOT EXISTS notification_preferences (
 			user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 			browser_enabled INTEGER NOT NULL DEFAULT 0 CHECK(browser_enabled IN (0, 1)),
@@ -195,6 +191,9 @@ func (s *Store) initialize() error {
 			paused_reason TEXT NOT NULL DEFAULT '',
 			quota_date TEXT NOT NULL DEFAULT '',
 			quota_used INTEGER NOT NULL DEFAULT 0 CHECK(quota_used >= 0),
+			availability_known INTEGER NOT NULL DEFAULT 0 CHECK(availability_known IN (0, 1)),
+			had_idle_port INTEGER NOT NULL DEFAULT 0 CHECK(had_idle_port IN (0, 1)),
+			availability_event_id INTEGER NOT NULL DEFAULT 0 CHECK(availability_event_id >= 0),
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY(user_id, device_id),
 			CHECK(length(trim(device_id)) > 0)
@@ -245,6 +244,9 @@ func (s *Store) initialize() error {
 			return fmt.Errorf("initialize sqlite database: %w", err)
 		}
 	}
+	if err := s.normalizeWatchRulesToPiles(); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("users", "device_limit", "INTEGER NOT NULL DEFAULT 10"); err != nil {
 		return err
 	}
@@ -269,6 +271,15 @@ func (s *Store) initialize() error {
 	if err := s.ensureColumn("metrics", "count", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("watch_refresh_states", "availability_known", "INTEGER NOT NULL DEFAULT 0 CHECK(availability_known IN (0, 1))"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("watch_refresh_states", "had_idle_port", "INTEGER NOT NULL DEFAULT 0 CHECK(had_idle_port IN (0, 1))"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("watch_refresh_states", "availability_event_id", "INTEGER NOT NULL DEFAULT 0 CHECK(availability_event_id >= 0)"); err != nil {
+		return err
+	}
 	for column, definition := range map[string]string{
 		"browser":        "TEXT NOT NULL DEFAULT ''",
 		"os":             "TEXT NOT NULL DEFAULT ''",
@@ -287,6 +298,62 @@ func (s *Store) initialize() error {
 	)
 	if err != nil {
 		return fmt.Errorf("write schema version: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) normalizeWatchRulesToPiles() error {
+	if _, ok, err := s.metadata("watch_rules_pile_level"); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin pile-level watch rule migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Former favorites never triggered remote requests, so silently turning
+	// them into reminders would be surprising. Only old active reminder rows
+	// migrate; multiple port rules for one pile collapse to the most recently
+	// updated rule and retain its schedule and enabled state.
+	if _, err := tx.Exec(`DELETE FROM watch_rules WHERE notify_idle = 0`); err != nil {
+		return fmt.Errorf("remove legacy watch favorites: %w", err)
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM watch_rules
+		WHERE id IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY user_id, device_id
+					ORDER BY enabled DESC, updated_at DESC, id
+				) AS position
+				FROM watch_rules
+			) WHERE position > 1
+		)
+	`); err != nil {
+		return fmt.Errorf("merge legacy port watch rules: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE watch_rules SET port_id = NULL, notify_idle = 0`); err != nil {
+		return fmt.Errorf("normalize pile watch rule targets: %w", err)
+	}
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS watch_rules_user_target_unique_idx`); err != nil {
+		return fmt.Errorf("drop legacy watch target index: %w", err)
+	}
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS watch_rules_enabled_pile_idx`); err != nil {
+		return fmt.Errorf("drop legacy watch scheduler index: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS watch_rules_user_pile_unique_idx ON watch_rules(user_id, device_id)`); err != nil {
+		return fmt.Errorf("create pile watch rule index: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS watch_rules_enabled_pile_idx ON watch_rules(enabled, device_id)`); err != nil {
+		return fmt.Errorf("create pile watch scheduler index: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO metadata(key, value) VALUES('watch_rules_pile_level', '1')`); err != nil {
+		return fmt.Errorf("mark pile watch rule migration: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit pile-level watch rule migration: %w", err)
 	}
 	return nil
 }
