@@ -27,6 +27,7 @@ const (
 	authBodyLimit     = 16 * 1024
 	adminBodyLimit    = 16 * 1024
 	pileBodyLimit     = 4 * 1024
+	watchBodyLimit    = 8 * 1024
 	cookieBodyLimit   = 32 * 1024
 )
 
@@ -120,6 +121,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/invites/", s.handleAdminInviteActions)
 	mux.HandleFunc("/api/piles", s.handlePiles)
 	mux.HandleFunc("/api/piles/", s.handlePileActions)
+	mux.HandleFunc("/api/watch-rules", s.handleWatchRules)
+	mux.HandleFunc("/api/watch-rules/", s.handleWatchRuleActions)
+	mux.HandleFunc("/api/notification-preferences", s.handleNotificationPreference)
+	mux.HandleFunc("/api/notifications", s.handleNotifications)
+	mux.HandleFunc("/api/notifications/", s.handleNotificationActions)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)
 	mux.HandleFunc("/api/session/cookie", s.handleCookieUpdate)
 	mux.HandleFunc("/api/session/yyb-binding", s.handleYYBBinding)

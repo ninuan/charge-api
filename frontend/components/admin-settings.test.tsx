@@ -25,6 +25,17 @@ const settings = {
   defaultDeviceLimit: 10,
   statsRetentionDays: 90,
   portHistoryRetentionDays: 90,
+  backgroundRemindersEnabled: true,
+  watchRefreshIntervalMinutes: 10,
+  watchRuleLimitPerUser: 20,
+  watchPileLimitPerUser: 5,
+  watchDailyRefreshQuota: 480,
+  notificationRetentionDays: 90,
+  scheduledPowerOffEnabled: true,
+  scheduledPowerOffStartMinute: 1380,
+  scheduledPowerOffEndMinute: 420,
+  scheduledPowerOffTimezone: "Asia/Shanghai",
+  powerRestoreJitterMinutes: 10,
 }
 
 const invitePage = {

@@ -125,6 +125,8 @@ func (m *Manager) AddPileWithYYB(userID string, req model.PileUpsertRequest, yyb
 }
 
 func (m *Manager) DeletePile(userID string, id string) error {
+	m.watchMu.Lock()
+	defer m.watchMu.Unlock()
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
 		return err
@@ -140,6 +142,9 @@ func (m *Manager) DeletePile(userID string, id string) error {
 	}
 	runtime.client.RemoveDevice(id)
 	if err := m.Save(); err != nil {
+		return err
+	}
+	if err := m.repository.DeleteWatchDataForPile(userID, id); err != nil {
 		return err
 	}
 	_, err = m.repository.DeletePortStatusEvents(userID, id)

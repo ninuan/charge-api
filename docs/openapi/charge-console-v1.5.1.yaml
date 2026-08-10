@@ -1,0 +1,1368 @@
+openapi: 3.0.3
+info:
+  title: Charge Console API
+  version: 1.5.1
+  description: |
+    Charge Console 1.5.1 用户端历史、管理员趋势、关注规则与站内通知契约。
+    关注规则本身不会在本阶段触发后台刷新；调度器将在后续阶段接入。
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+tags:
+  - name: History
+    description: 当前登录普通用户所绑定充电桩的历史分析
+  - name: Admin Trends
+    description: 管理员运营趋势分析
+  - name: Watch Rules
+    description: 当前普通用户的充电桩收藏与端口空闲提醒规则
+  - name: Notifications
+    description: 当前普通用户的通知偏好与站内通知箱
+paths:
+  /api/watch-rules:
+    get:
+      operationId: listWatchRules
+      summary: 获取当前用户的全部关注规则
+      tags: [Watch Rules]
+      responses:
+        "200":
+          description: 按更新时间倒序返回的关注规则
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchRule"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/WatchUnavailable"
+    post:
+      operationId: createWatchRule
+      summary: 创建充电桩收藏或端口提醒规则
+      tags: [Watch Rules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WatchRuleCreateRequest"
+      responses:
+        "201":
+          description: 已创建的关注规则
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchRule"
+        "400":
+          $ref: "#/components/responses/WatchInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/WatchTargetNotFound"
+        "409":
+          $ref: "#/components/responses/WatchConflict"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/WatchUnavailable"
+  /api/watch-rules/{ruleId}:
+    parameters:
+      - $ref: "#/components/parameters/WatchRuleId"
+    patch:
+      operationId: updateWatchRule
+      summary: 更新关注规则状态和生效时段
+      tags: [Watch Rules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WatchRuleUpdateRequest"
+      responses:
+        "200":
+          description: 更新后的关注规则
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchRule"
+        "400":
+          $ref: "#/components/responses/WatchInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/WatchRuleNotFound"
+        "409":
+          $ref: "#/components/responses/WatchConflict"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/WatchUnavailable"
+    delete:
+      operationId: deleteWatchRule
+      summary: 删除关注规则
+      tags: [Watch Rules]
+      responses:
+        "204":
+          description: 关注规则已删除
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/WatchRuleNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/WatchUnavailable"
+  /api/notification-preferences:
+    get:
+      operationId: getNotificationPreference
+      summary: 获取当前用户的通知偏好
+      tags: [Notifications]
+      responses:
+        "200":
+          description: 浏览器通知意愿与免打扰设置
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreference"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotificationUnavailable"
+    patch:
+      operationId: updateNotificationPreference
+      summary: 更新通知偏好
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPreferenceUpdateRequest"
+      responses:
+        "200":
+          description: 更新后的通知偏好
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreference"
+        "400":
+          $ref: "#/components/responses/NotificationPreferenceInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotificationUnavailable"
+  /api/notifications:
+    get:
+      operationId: listNotifications
+      summary: 分页获取当前用户的站内通知
+      tags: [Notifications]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NotificationStatusFilter"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: 通知分页、下一游标和总未读数量
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPage"
+        "400":
+          $ref: "#/components/responses/NotificationQueryInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotificationUnavailable"
+  /api/notifications/{notificationId}/read:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    post:
+      operationId: markNotificationRead
+      summary: 将单条通知标记为已读
+      tags: [Notifications]
+      responses:
+        "200":
+          description: 已读后的通知
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/NotificationNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotificationUnavailable"
+  /api/notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      summary: 将当前用户的全部未读通知标记为已读
+      tags: [Notifications]
+      responses:
+        "200":
+          description: 实际更新数量
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdatedCount"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotificationUnavailable"
+  /api/notifications/resolved:
+    delete:
+      operationId: deleteResolvedNotifications
+      summary: 清理当前用户已经解决的通知
+      tags: [Notifications]
+      responses:
+        "200":
+          description: 实际删除数量
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedCount"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotificationUnavailable"
+  /api/admin/trends:
+    get:
+      operationId: getAdminTrends
+      summary: 获取管理员运营趋势
+      tags: [Admin Trends]
+      parameters:
+        - $ref: "#/components/parameters/AdminTrendRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 请求量、远端成功率、活跃用户和离线端口趋势
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTrendsResponse"
+        "400":
+          $ref: "#/components/responses/InvalidAdminTrendQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AdminTrendsUnavailable"
+  /api/admin/trends.csv:
+    get:
+      operationId: exportAdminTrendsCSV
+      summary: 导出管理员运营趋势 CSV
+      tags: [Admin Trends]
+      parameters:
+        - $ref: "#/components/parameters/AdminTrendRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 与相同范围趋势接口数值一致的 UTF-8 BOM CSV 文件
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+            Content-Disposition:
+              $ref: "#/components/headers/CSVContentDisposition"
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/InvalidAdminTrendQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AdminTrendsUnavailable"
+  /api/piles/{deviceId}/history:
+    get:
+      operationId: getDeviceHistory
+      summary: 获取充电桩历史分析
+      tags: [History]
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/HistoryRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 设备维度的历史指标、每日趋势、热力图和端口摘要
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceHistoryResponse"
+        "400":
+          $ref: "#/components/responses/InvalidHistoryQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/HistoryNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "422":
+          $ref: "#/components/responses/HistoryRangeTooLarge"
+        "503":
+          $ref: "#/components/responses/HistoryUnavailable"
+  /api/piles/{deviceId}/ports/{portId}/history:
+    get:
+      operationId: getPortHistory
+      summary: 获取单个充电口历史分析
+      tags: [History]
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/PortId"
+        - $ref: "#/components/parameters/HistoryRange"
+        - $ref: "#/components/parameters/Timezone"
+      responses:
+        "200":
+          description: 单个端口的历史指标、每日趋势和最近状态时间线
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortHistoryResponse"
+        "400":
+          $ref: "#/components/responses/InvalidPortHistoryQuery"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          $ref: "#/components/responses/HistoryNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "422":
+          $ref: "#/components/responses/HistoryRangeTooLarge"
+        "503":
+          $ref: "#/components/responses/HistoryUnavailable"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: charge_session
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      description: 当前用户已绑定的 6–64 位数字设备 ID
+      schema:
+        type: string
+        pattern: "^[0-9]{6,64}$"
+    PortId:
+      name: portId
+      in: path
+      required: true
+      description: 充电口编号
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    HistoryRange:
+      name: range
+      in: query
+      required: false
+      description: 历史统计范围；省略时使用 7d
+      schema:
+        $ref: "#/components/schemas/HistoryRange"
+    AdminTrendRange:
+      name: range
+      in: query
+      required: false
+      description: 趋势统计范围；省略时使用 24h
+      schema:
+        $ref: "#/components/schemas/AdminTrendRange"
+    Timezone:
+      name: timezone
+      in: query
+      required: false
+      description: IANA 时区名称；省略时使用 Asia/Shanghai
+      schema:
+        type: string
+        maxLength: 64
+        default: Asia/Shanghai
+        example: Asia/Shanghai
+    WatchRuleId:
+      name: ruleId
+      in: path
+      required: true
+      description: 当前用户关注规则 ID
+      schema:
+        type: string
+        maxLength: 128
+        pattern: "^[A-Za-z0-9_.-]+$"
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      description: 当前用户通知 ID
+      schema:
+        type: string
+        maxLength: 128
+        pattern: "^[A-Za-z0-9_.-]+$"
+  headers:
+    PrivateNoStore:
+      description: 分析响应包含用户或运营数据，不允许共享或本地缓存
+      schema:
+        type: string
+        enum: ["private, no-store"]
+    CSVContentDisposition:
+      description: 包含范围和导出日期的安全 ASCII 文件名
+      schema:
+        type: string
+        example: attachment; filename="charge-trends-7d-2026-08-05.csv"
+  responses:
+    InvalidAdminTrendQuery:
+      description: 趋势范围或时区参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: ADMIN_TREND_QUERY_INVALID
+            error: 趋势范围或时区参数无效
+    InvalidHistoryQuery:
+      description: 设备 ID、历史范围或时区参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          examples:
+            invalidDevice:
+              value:
+                code: DEVICE_ID_INVALID
+                error: 设备 ID 格式无效
+            invalidQuery:
+              value:
+                code: HISTORY_QUERY_INVALID
+                error: 历史范围或时区参数无效
+    InvalidPortHistoryQuery:
+      description: 设备 ID、端口编号、历史范围或时区参数无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          examples:
+            invalidPort:
+              value:
+                code: PORT_ID_INVALID
+                error: 充电口编号格式无效
+            invalidQuery:
+              value:
+                code: HISTORY_QUERY_INVALID
+                error: 历史范围或时区参数无效
+    Unauthenticated:
+      description: 未登录或会话已失效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: login required
+    OrdinaryUserRequired:
+      description: 当前账户不是普通用户
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: ordinary user permission required
+    AdminRequired:
+      description: 当前账户不是管理员
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: admin permission required
+    HistoryNotFound:
+      description: 设备不属于当前用户、端口不存在或尚无该端口历史
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: HISTORY_NOT_FOUND
+            error: 未找到对应的历史记录
+    MethodNotAllowed:
+      description: 请求方法不受支持
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: method not allowed
+    HistoryRangeTooLarge:
+      description: 所选范围内的状态变化超过单次分析上限
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: HISTORY_RANGE_TOO_LARGE
+            error: 该范围内历史变化过多，请缩短查询范围
+    HistoryUnavailable:
+      description: 历史存储或聚合暂时不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: HISTORY_UNAVAILABLE
+            error: 历史数据暂时不可用，请稍后重试
+    AdminTrendsUnavailable:
+      description: 指标或状态历史聚合暂时不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: ADMIN_TRENDS_UNAVAILABLE
+            error: 运营趋势暂时不可用，请稍后重试
+    WatchInvalid:
+      description: 关注规则字段、星期、时段或时区无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: WATCH_RULE_INVALID
+            error: 关注规则内容无效
+    WatchTargetNotFound:
+      description: 充电桩不属于当前用户或端口不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: WATCH_TARGET_NOT_FOUND
+            error: 未找到当前账户下的充电桩或端口
+    WatchRuleNotFound:
+      description: 规则不存在或不属于当前用户
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: WATCH_RULE_NOT_FOUND
+            error: 未找到关注规则
+    WatchConflict:
+      description: 目标已存在，或达到规则/提醒桩数量限制
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+    WatchUnavailable:
+      description: 关注规则存储暂时不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: WATCH_UNAVAILABLE
+            error: 关注功能暂时不可用，请稍后重试
+    NotificationPreferenceInvalid:
+      description: 通知偏好、免打扰时间或时区无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: NOTIFICATION_PREFERENCE_INVALID
+            error: 通知偏好内容无效
+    NotificationQueryInvalid:
+      description: 通知状态、分页大小或游标无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: NOTIFICATION_QUERY_INVALID
+            error: 通知筛选或分页参数无效
+    NotificationNotFound:
+      description: 通知不存在或不属于当前用户
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: NOTIFICATION_NOT_FOUND
+            error: 未找到通知
+    NotificationUnavailable:
+      description: 通知存储暂时不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodedErrorResponse"
+          example:
+            code: NOTIFICATION_UNAVAILABLE
+            error: 通知功能暂时不可用，请稍后重试
+  schemas:
+    WatchRule:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - userId
+        - deviceId
+        - notifyIdle
+        - enabled
+        - activeWeekdays
+        - activeStartMinute
+        - activeEndMinute
+        - timezone
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        deviceId:
+          type: string
+          pattern: "^[0-9]{6,64}$"
+        portId:
+          type: integer
+          minimum: 1
+          nullable: true
+        notifyIdle:
+          type: boolean
+        enabled:
+          type: boolean
+        activeWeekdays:
+          type: integer
+          minimum: 1
+          maximum: 127
+        activeStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        activeEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        timezone:
+          type: string
+          maxLength: 64
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    WatchRuleCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [deviceId]
+      properties:
+        deviceId:
+          type: string
+          pattern: "^[0-9]{6,64}$"
+        portId:
+          type: integer
+          minimum: 1
+          nullable: true
+        notifyIdle:
+          type: boolean
+        enabled:
+          type: boolean
+        activeWeekdays:
+          type: integer
+          minimum: 1
+          maximum: 127
+        activeStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        activeEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        timezone:
+          type: string
+          maxLength: 64
+    WatchRuleUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        notifyIdle:
+          type: boolean
+        enabled:
+          type: boolean
+        activeWeekdays:
+          type: integer
+          minimum: 1
+          maximum: 127
+        activeStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        activeEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        timezone:
+          type: string
+          maxLength: 64
+    NotificationPreference:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - browserEnabled
+        - quietHoursEnabled
+        - quietStartMinute
+        - quietEndMinute
+        - timezone
+        - updatedAt
+      properties:
+        userId:
+          type: string
+        browserEnabled:
+          type: boolean
+        quietHoursEnabled:
+          type: boolean
+        quietStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        quietEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        timezone:
+          type: string
+          maxLength: 64
+        updatedAt:
+          type: string
+          format: date-time
+    NotificationPreferenceUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        browserEnabled:
+          type: boolean
+        quietHoursEnabled:
+          type: boolean
+        quietStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        quietEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        timezone:
+          type: string
+          maxLength: 64
+    NotificationType:
+      type: string
+      enum: [port_idle, credential_expired, pile_offline, pile_recovered]
+    NotificationSeverity:
+      type: string
+      enum: [info, warning, critical]
+    NotificationStatusFilter:
+      type: string
+      enum: [all, unread, resolved]
+      default: all
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, userId, type, severity, title, message, createdAt]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        type:
+          $ref: "#/components/schemas/NotificationType"
+        severity:
+          $ref: "#/components/schemas/NotificationSeverity"
+        title:
+          type: string
+        message:
+          type: string
+        deviceId:
+          type: string
+        portId:
+          type: integer
+          minimum: 1
+          nullable: true
+        sourceEventId:
+          type: integer
+          format: int64
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    NotificationPage:
+      type: object
+      additionalProperties: false
+      required: [items, unreadCount]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        nextCursor:
+          type: string
+        unreadCount:
+          type: integer
+          minimum: 0
+    UpdatedCount:
+      type: object
+      additionalProperties: false
+      required: [updated]
+      properties:
+        updated:
+          type: integer
+          format: int64
+          minimum: 0
+    DeletedCount:
+      type: object
+      additionalProperties: false
+      required: [deleted]
+      properties:
+        deleted:
+          type: integer
+          format: int64
+          minimum: 0
+    HistoryRange:
+      type: string
+      enum: [24h, 7d, 30d]
+      default: 7d
+    AdminTrendRange:
+      type: string
+      enum: [24h, 7d, 30d]
+      default: 24h
+    PortStatus:
+      type: string
+      enum: [idle, in_use, offline]
+    HistorySampleState:
+      type: string
+      enum: [no_data, insufficient, partial, sufficient]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+    CodedErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, error]
+      properties:
+        code:
+          type: string
+          enum:
+            - DEVICE_ID_INVALID
+            - PORT_ID_INVALID
+            - HISTORY_QUERY_INVALID
+            - HISTORY_NOT_FOUND
+            - HISTORY_RANGE_TOO_LARGE
+            - HISTORY_UNAVAILABLE
+            - ADMIN_TREND_QUERY_INVALID
+            - ADMIN_TRENDS_UNAVAILABLE
+            - WATCH_RULE_INVALID
+            - WATCH_TARGET_NOT_FOUND
+            - WATCH_RULE_NOT_FOUND
+            - WATCH_RULE_CONFLICT
+            - WATCH_RULE_LIMIT_REACHED
+            - WATCH_PILE_LIMIT_REACHED
+            - WATCH_UNAVAILABLE
+            - NOTIFICATION_PREFERENCE_INVALID
+            - NOTIFICATION_QUERY_INVALID
+            - NOTIFICATION_NOT_FOUND
+            - NOTIFICATION_UNAVAILABLE
+        error:
+          type: string
+    HistoryWindow:
+      type: object
+      additionalProperties: false
+      required: [range, timezone, start, end]
+      properties:
+        range:
+          $ref: "#/components/schemas/HistoryRange"
+        timezone:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    AdminTrendWindow:
+      type: object
+      additionalProperties: false
+      required: [range, timezone, bucketUnit, start, end]
+      properties:
+        range:
+          $ref: "#/components/schemas/AdminTrendRange"
+        timezone:
+          type: string
+        bucketUnit:
+          type: string
+          enum: [hour, day]
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    AdminTrendPoint:
+      type: object
+      additionalProperties: false
+      required:
+        - start
+        - end
+        - requests
+        - remoteAttempts
+        - remoteSuccesses
+        - remoteFailures
+        - remoteSuccessRate
+        - activeUsers
+        - offlinePorts
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        requests:
+          type: integer
+          minimum: 0
+        remoteAttempts:
+          type: integer
+          minimum: 0
+        remoteSuccesses:
+          type: integer
+          minimum: 0
+        remoteFailures:
+          type: integer
+          minimum: 0
+        remoteSuccessRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        activeUsers:
+          type: integer
+          minimum: 0
+        offlinePorts:
+          type: integer
+          minimum: 0
+    AdminTrendSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - requests
+        - remoteAttempts
+        - remoteSuccesses
+        - remoteFailures
+        - remoteSuccessRate
+        - activeUsers
+        - offlinePorts
+      properties:
+        requests:
+          type: integer
+          minimum: 0
+        remoteAttempts:
+          type: integer
+          minimum: 0
+        remoteSuccesses:
+          type: integer
+          minimum: 0
+        remoteFailures:
+          type: integer
+          minimum: 0
+        remoteSuccessRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        activeUsers:
+          type: integer
+          minimum: 0
+        offlinePorts:
+          type: integer
+          minimum: 0
+    AdminTrendsResponse:
+      type: object
+      additionalProperties: false
+      required: [window, summary, points, updatedAt]
+      properties:
+        window:
+          $ref: "#/components/schemas/AdminTrendWindow"
+        summary:
+          $ref: "#/components/schemas/AdminTrendSummary"
+        points:
+          type: array
+          minItems: 7
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/AdminTrendPoint"
+        updatedAt:
+          type: string
+          format: date-time
+    PortHistoryMetrics:
+      type: object
+      additionalProperties: false
+      required:
+        - observedSeconds
+        - gapSeconds
+        - idleSeconds
+        - inUseSeconds
+        - offlineSeconds
+        - occupancyPercent
+        - completedSessions
+        - averageSessionSeconds
+        - sampleState
+      properties:
+        observedSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        gapSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        idleSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        inUseSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        offlineSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        occupancyPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        completedSessions:
+          type: integer
+          minimum: 0
+        averageSessionSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        sampleState:
+          $ref: "#/components/schemas/HistorySampleState"
+    HistoryDailyPoint:
+      type: object
+      additionalProperties: false
+      required: [date, metrics]
+      properties:
+        date:
+          type: string
+          format: date
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+    HistoryHeatmapCell:
+      type: object
+      additionalProperties: false
+      required:
+        - weekday
+        - hour
+        - idleSeconds
+        - inUseSeconds
+        - offlineSeconds
+        - occupancyPercent
+        - sampleDates
+        - sampleSufficient
+      properties:
+        weekday:
+          type: integer
+          minimum: 1
+          maximum: 7
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        idleSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        inUseSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        offlineSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        occupancyPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        sampleDates:
+          type: integer
+          minimum: 0
+        sampleSufficient:
+          type: boolean
+    HistoryHourInsight:
+      type: object
+      additionalProperties: false
+      required: [weekday, hour, occupancyPercent, sampleDates]
+      properties:
+        weekday:
+          type: integer
+          minimum: 1
+          maximum: 7
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        occupancyPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        sampleDates:
+          type: integer
+          minimum: 0
+    PortHistoryTimelineItem:
+      type: object
+      additionalProperties: false
+      required: [portId, toStatus, changedAt, usedSeconds]
+      properties:
+        portId:
+          type: integer
+          minimum: 1
+        fromStatus:
+          $ref: "#/components/schemas/PortStatus"
+        toStatus:
+          $ref: "#/components/schemas/PortStatus"
+        changedAt:
+          type: string
+          format: date-time
+        usedSeconds:
+          type: integer
+          minimum: 0
+        remainingText:
+          type: string
+    HistoryDevice:
+      type: object
+      additionalProperties: false
+      required: [id, number, name, address]
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+    PortHistorySummary:
+      type: object
+      additionalProperties: false
+      required: [portId, currentStatus, metrics]
+      properties:
+        portId:
+          type: integer
+          minimum: 1
+        currentStatus:
+          $ref: "#/components/schemas/PortStatus"
+        historyStartedAt:
+          type: string
+          format: date-time
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+    DeviceHistoryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - device
+        - window
+        - metrics
+        - daily
+        - heatmap
+        - ports
+        - busiestHours
+        - historyNotice
+      properties:
+        device:
+          $ref: "#/components/schemas/HistoryDevice"
+        window:
+          $ref: "#/components/schemas/HistoryWindow"
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryDailyPoint"
+        heatmap:
+          type: array
+          minItems: 168
+          maxItems: 168
+          items:
+            $ref: "#/components/schemas/HistoryHeatmapCell"
+        ports:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortHistorySummary"
+        busiestHours:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/HistoryHourInsight"
+        quietSuggestion:
+          $ref: "#/components/schemas/HistoryHourInsight"
+        historyStartedAt:
+          type: string
+          format: date-time
+        historyNotice:
+          type: string
+    PortHistoryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - device
+        - portId
+        - currentStatus
+        - window
+        - metrics
+        - daily
+        - timeline
+        - timelineTruncated
+        - historyNotice
+      properties:
+        device:
+          $ref: "#/components/schemas/HistoryDevice"
+        portId:
+          type: integer
+          minimum: 1
+        currentStatus:
+          $ref: "#/components/schemas/PortStatus"
+        window:
+          $ref: "#/components/schemas/HistoryWindow"
+        metrics:
+          $ref: "#/components/schemas/PortHistoryMetrics"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryDailyPoint"
+        timeline:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/PortHistoryTimelineItem"
+        timelineTruncated:
+          type: boolean
+        historyStartedAt:
+          type: string
+          format: date-time
+        historyNotice:
+          type: string

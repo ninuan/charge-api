@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,15 @@ import (
 )
 
 const defaultNotificationListLimit = 100
+
+var ErrNotificationCursorNotFound = errors.New("notification cursor not found")
+
+type NotificationPageQuery struct {
+	UserID   string
+	CursorID string
+	Status   string
+	Limit    int
+}
 
 func (s *Store) SaveWatchRule(rule model.WatchRule) error {
 	if err := validateWatchRule(rule); err != nil {
@@ -283,6 +293,161 @@ func (s *Store) ListNotifications(userID string, limit int) ([]model.Notificatio
 		return nil, fmt.Errorf("iterate notifications: %w", err)
 	}
 	return notifications, nil
+}
+
+func (s *Store) ListNotificationsPage(query NotificationPageQuery) (model.NotificationPage, error) {
+	query.UserID = strings.TrimSpace(query.UserID)
+	query.CursorID = strings.TrimSpace(query.CursorID)
+	query.Status = strings.TrimSpace(query.Status)
+	if query.UserID == "" {
+		return model.NotificationPage{}, fmt.Errorf("notifications require a user")
+	}
+	if query.Limit < 1 || query.Limit > 100 {
+		return model.NotificationPage{}, fmt.Errorf("notification page limit is invalid")
+	}
+
+	clauses := []string{"user_id = ?"}
+	args := []any{query.UserID}
+	switch query.Status {
+	case "", "all":
+	case "unread":
+		clauses = append(clauses, "read_at IS NULL")
+	case "resolved":
+		clauses = append(clauses, "resolved_at IS NOT NULL")
+	default:
+		return model.NotificationPage{}, fmt.Errorf("notification status is invalid")
+	}
+	if query.CursorID != "" {
+		var cursorCreatedAt int64
+		err := s.db.QueryRow(`
+			SELECT created_at FROM notifications WHERE user_id = ? AND id = ?
+		`, query.UserID, query.CursorID).Scan(&cursorCreatedAt)
+		if err == sql.ErrNoRows {
+			return model.NotificationPage{}, ErrNotificationCursorNotFound
+		}
+		if err != nil {
+			return model.NotificationPage{}, fmt.Errorf("load notification cursor: %w", err)
+		}
+		clauses = append(clauses, "(created_at < ? OR (created_at = ? AND id < ?))")
+		args = append(args, cursorCreatedAt, cursorCreatedAt, query.CursorID)
+	}
+	args = append(args, query.Limit+1)
+	rows, err := s.db.Query(`
+		SELECT id, user_id, type, severity, title, message, device_id, port_id,
+		       source_event_id, dedupe_key, read_at, resolved_at, created_at
+		FROM notifications
+		WHERE `+strings.Join(clauses, " AND ")+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, args...)
+	if err != nil {
+		return model.NotificationPage{}, fmt.Errorf("list notification page: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]model.Notification, 0, query.Limit+1)
+	for rows.Next() {
+		notification, err := scanNotification(rows)
+		if err != nil {
+			return model.NotificationPage{}, err
+		}
+		items = append(items, notification)
+	}
+	if err := rows.Err(); err != nil {
+		return model.NotificationPage{}, fmt.Errorf("iterate notification page: %w", err)
+	}
+	nextCursor := ""
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+		nextCursor = items[len(items)-1].ID
+	}
+	var unreadCount int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL
+	`, query.UserID).Scan(&unreadCount); err != nil {
+		return model.NotificationPage{}, fmt.Errorf("count unread notifications: %w", err)
+	}
+	return model.NotificationPage{Items: items, NextCursor: nextCursor, UnreadCount: unreadCount}, nil
+}
+
+func (s *Store) LoadNotification(userID, notificationID string) (model.Notification, bool, error) {
+	userID = strings.TrimSpace(userID)
+	notificationID = strings.TrimSpace(notificationID)
+	if userID == "" || notificationID == "" {
+		return model.Notification{}, false, fmt.Errorf("notification lookup requires user and notification")
+	}
+	notification, err := scanNotification(s.db.QueryRow(`
+		SELECT id, user_id, type, severity, title, message, device_id, port_id,
+		       source_event_id, dedupe_key, read_at, resolved_at, created_at
+		FROM notifications
+		WHERE user_id = ? AND id = ?
+	`, userID, notificationID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Notification{}, false, nil
+	}
+	if err != nil {
+		return model.Notification{}, false, err
+	}
+	return notification, true, nil
+}
+
+func (s *Store) MarkNotificationRead(userID, notificationID string, at time.Time) (model.Notification, bool, error) {
+	userID = strings.TrimSpace(userID)
+	notificationID = strings.TrimSpace(notificationID)
+	if userID == "" || notificationID == "" || at.IsZero() {
+		return model.Notification{}, false, fmt.Errorf("mark notification read requires user, notification, and time")
+	}
+	result, err := s.db.Exec(`
+		UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE user_id = ? AND id = ?
+	`, at.UTC().Unix(), userID, notificationID)
+	if err != nil {
+		return model.Notification{}, false, fmt.Errorf("mark notification read: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return model.Notification{}, false, fmt.Errorf("read mark notification result: %w", err)
+	}
+	if rows == 0 {
+		return model.Notification{}, false, nil
+	}
+	notification, ok, err := s.LoadNotification(userID, notificationID)
+	return notification, ok, err
+}
+
+func (s *Store) MarkAllNotificationsRead(userID string, at time.Time) (int64, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || at.IsZero() {
+		return 0, fmt.Errorf("mark all notifications read requires user and time")
+	}
+	result, err := s.db.Exec(`
+		UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL
+	`, at.UTC().Unix(), userID)
+	if err != nil {
+		return 0, fmt.Errorf("mark all notifications read: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read mark all notifications result: %w", err)
+	}
+	return rows, nil
+}
+
+func (s *Store) DeleteResolvedNotifications(userID string) (int64, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return 0, fmt.Errorf("delete resolved notifications requires a user")
+	}
+	result, err := s.db.Exec(`
+		DELETE FROM notifications WHERE user_id = ? AND resolved_at IS NOT NULL
+	`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("delete resolved notifications: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read delete resolved notifications result: %w", err)
+	}
+	return rows, nil
 }
 
 func (s *Store) SaveWatchRefreshState(state model.WatchRefreshState) error {

@@ -568,6 +568,8 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 }
 
 func (m *Manager) DeleteUser(id string) error {
+	m.watchMu.Lock()
+	defer m.watchMu.Unlock()
 	m.mu.Lock()
 	if _, ok := m.users[id]; !ok {
 		m.mu.Unlock()

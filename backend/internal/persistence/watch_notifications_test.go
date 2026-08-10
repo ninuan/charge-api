@@ -146,6 +146,42 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 	if len(notifications) != 3 || notifications[0].ID != duplicateCredential.ID {
 		t.Fatalf("notifications did not round-trip in order: %+v", notifications)
 	}
+	page, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: user.ID, Status: "all", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListNotificationsPage: %v", err)
+	}
+	if len(page.Items) != 2 || page.NextCursor == "" || page.UnreadCount != 3 {
+		t.Fatalf("unexpected first notification page: %+v", page)
+	}
+	nextPage, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: user.ID, CursorID: page.NextCursor, Status: "all", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListNotificationsPage next: %v", err)
+	}
+	if len(nextPage.Items) != 1 || nextPage.NextCursor != "" {
+		t.Fatalf("unexpected next notification page: %+v", nextPage)
+	}
+	marked, ok, err := store.MarkNotificationRead(user.ID, idleNotification.ID, now.Add(3*time.Second))
+	if err != nil || !ok || marked.ReadAt == nil {
+		t.Fatalf("MarkNotificationRead = %+v, ok %v, err %v", marked, ok, err)
+	}
+	updated, err := store.MarkAllNotificationsRead(user.ID, now.Add(4*time.Second))
+	if err != nil || updated != 2 {
+		t.Fatalf("MarkAllNotificationsRead updated %d, err %v", updated, err)
+	}
+	resolvedPage, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: user.ID, Status: "resolved", Limit: 10,
+	})
+	if err != nil || len(resolvedPage.Items) != 1 || resolvedPage.UnreadCount != 0 {
+		t.Fatalf("resolved notification page = %+v, err %v", resolvedPage, err)
+	}
+	deletedResolved, err := store.DeleteResolvedNotifications(user.ID)
+	if err != nil || deletedResolved != 1 {
+		t.Fatalf("DeleteResolvedNotifications deleted %d, err %v", deletedResolved, err)
+	}
 
 	lastAttemptAt := now.Add(3 * time.Minute)
 	lastSuccessAt := now.Add(2 * time.Minute)

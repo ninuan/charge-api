@@ -156,6 +156,17 @@ export interface RegistrationSettings {
   defaultRefreshEnabled: boolean
   statsRetentionDays: number
   portHistoryRetentionDays: number
+  backgroundRemindersEnabled: boolean
+  watchRefreshIntervalMinutes: number
+  watchRuleLimitPerUser: number
+  watchPileLimitPerUser: number
+  watchDailyRefreshQuota: number
+  notificationRetentionDays: number
+  scheduledPowerOffEnabled: boolean
+  scheduledPowerOffStartMinute: number
+  scheduledPowerOffEndMinute: number
+  scheduledPowerOffTimezone: string
+  powerRestoreJitterMinutes: number
 }
 
 export interface InviteCode {

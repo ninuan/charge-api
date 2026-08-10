@@ -38,6 +38,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取当前用户的通知偏好 */
+        get: operations["getNotificationPreference"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 更新通知偏好 */
+        patch: operations["updateNotificationPreference"];
+        trace?: never;
+    };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 分页获取当前用户的站内通知 */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notificationId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户通知 ID */
+                notificationId: components["parameters"]["NotificationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 将单条通知标记为已读 */
+        post: operations["markNotificationRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 将当前用户的全部未读通知标记为已读 */
+        post: operations["markAllNotificationsRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/resolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 清理当前用户已经解决的通知 */
+        delete: operations["deleteResolvedNotifications"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/piles/{deviceId}/history": {
         parameters: {
             query?: never;
@@ -70,6 +159,45 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/watch-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取当前用户的全部关注规则 */
+        get: operations["listWatchRules"];
+        put?: never;
+        /** 创建充电桩收藏或端口提醒规则 */
+        post: operations["createWatchRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/watch-rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户关注规则 ID */
+                ruleId: components["parameters"]["WatchRuleId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除关注规则 */
+        delete: operations["deleteWatchRule"];
+        options?: never;
+        head?: never;
+        /** 更新关注规则状态和生效时段 */
+        patch: operations["updateWatchRule"];
         trace?: never;
     };
 }
@@ -124,8 +252,12 @@ export interface components {
         };
         CodedErrorResponse: {
             /** @enum {string} */
-            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE";
+            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE" | "WATCH_RULE_INVALID" | "WATCH_TARGET_NOT_FOUND" | "WATCH_RULE_NOT_FOUND" | "WATCH_RULE_CONFLICT" | "WATCH_RULE_LIMIT_REACHED" | "WATCH_PILE_LIMIT_REACHED" | "WATCH_UNAVAILABLE" | "NOTIFICATION_PREFERENCE_INVALID" | "NOTIFICATION_QUERY_INVALID" | "NOTIFICATION_NOT_FOUND" | "NOTIFICATION_UNAVAILABLE";
             error: string;
+        };
+        DeletedCount: {
+            /** Format: int64 */
+            deleted: number;
         };
         DeviceHistoryResponse: {
             busiestHours: components["schemas"]["HistoryHourInsight"][];
@@ -190,6 +322,55 @@ export interface components {
             start: string;
             timezone: string;
         };
+        Notification: {
+            /** Format: date-time */
+            createdAt: string;
+            deviceId?: string;
+            id: string;
+            message: string;
+            portId?: number | null;
+            /** Format: date-time */
+            readAt?: string | null;
+            /** Format: date-time */
+            resolvedAt?: string | null;
+            severity: components["schemas"]["NotificationSeverity"];
+            /** Format: int64 */
+            sourceEventId?: number | null;
+            title: string;
+            type: components["schemas"]["NotificationType"];
+            userId: string;
+        };
+        NotificationPage: {
+            items: components["schemas"]["Notification"][];
+            nextCursor?: string;
+            unreadCount: number;
+        };
+        NotificationPreference: {
+            browserEnabled: boolean;
+            quietEndMinute: number;
+            quietHoursEnabled: boolean;
+            quietStartMinute: number;
+            timezone: string;
+            /** Format: date-time */
+            updatedAt: string;
+            userId: string;
+        };
+        NotificationPreferenceUpdateRequest: {
+            browserEnabled?: boolean;
+            quietEndMinute?: number;
+            quietHoursEnabled?: boolean;
+            quietStartMinute?: number;
+            timezone?: string;
+        };
+        /** @enum {string} */
+        NotificationSeverity: "info" | "warning" | "critical";
+        /**
+         * @default all
+         * @enum {string}
+         */
+        NotificationStatusFilter: "all" | "unread" | "resolved";
+        /** @enum {string} */
+        NotificationType: "port_idle" | "credential_expired" | "pile_offline" | "pile_recovered";
         PortHistoryMetrics: {
             /** Format: int64 */
             averageSessionSeconds: number | null;
@@ -239,6 +420,44 @@ export interface components {
         };
         /** @enum {string} */
         PortStatus: "idle" | "in_use" | "offline";
+        UpdatedCount: {
+            /** Format: int64 */
+            updated: number;
+        };
+        WatchRule: {
+            activeEndMinute: number;
+            activeStartMinute: number;
+            activeWeekdays: number;
+            /** Format: date-time */
+            createdAt: string;
+            deviceId: string;
+            enabled: boolean;
+            id: string;
+            notifyIdle: boolean;
+            portId?: number | null;
+            timezone: string;
+            /** Format: date-time */
+            updatedAt: string;
+            userId: string;
+        };
+        WatchRuleCreateRequest: {
+            activeEndMinute?: number;
+            activeStartMinute?: number;
+            activeWeekdays?: number;
+            deviceId: string;
+            enabled?: boolean;
+            notifyIdle?: boolean;
+            portId?: number | null;
+            timezone?: string;
+        };
+        WatchRuleUpdateRequest: {
+            activeEndMinute?: number;
+            activeStartMinute?: number;
+            activeWeekdays?: number;
+            enabled?: boolean;
+            notifyIdle?: boolean;
+            timezone?: string;
+        };
     };
     responses: {
         /** @description 当前账户不是管理员 */
@@ -362,6 +581,66 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 通知不存在或不属于当前用户 */
+        NotificationNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "NOTIFICATION_NOT_FOUND",
+                 *       "error": "未找到通知"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 通知偏好、免打扰时间或时区无效 */
+        NotificationPreferenceInvalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "NOTIFICATION_PREFERENCE_INVALID",
+                 *       "error": "通知偏好内容无效"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 通知状态、分页大小或游标无效 */
+        NotificationQueryInvalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "NOTIFICATION_QUERY_INVALID",
+                 *       "error": "通知筛选或分页参数无效"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 通知存储暂时不可用 */
+        NotificationUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "NOTIFICATION_UNAVAILABLE",
+                 *       "error": "通知功能暂时不可用，请稍后重试"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
         /** @description 当前账户不是普通用户 */
         OrdinaryUserRequired: {
             headers: {
@@ -390,6 +669,75 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 目标已存在，或达到规则/提醒桩数量限制 */
+        WatchConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 关注规则字段、星期、时段或时区无效 */
+        WatchInvalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WATCH_RULE_INVALID",
+                 *       "error": "关注规则内容无效"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 规则不存在或不属于当前用户 */
+        WatchRuleNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WATCH_RULE_NOT_FOUND",
+                 *       "error": "未找到关注规则"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 充电桩不属于当前用户或端口不存在 */
+        WatchTargetNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WATCH_TARGET_NOT_FOUND",
+                 *       "error": "未找到当前账户下的充电桩或端口"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 关注规则存储暂时不可用 */
+        WatchUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WATCH_UNAVAILABLE",
+                 *       "error": "关注功能暂时不可用，请稍后重试"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
     };
     parameters: {
         /** @description 趋势统计范围；省略时使用 24h */
@@ -398,10 +746,14 @@ export interface components {
         DeviceId: string;
         /** @description 历史统计范围；省略时使用 7d */
         HistoryRange: components["schemas"]["HistoryRange"];
+        /** @description 当前用户通知 ID */
+        NotificationId: string;
         /** @description 充电口编号 */
         PortId: number;
         /** @description IANA 时区名称；省略时使用 Asia/Shanghai */
         Timezone: string;
+        /** @description 当前用户关注规则 ID */
+        WatchRuleId: string;
     };
     requestBodies: never;
     headers: {
@@ -418,6 +770,7 @@ export type AdminTrendsResponse = components['schemas']['AdminTrendsResponse'];
 export type AdminTrendSummary = components['schemas']['AdminTrendSummary'];
 export type AdminTrendWindow = components['schemas']['AdminTrendWindow'];
 export type CodedErrorResponse = components['schemas']['CodedErrorResponse'];
+export type DeletedCount = components['schemas']['DeletedCount'];
 export type DeviceHistoryResponse = components['schemas']['DeviceHistoryResponse'];
 export type ErrorResponse = components['schemas']['ErrorResponse'];
 export type HistoryDailyPoint = components['schemas']['HistoryDailyPoint'];
@@ -427,11 +780,22 @@ export type HistoryHourInsight = components['schemas']['HistoryHourInsight'];
 export type HistoryRange = components['schemas']['HistoryRange'];
 export type HistorySampleState = components['schemas']['HistorySampleState'];
 export type HistoryWindow = components['schemas']['HistoryWindow'];
+export type Notification = components['schemas']['Notification'];
+export type NotificationPage = components['schemas']['NotificationPage'];
+export type NotificationPreference = components['schemas']['NotificationPreference'];
+export type NotificationPreferenceUpdateRequest = components['schemas']['NotificationPreferenceUpdateRequest'];
+export type NotificationSeverity = components['schemas']['NotificationSeverity'];
+export type NotificationStatusFilter = components['schemas']['NotificationStatusFilter'];
+export type NotificationType = components['schemas']['NotificationType'];
 export type PortHistoryMetrics = components['schemas']['PortHistoryMetrics'];
 export type PortHistoryResponse = components['schemas']['PortHistoryResponse'];
 export type PortHistorySummary = components['schemas']['PortHistorySummary'];
 export type PortHistoryTimelineItem = components['schemas']['PortHistoryTimelineItem'];
 export type PortStatus = components['schemas']['PortStatus'];
+export type UpdatedCount = components['schemas']['UpdatedCount'];
+export type WatchRule = components['schemas']['WatchRule'];
+export type WatchRuleCreateRequest = components['schemas']['WatchRuleCreateRequest'];
+export type WatchRuleUpdateRequest = components['schemas']['WatchRuleUpdateRequest'];
 export type ResponseAdminRequired = components['responses']['AdminRequired'];
 export type ResponseAdminTrendsUnavailable = components['responses']['AdminTrendsUnavailable'];
 export type ResponseHistoryNotFound = components['responses']['HistoryNotFound'];
@@ -441,13 +805,24 @@ export type ResponseInvalidAdminTrendQuery = components['responses']['InvalidAdm
 export type ResponseInvalidHistoryQuery = components['responses']['InvalidHistoryQuery'];
 export type ResponseInvalidPortHistoryQuery = components['responses']['InvalidPortHistoryQuery'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
+export type ResponseNotificationNotFound = components['responses']['NotificationNotFound'];
+export type ResponseNotificationPreferenceInvalid = components['responses']['NotificationPreferenceInvalid'];
+export type ResponseNotificationQueryInvalid = components['responses']['NotificationQueryInvalid'];
+export type ResponseNotificationUnavailable = components['responses']['NotificationUnavailable'];
 export type ResponseOrdinaryUserRequired = components['responses']['OrdinaryUserRequired'];
 export type ResponseUnauthenticated = components['responses']['Unauthenticated'];
+export type ResponseWatchConflict = components['responses']['WatchConflict'];
+export type ResponseWatchInvalid = components['responses']['WatchInvalid'];
+export type ResponseWatchRuleNotFound = components['responses']['WatchRuleNotFound'];
+export type ResponseWatchTargetNotFound = components['responses']['WatchTargetNotFound'];
+export type ResponseWatchUnavailable = components['responses']['WatchUnavailable'];
 export type ParameterAdminTrendRange = components['parameters']['AdminTrendRange'];
 export type ParameterDeviceId = components['parameters']['DeviceId'];
 export type ParameterHistoryRange = components['parameters']['HistoryRange'];
+export type ParameterNotificationId = components['parameters']['NotificationId'];
 export type ParameterPortId = components['parameters']['PortId'];
 export type ParameterTimezone = components['parameters']['Timezone'];
+export type ParameterWatchRuleId = components['parameters']['WatchRuleId'];
 export type HeaderCsvContentDisposition = components['headers']['CSVContentDisposition'];
 export type HeaderPrivateNoStore = components['headers']['PrivateNoStore'];
 export type $defs = Record<string, never>;
@@ -513,6 +888,168 @@ export interface operations {
             403: components["responses"]["AdminRequired"];
             405: components["responses"]["MethodNotAllowed"];
             503: components["responses"]["AdminTrendsUnavailable"];
+        };
+    };
+    getNotificationPreference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 浏览器通知意愿与免打扰设置 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreference"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["NotificationUnavailable"];
+        };
+    };
+    updateNotificationPreference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPreferenceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的通知偏好 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreference"];
+                };
+            };
+            400: components["responses"]["NotificationPreferenceInvalid"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["NotificationUnavailable"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+                status?: components["schemas"]["NotificationStatusFilter"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 通知分页、下一游标和总未读数量 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+            400: components["responses"]["NotificationQueryInvalid"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["NotificationUnavailable"];
+        };
+    };
+    markNotificationRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户通知 ID */
+                notificationId: components["parameters"]["NotificationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已读后的通知 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Notification"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            404: components["responses"]["NotificationNotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["NotificationUnavailable"];
+        };
+    };
+    markAllNotificationsRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 实际更新数量 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatedCount"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["NotificationUnavailable"];
+        };
+    };
+    deleteResolvedNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 实际删除数量 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedCount"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["NotificationUnavailable"];
         };
     };
     getDeviceHistory: {
@@ -587,6 +1124,124 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             422: components["responses"]["HistoryRangeTooLarge"];
             503: components["responses"]["HistoryUnavailable"];
+        };
+    };
+    listWatchRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 按更新时间倒序返回的关注规则 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchRule"][];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["WatchUnavailable"];
+        };
+    };
+    createWatchRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchRuleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建的关注规则 */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchRule"];
+                };
+            };
+            400: components["responses"]["WatchInvalid"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            404: components["responses"]["WatchTargetNotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["WatchConflict"];
+            503: components["responses"]["WatchUnavailable"];
+        };
+    };
+    deleteWatchRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户关注规则 ID */
+                ruleId: components["parameters"]["WatchRuleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 关注规则已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            404: components["responses"]["WatchRuleNotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["WatchUnavailable"];
+        };
+    };
+    updateWatchRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户关注规则 ID */
+                ruleId: components["parameters"]["WatchRuleId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchRuleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的关注规则 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchRule"];
+                };
+            };
+            400: components["responses"]["WatchInvalid"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            404: components["responses"]["WatchRuleNotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["WatchConflict"];
+            503: components["responses"]["WatchUnavailable"];
         };
     };
 }

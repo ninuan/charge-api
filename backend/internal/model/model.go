@@ -294,6 +294,26 @@ type WatchRule struct {
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
+type WatchRuleCreateRequest struct {
+	DeviceID          string  `json:"deviceId"`
+	PortID            *int    `json:"portId,omitempty"`
+	NotifyIdle        bool    `json:"notifyIdle"`
+	Enabled           *bool   `json:"enabled,omitempty"`
+	ActiveWeekdays    *int    `json:"activeWeekdays,omitempty"`
+	ActiveStartMinute *int    `json:"activeStartMinute,omitempty"`
+	ActiveEndMinute   *int    `json:"activeEndMinute,omitempty"`
+	Timezone          *string `json:"timezone,omitempty"`
+}
+
+type WatchRuleUpdateRequest struct {
+	NotifyIdle        *bool   `json:"notifyIdle,omitempty"`
+	Enabled           *bool   `json:"enabled,omitempty"`
+	ActiveWeekdays    *int    `json:"activeWeekdays,omitempty"`
+	ActiveStartMinute *int    `json:"activeStartMinute,omitempty"`
+	ActiveEndMinute   *int    `json:"activeEndMinute,omitempty"`
+	Timezone          *string `json:"timezone,omitempty"`
+}
+
 type NotificationPreference struct {
 	UserID            string    `json:"userId"`
 	BrowserEnabled    bool      `json:"browserEnabled"`
@@ -302,6 +322,14 @@ type NotificationPreference struct {
 	QuietEndMinute    int       `json:"quietEndMinute"`
 	Timezone          string    `json:"timezone"`
 	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type NotificationPreferenceUpdateRequest struct {
+	BrowserEnabled    *bool   `json:"browserEnabled,omitempty"`
+	QuietHoursEnabled *bool   `json:"quietHoursEnabled,omitempty"`
+	QuietStartMinute  *int    `json:"quietStartMinute,omitempty"`
+	QuietEndMinute    *int    `json:"quietEndMinute,omitempty"`
+	Timezone          *string `json:"timezone,omitempty"`
 }
 
 type NotificationType string
@@ -327,6 +355,12 @@ type Notification struct {
 	ReadAt        *time.Time       `json:"readAt,omitempty"`
 	ResolvedAt    *time.Time       `json:"resolvedAt,omitempty"`
 	CreatedAt     time.Time        `json:"createdAt"`
+}
+
+type NotificationPage struct {
+	Items       []Notification `json:"items"`
+	NextCursor  string         `json:"nextCursor,omitempty"`
+	UnreadCount int            `json:"unreadCount"`
 }
 
 type WatchRefreshState struct {

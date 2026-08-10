@@ -62,6 +62,7 @@ var recoveryStatusCodePattern = regexp.MustCompile(`(?:status=|returned\s+)([1-5
 type Manager struct {
 	mu          sync.RWMutex
 	saveMu      sync.Mutex
+	watchMu     sync.Mutex
 	repository  *persistence.Store
 	requests    []parser.CaptureRequest
 	minInterval time.Duration
