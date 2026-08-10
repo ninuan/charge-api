@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charge-dashboard/internal/charger"
 	"charge-dashboard/internal/model"
@@ -141,6 +142,7 @@ func (m *Manager) DeletePile(userID string, id string) error {
 		return fmt.Errorf("pile not found")
 	}
 	runtime.client.RemoveDevice(id)
+	m.invalidateBackgroundPileValidation(userID, id)
 	if err := m.Save(); err != nil {
 		return err
 	}
@@ -263,6 +265,7 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
+	m.invalidateBackgroundCredentialValidation(userID)
 	user, _ := m.User(userID)
 	if !user.RefreshEnabled {
 		snapshot := runtime.store.Snapshot()
@@ -298,6 +301,7 @@ func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) er
 	if _, err := m.repository.RecordPortStatusTransitions(userID, piles); err != nil {
 		return fmt.Errorf("record remote port status transitions: %w", err)
 	}
+	m.markBackgroundCredentialsValidated(userID, piles, time.Now())
 	return nil
 }
 

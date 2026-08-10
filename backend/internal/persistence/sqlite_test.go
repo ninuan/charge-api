@@ -326,6 +326,35 @@ func TestMetricSeriesSumsMetricCounts(t *testing.T) {
 	}
 }
 
+func TestMetricKindCountKeepsBackgroundKindsSeparate(t *testing.T) {
+	store, err := OpenSQLite(
+		filepath.Join(t.TempDir(), "state.db"),
+		bytes.Repeat([]byte{0x59}, CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.RecordMetricCount("user-1", "watch_remote", 2, now); err != nil {
+		t.Fatalf("RecordMetricCount watch_remote: %v", err)
+	}
+	if err := store.RecordMetricCount("user-2", "watch_remote", 3, now); err != nil {
+		t.Fatalf("RecordMetricCount second watch_remote: %v", err)
+	}
+	count, err := store.MetricKindCount("watch_remote", now.Add(-time.Minute))
+	if err != nil || count != 5 {
+		t.Fatalf("MetricKindCount = %d, err %v; want 5", count, err)
+	}
+	points, err := store.MetricSeries(now.Add(-time.Minute), 3600)
+	if err != nil {
+		t.Fatalf("MetricSeries: %v", err)
+	}
+	if len(points) != 1 || points[0].Requests != 0 || points[0].ActiveUsers != 0 || points[0].Remote != 0 {
+		t.Fatalf("background metric polluted interactive series: %+v", points)
+	}
+}
+
 func TestMetricRetentionPrunesMoreThanOneBatch(t *testing.T) {
 	store, err := OpenSQLite(
 		filepath.Join(t.TempDir(), "state.db"),

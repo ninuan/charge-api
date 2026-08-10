@@ -588,6 +588,7 @@ func (m *Manager) DeleteUser(id string) error {
 	delete(m.users, id)
 	delete(m.runtimes, id)
 	m.mu.Unlock()
+	m.invalidateBackgroundCredentialValidation(id)
 
 	return m.Save()
 }

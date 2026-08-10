@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	ErrAuthExpired = errors.New("cookie expired or unauthorized")
-	ErrDeviceLimit = errors.New("device limit reached")
+	ErrAuthExpired    = errors.New("cookie expired or unauthorized")
+	ErrDeviceLimit    = errors.New("device limit reached")
+	ErrDeviceNotFound = errors.New("device not found")
 )
 
 const (
@@ -163,7 +164,7 @@ func (c *Client) FetchPiles(force bool) FetchResult {
 		go func() {
 			defer wg.Done()
 			for request := range jobs {
-				pile, err := c.fetchPile(request.request)
+				pile, err := c.fetchDevice(request)
 				results <- deviceResult{id: request.id, pile: pile, err: err}
 			}
 		}()
@@ -198,6 +199,54 @@ func (c *Client) FetchPiles(force bool) FetchResult {
 	})
 	sort.Slice(result.Failures, func(i, j int) bool {
 		return result.Failures[i].DeviceID < result.Failures[j].DeviceID
+	})
+	return result
+}
+
+// FetchPile fetches exactly one registered charging pile. A pile is the remote
+// request unit and its response contains all ports; callers must never invoke
+// this method once per port.
+func (c *Client) FetchPile(deviceID string, force bool) FetchResult {
+	deviceID = strings.TrimSpace(deviceID)
+	result := FetchResult{
+		Piles:    make([]model.Pile, 0, 1),
+		Failures: make([]DeviceFailure, 0, 1),
+	}
+	request, ok := c.snapshotRequest(deviceID)
+	if !ok {
+		result.Failures = append(result.Failures, DeviceFailure{
+			DeviceID: deviceID,
+			Err:      fmt.Errorf("%s: %w", deviceID, ErrDeviceNotFound),
+		})
+		return result
+	}
+
+	now := c.now()
+	if retryAt, backedOff := c.retryAt(deviceID, now); !force && backedOff {
+		result.Skipped = 1
+		result.NextRetryAt = earlierTime(nil, retryAt)
+		result.Failures = append(result.Failures, DeviceFailure{
+			DeviceID: deviceID,
+			RetryAt:  retryAt,
+			Skipped:  true,
+		})
+		return result
+	}
+
+	result.Attempted = 1
+	pile, err := c.fetchDevice(request)
+	if err == nil {
+		c.clearBackoff(deviceID)
+		result.Piles = append(result.Piles, pile)
+		return result
+	}
+
+	retryAt := c.recordFailure(deviceID)
+	result.NextRetryAt = earlierTime(nil, retryAt)
+	result.Failures = append(result.Failures, DeviceFailure{
+		DeviceID: deviceID,
+		Err:      fmt.Errorf("%s: %w", deviceID, err),
+		RetryAt:  retryAt,
 	})
 	return result
 }
@@ -352,6 +401,10 @@ func IsDeviceLimit(err error) bool {
 	return errors.Is(err, ErrDeviceLimit)
 }
 
+func IsDeviceNotFound(err error) bool {
+	return errors.Is(err, ErrDeviceNotFound)
+}
+
 func (r FetchResult) AuthExpired() bool {
 	for _, failure := range r.Failures {
 		if failure.Err != nil && IsAuthExpired(failure.Err) {
@@ -408,6 +461,25 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 	return pile, err
 }
 
+func (c *Client) fetchDevice(request deviceRequest) (model.Pile, error) {
+	pile, err := c.fetchPile(request.request)
+	if err != nil {
+		return model.Pile{}, err
+	}
+	if pile.ID != request.id {
+		return model.Pile{}, fmt.Errorf("remote device ID mismatch: got %q, want %q", pile.ID, request.id)
+	}
+	if pile.OpenNum <= 0 || len(pile.Ports) != pile.OpenNum {
+		return model.Pile{}, fmt.Errorf("remote pile %s returned an incomplete port snapshot", request.id)
+	}
+	for index, port := range pile.Ports {
+		if port.ID != index+1 {
+			return model.Pile{}, fmt.Errorf("remote pile %s returned an invalid port snapshot", request.id)
+		}
+	}
+	return pile, nil
+}
+
 func (c *Client) snapshotRequests() []deviceRequest {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -419,6 +491,16 @@ func (c *Client) snapshotRequests() []deviceRequest {
 		}
 	}
 	return requests
+}
+
+func (c *Client) snapshotRequest(id string) (deviceRequest, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	request, ok := c.requests[id]
+	if !ok {
+		return deviceRequest{}, false
+	}
+	return deviceRequest{id: id, request: request}, true
 }
 
 func (c *Client) retryAt(id string, now time.Time) (time.Time, bool) {

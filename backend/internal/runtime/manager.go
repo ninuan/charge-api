@@ -60,18 +60,19 @@ const (
 var recoveryStatusCodePattern = regexp.MustCompile(`(?:status=|returned\s+)([1-5][0-9]{2})`)
 
 type Manager struct {
-	mu          sync.RWMutex
-	saveMu      sync.Mutex
-	watchMu     sync.Mutex
-	repository  *persistence.Store
-	requests    []parser.CaptureRequest
-	minInterval time.Duration
-	users       map[string]model.User
-	runtimes    map[string]*UserRuntime
-	initialPass string
-	migrated    bool
-	settings    model.RegistrationSettings
-	invites     map[string]model.InviteCode
+	mu                sync.RWMutex
+	saveMu            sync.Mutex
+	watchMu           sync.Mutex
+	backgroundRefresh backgroundRefreshCoordinator
+	repository        *persistence.Store
+	requests          []parser.CaptureRequest
+	minInterval       time.Duration
+	users             map[string]model.User
+	runtimes          map[string]*UserRuntime
+	initialPass       string
+	migrated          bool
+	settings          model.RegistrationSettings
+	invites           map[string]model.InviteCode
 }
 
 type UserRuntime struct {

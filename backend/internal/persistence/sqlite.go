@@ -829,6 +829,21 @@ func (s *Store) RecordMetricCount(userID, kind string, count int, at time.Time) 
 	return err
 }
 
+// MetricKindCount returns the independently recorded count for one metric
+// kind. Background reminder metrics deliberately use their own kinds so they
+// can be inspected without entering interactive request and active-user totals.
+func (s *Store) MetricKindCount(kind string, since time.Time) (int, error) {
+	var count int
+	if err := s.db.QueryRow(
+		`SELECT COALESCE(SUM(count), 0) FROM metrics WHERE kind = ? AND created_at >= ?`,
+		kind,
+		since.Unix(),
+	).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 const retentionPruneBatchSize = 500
 
 func (s *Store) PruneMetrics(before time.Time) (int64, error) {

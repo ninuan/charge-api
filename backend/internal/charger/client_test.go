@@ -72,6 +72,70 @@ func TestFetchPilesUsesBoundedConcurrencyAndReturnsPartialResults(t *testing.T) 
 	}
 }
 
+func TestFetchPileRequestsOnlyTargetAndReturnsAllPorts(t *testing.T) {
+	requestCounts := map[string]*int32{
+		"device-1": new(int32),
+		"device-2": new(int32),
+	}
+	client := newTestClient(2, requestCounts)
+	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		id := values.Get("id")
+		atomic.AddInt32(requestCounts[id], 1)
+		return testResponse(http.StatusOK, fmt.Sprintf(
+			`{"id":%q,"number":"61034278","status":"在线","opennum":10,"used":[2,8]}`,
+			id,
+		)), nil
+	})
+
+	result := client.FetchPile("device-2", false)
+	if result.Attempted != 1 || result.Skipped != 0 || len(result.Failures) != 0 || len(result.Piles) != 1 {
+		t.Fatalf("unexpected single-pile result: %+v", result)
+	}
+	if got := len(result.Piles[0].Ports); got != 10 {
+		t.Fatalf("port count = %d, want 10", got)
+	}
+	if got := atomic.LoadInt32(requestCounts["device-1"]); got != 0 {
+		t.Fatalf("untargeted pile was requested %d times", got)
+	}
+	if got := atomic.LoadInt32(requestCounts["device-2"]); got != 1 {
+		t.Fatalf("target pile was requested %d times, want 1", got)
+	}
+}
+
+func TestFetchPileRespectsBackoffAndRejectsUnknownDevice(t *testing.T) {
+	requestCounts := map[string]*int32{"device-1": new(int32)}
+	client := newTestClient(1, requestCounts)
+	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		atomic.AddInt32(requestCounts["device-1"], 1)
+		return testResponse(http.StatusBadGateway, "temporary failure"), nil
+	})
+
+	first := client.FetchPile("device-1", false)
+	if first.Attempted != 1 || len(first.Failures) != 1 || first.Failures[0].Skipped {
+		t.Fatalf("unexpected first failure: %+v", first)
+	}
+	second := client.FetchPile("device-1", false)
+	if second.Attempted != 0 || second.Skipped != 1 || len(second.Failures) != 1 || !second.Failures[0].Skipped {
+		t.Fatalf("expected backoff skip: %+v", second)
+	}
+	if got := atomic.LoadInt32(requestCounts["device-1"]); got != 1 {
+		t.Fatalf("backed-off pile was requested %d times", got)
+	}
+
+	unknown := client.FetchPile("missing", false)
+	if unknown.Attempted != 0 || len(unknown.Failures) != 1 || !IsDeviceNotFound(unknown.FirstError()) {
+		t.Fatalf("unexpected unknown-device result: %+v", unknown)
+	}
+}
+
 func TestFailureBackoffIncreasesAndCaps(t *testing.T) {
 	client := newClient(nil, false)
 	now := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
