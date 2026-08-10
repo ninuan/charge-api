@@ -525,6 +525,95 @@ func (s *Store) LoadWatchRefreshState(userID, deviceID string) (model.WatchRefre
 	return state, true, nil
 }
 
+func (s *Store) ListWatchRefreshStates(userID string) ([]model.WatchRefreshState, error) {
+	userID = strings.TrimSpace(userID)
+	query := `
+		SELECT user_id, device_id, next_attempt_at, last_attempt_at, last_success_at,
+		       consecutive_failures, paused_reason, quota_date, quota_used, updated_at
+		FROM watch_refresh_states
+	`
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if userID == "" {
+		rows, err = s.db.Query(query + ` ORDER BY user_id, device_id`)
+	} else {
+		rows, err = s.db.Query(query+` WHERE user_id = ? ORDER BY device_id`, userID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list watch refresh states: %w", err)
+	}
+	defer rows.Close()
+	states := make([]model.WatchRefreshState, 0)
+	for rows.Next() {
+		state, err := scanWatchRefreshState(rows)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	return states, rows.Err()
+}
+
+func (s *Store) DeleteWatchRefreshState(userID, deviceID string) error {
+	userID = strings.TrimSpace(userID)
+	deviceID = strings.TrimSpace(deviceID)
+	if userID == "" || deviceID == "" {
+		return fmt.Errorf("delete watch refresh state requires user and pile")
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM watch_refresh_states WHERE user_id = ? AND device_id = ?`,
+		userID,
+		deviceID,
+	); err != nil {
+		return fmt.Errorf("delete watch refresh state: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) WatchRefreshQuotaUsed(userID, quotaDate string) (int, error) {
+	userID = strings.TrimSpace(userID)
+	quotaDate = strings.TrimSpace(quotaDate)
+	if userID == "" || quotaDate == "" {
+		return 0, fmt.Errorf("watch refresh quota requires user and date")
+	}
+	var used int
+	if err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(quota_used), 0)
+		FROM watch_refresh_states
+		WHERE user_id = ? AND quota_date = ?
+	`, userID, quotaDate).Scan(&used); err != nil {
+		return 0, fmt.Errorf("load watch refresh quota: %w", err)
+	}
+	return used, nil
+}
+
+func scanWatchRefreshState(scanner interface{ Scan(...any) error }) (model.WatchRefreshState, error) {
+	var state model.WatchRefreshState
+	var nextAttemptAt, updatedAt int64
+	var lastAttemptAt, lastSuccessAt sql.NullInt64
+	if err := scanner.Scan(
+		&state.UserID,
+		&state.DeviceID,
+		&nextAttemptAt,
+		&lastAttemptAt,
+		&lastSuccessAt,
+		&state.ConsecutiveFailures,
+		&state.PausedReason,
+		&state.QuotaDate,
+		&state.QuotaUsed,
+		&updatedAt,
+	); err != nil {
+		return model.WatchRefreshState{}, fmt.Errorf("scan watch refresh state: %w", err)
+	}
+	state.NextAttemptAt = time.Unix(nextAttemptAt, 0).UTC()
+	state.LastAttemptAt = nullableUnixTime(lastAttemptAt)
+	state.LastSuccessAt = nullableUnixTime(lastSuccessAt)
+	state.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	return state, nil
+}
+
 func validateWatchRule(rule model.WatchRule) error {
 	if strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.UserID) == "" || strings.TrimSpace(rule.DeviceID) == "" {
 		return fmt.Errorf("watch rule requires id, user, and pile")

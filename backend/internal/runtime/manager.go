@@ -64,6 +64,7 @@ type Manager struct {
 	saveMu            sync.Mutex
 	watchMu           sync.Mutex
 	backgroundRefresh backgroundRefreshCoordinator
+	reminderScheduler reminderSchedulerCoordinator
 	repository        *persistence.Store
 	requests          []parser.CaptureRequest
 	minInterval       time.Duration

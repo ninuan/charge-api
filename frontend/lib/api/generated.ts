@@ -425,8 +425,11 @@ export interface components {
             updated: number;
         };
         WatchRule: {
+            /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
             activeEndMinute: number;
+            /** @description 当地时区当天起始分钟；与结束分钟相同时表示全天。 */
             activeStartMinute: number;
+            /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays: number;
             /** Format: date-time */
             createdAt: string;
@@ -441,8 +444,11 @@ export interface components {
             userId: string;
         };
         WatchRuleCreateRequest: {
+            /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
             activeEndMinute?: number;
+            /** @description 当地时区当天起始分钟；与结束分钟相同时表示全天。 */
             activeStartMinute?: number;
+            /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays?: number;
             deviceId: string;
             enabled?: boolean;
@@ -451,8 +457,11 @@ export interface components {
             timezone?: string;
         };
         WatchRuleUpdateRequest: {
+            /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
             activeEndMinute?: number;
+            /** @description 当地时区当天起始分钟；与结束分钟相同时表示全天。 */
             activeStartMinute?: number;
+            /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays?: number;
             enabled?: boolean;
             notifyIdle?: boolean;

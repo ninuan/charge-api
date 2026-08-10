@@ -150,6 +150,7 @@ func (m *Manager) DeletePile(userID string, id string) error {
 		return err
 	}
 	_, err = m.repository.DeletePortStatusEvents(userID, id)
+	m.wakeReminderScheduler()
 	return err
 }
 

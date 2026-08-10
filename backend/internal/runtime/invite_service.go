@@ -107,6 +107,7 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
 		return err
 	}
+	m.wakeReminderScheduler()
 	return nil
 }
 

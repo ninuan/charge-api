@@ -564,7 +564,11 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	m.users[id] = user
 	m.mu.Unlock()
 
-	return publicUser(user), m.Save()
+	if err := m.Save(); err != nil {
+		return model.CurrentUser{}, err
+	}
+	m.wakeReminderScheduler()
+	return publicUser(user), nil
 }
 
 func (m *Manager) DeleteUser(id string) error {
@@ -589,6 +593,7 @@ func (m *Manager) DeleteUser(id string) error {
 	delete(m.runtimes, id)
 	m.mu.Unlock()
 	m.invalidateBackgroundCredentialValidation(id)
+	m.wakeReminderScheduler()
 
 	return m.Save()
 }

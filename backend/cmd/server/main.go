@@ -134,6 +134,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("create runtime manager: %v", err)
 	}
+	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
+	if err := manager.StartReminderScheduler(schedulerCtx); err != nil {
+		log.Fatalf("start reminder scheduler: %v", err)
+	}
+	defer stopScheduler()
 	if manager.MigratedLegacyJSON() {
 		log.Printf("legacy JSON state imported from %s", absLegacyState)
 	}
@@ -184,11 +189,18 @@ func main() {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {
 	case err := <-errCh:
+		stopScheduler()
+		waitCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if waitErr := manager.WaitReminderScheduler(waitCtx); waitErr != nil {
+			log.Printf("reminder scheduler shutdown failed: %v", waitErr)
+		}
+		cancel()
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server stopped: %v", err)
 		}
 	case sig := <-signals:
 		log.Printf("received %s, shutting down", sig)
+		stopScheduler()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -196,6 +208,9 @@ func main() {
 		}
 		if err := <-errCh; err != nil && err != http.ErrServerClosed {
 			log.Printf("server stopped: %v", err)
+		}
+		if err := manager.WaitReminderScheduler(shutdownCtx); err != nil {
+			log.Printf("reminder scheduler shutdown failed: %v", err)
 		}
 	}
 }

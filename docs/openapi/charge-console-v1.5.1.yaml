@@ -722,14 +722,17 @@ components:
           type: integer
           minimum: 1
           maximum: 127
+          description: 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。
         activeStartMinute:
           type: integer
           minimum: 0
           maximum: 1439
+          description: 当地时区当天起始分钟；与结束分钟相同时表示全天。
         activeEndMinute:
           type: integer
           minimum: 0
           maximum: 1439
+          description: 当地时区当天结束分钟；小于起始分钟时表示跨午夜。
         timezone:
           type: string
           maxLength: 64
@@ -759,14 +762,17 @@ components:
           type: integer
           minimum: 1
           maximum: 127
+          description: 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。
         activeStartMinute:
           type: integer
           minimum: 0
           maximum: 1439
+          description: 当地时区当天起始分钟；与结束分钟相同时表示全天。
         activeEndMinute:
           type: integer
           minimum: 0
           maximum: 1439
+          description: 当地时区当天结束分钟；小于起始分钟时表示跨午夜。
         timezone:
           type: string
           maxLength: 64
@@ -783,14 +789,17 @@ components:
           type: integer
           minimum: 1
           maximum: 127
+          description: 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。
         activeStartMinute:
           type: integer
           minimum: 0
           maximum: 1439
+          description: 当地时区当天起始分钟；与结束分钟相同时表示全天。
         activeEndMinute:
           type: integer
           minimum: 0
           maximum: 1439
+          description: 当地时区当天结束分钟；小于起始分钟时表示跨午夜。
         timezone:
           type: string
           maxLength: 64

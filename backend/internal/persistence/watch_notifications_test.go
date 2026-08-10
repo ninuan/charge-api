@@ -203,6 +203,23 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		loadedRefreshState.LastSuccessAt == nil || !loadedRefreshState.LastSuccessAt.Equal(lastSuccessAt) {
 		t.Fatalf("watch refresh state did not round-trip: %+v", loadedRefreshState)
 	}
+	secondRefreshState := refreshState
+	secondRefreshState.DeviceID = "pile-2"
+	secondRefreshState.QuotaUsed = 5
+	if err := store.SaveWatchRefreshState(secondRefreshState); err != nil {
+		t.Fatalf("SaveWatchRefreshState second pile: %v", err)
+	}
+	states, err := store.ListWatchRefreshStates(user.ID)
+	if err != nil || len(states) != 2 {
+		t.Fatalf("ListWatchRefreshStates = %+v, err %v", states, err)
+	}
+	quotaUsed, err := store.WatchRefreshQuotaUsed(user.ID, "2026-08-09")
+	if err != nil || quotaUsed != 17 {
+		t.Fatalf("WatchRefreshQuotaUsed = %d, err %v; want 17", quotaUsed, err)
+	}
+	if err := store.DeleteWatchRefreshState(user.ID, "pile-2"); err != nil {
+		t.Fatalf("DeleteWatchRefreshState: %v", err)
+	}
 	if err := store.DeleteWatchDataForPile(user.ID, "pile-1"); err != nil {
 		t.Fatalf("DeleteWatchDataForPile: %v", err)
 	}

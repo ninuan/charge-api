@@ -90,6 +90,7 @@ func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRe
 	if err := m.repository.SaveWatchRule(rule); err != nil {
 		return model.WatchRule{}, fmt.Errorf("save watch rule: %w", err)
 	}
+	m.wakeReminderScheduler()
 	return rule, nil
 }
 
@@ -145,6 +146,7 @@ func (m *Manager) UpdateWatchRule(userID, ruleID string, request model.WatchRule
 	if err := m.repository.SaveWatchRule(rule); err != nil {
 		return model.WatchRule{}, fmt.Errorf("update watch rule: %w", err)
 	}
+	m.wakeReminderScheduler()
 	return rule, nil
 }
 
@@ -158,6 +160,7 @@ func (m *Manager) DeleteWatchRule(userID, ruleID string) error {
 	if !deleted {
 		return ErrWatchRuleNotFound
 	}
+	m.wakeReminderScheduler()
 	return nil
 }
 

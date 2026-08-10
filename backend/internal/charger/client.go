@@ -207,6 +207,13 @@ func (c *Client) FetchPiles(force bool) FetchResult {
 // request unit and its response contains all ports; callers must never invoke
 // this method once per port.
 func (c *Client) FetchPile(deviceID string, force bool) FetchResult {
+	return c.FetchPileWithPermit(deviceID, force, nil)
+}
+
+// FetchPileWithPermit runs beforeRequest only after ownership and backoff have
+// been checked, immediately before the remote HTTP attempt. It lets a caller
+// persist a quota reservation without charging cache or backoff skips.
+func (c *Client) FetchPileWithPermit(deviceID string, force bool, beforeRequest func() error) FetchResult {
 	deviceID = strings.TrimSpace(deviceID)
 	result := FetchResult{
 		Piles:    make([]model.Pile, 0, 1),
@@ -233,6 +240,15 @@ func (c *Client) FetchPile(deviceID string, force bool) FetchResult {
 		return result
 	}
 
+	if beforeRequest != nil {
+		if err := beforeRequest(); err != nil {
+			result.Failures = append(result.Failures, DeviceFailure{
+				DeviceID: deviceID,
+				Err:      err,
+			})
+			return result
+		}
+	}
 	result.Attempted = 1
 	pile, err := c.fetchDevice(request)
 	if err == nil {

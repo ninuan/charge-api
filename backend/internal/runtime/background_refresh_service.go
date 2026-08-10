@@ -61,10 +61,14 @@ type backgroundCredentialKey struct {
 	deviceID string
 }
 
-// RefreshWatchedPile refreshes one whole charging pile for one user. It is a
-// capability for the scheduler added in the next phase; this method does not
-// start a timer, scan rules, or perform interactive credential recovery.
+// RefreshWatchedPile refreshes one whole charging pile for one user. The
+// scheduler uses the same capability internally, but this method itself does
+// not start a timer, scan rules, or perform interactive credential recovery.
 func (m *Manager) RefreshWatchedPile(userID, deviceID string) (WatchedPileRefreshResult, error) {
+	return m.refreshWatchedPile(userID, deviceID, nil)
+}
+
+func (m *Manager) refreshWatchedPile(userID, deviceID string, beforeRemoteRequest func() error) (WatchedPileRefreshResult, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
@@ -90,7 +94,7 @@ func (m *Manager) RefreshWatchedPile(userID, deviceID string) (WatchedPileRefres
 	runtime.refreshMu.Lock()
 	defer runtime.refreshMu.Unlock()
 
-	result, err := m.loadWatchedPile(runtime, userID, deviceID)
+	result, err := m.loadWatchedPile(runtime, userID, deviceID, beforeRemoteRequest)
 	m.recordWatchedPileMetrics(userID, result, err)
 	if err != nil || result.Skipped {
 		return result, err
@@ -131,7 +135,12 @@ func runtimeOwnsPile(runtime *UserRuntime, deviceID string) bool {
 	return false
 }
 
-func (m *Manager) loadWatchedPile(runtime *UserRuntime, userID, deviceID string) (WatchedPileRefreshResult, error) {
+func (m *Manager) loadWatchedPile(
+	runtime *UserRuntime,
+	userID string,
+	deviceID string,
+	beforeRemoteRequest func() error,
+) (WatchedPileRefreshResult, error) {
 	coordinator := &m.backgroundRefresh
 	coordinator.mu.Lock()
 	coordinator.initializeLocked()
@@ -173,7 +182,7 @@ func (m *Manager) loadWatchedPile(runtime *UserRuntime, userID, deviceID string)
 	coordinator.flights[flightKey] = flight
 	coordinator.mu.Unlock()
 
-	result, fetchErr := fetchWatchedPile(runtime, deviceID)
+	result, fetchErr := fetchWatchedPile(runtime, deviceID, beforeRemoteRequest)
 	coordinator.mu.Lock()
 	if fetchErr == nil && !result.Skipped {
 		result.FetchedAt = coordinator.now()
@@ -193,8 +202,8 @@ func (m *Manager) loadWatchedPile(runtime *UserRuntime, userID, deviceID string)
 	return result, fetchErr
 }
 
-func fetchWatchedPile(runtime *UserRuntime, deviceID string) (WatchedPileRefreshResult, error) {
-	fetched := runtime.client.FetchPile(deviceID, false)
+func fetchWatchedPile(runtime *UserRuntime, deviceID string, beforeRemoteRequest func() error) (WatchedPileRefreshResult, error) {
+	fetched := runtime.client.FetchPileWithPermit(deviceID, false, beforeRemoteRequest)
 	result := WatchedPileRefreshResult{
 		Attempted:   fetched.Attempted > 0,
 		Skipped:     fetched.Skipped > 0,

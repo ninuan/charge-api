@@ -136,6 +136,50 @@ func TestFetchPileRespectsBackoffAndRejectsUnknownDevice(t *testing.T) {
 	}
 }
 
+func TestFetchPilePermitRunsOnlyImmediatelyBeforeRemoteAttempt(t *testing.T) {
+	requestCounts := map[string]*int32{"device-1": new(int32)}
+	client := newTestClient(1, requestCounts)
+	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		atomic.AddInt32(requestCounts["device-1"], 1)
+		return testResponse(http.StatusOK, `{"id":"device-1","status":"在线","opennum":10}`), nil
+	})
+	var permitCalls int32
+	permitErr := fmt.Errorf("quota exhausted")
+	denied := client.FetchPileWithPermit("device-1", false, func() error {
+		atomic.AddInt32(&permitCalls, 1)
+		return permitErr
+	})
+	if denied.Attempted != 0 || denied.FirstError() != permitErr {
+		t.Fatalf("denied result = %+v", denied)
+	}
+	if got := atomic.LoadInt32(requestCounts["device-1"]); got != 0 {
+		t.Fatalf("denied permit sent %d remote requests", got)
+	}
+
+	allowed := client.FetchPileWithPermit("device-1", false, func() error {
+		atomic.AddInt32(&permitCalls, 1)
+		return nil
+	})
+	if allowed.Attempted != 1 || len(allowed.Piles) != 1 {
+		t.Fatalf("allowed result = %+v", allowed)
+	}
+	if got := atomic.LoadInt32(&permitCalls); got != 2 {
+		t.Fatalf("permit calls = %d, want 2", got)
+	}
+
+	client.recordFailure("device-1")
+	backedOff := client.FetchPileWithPermit("device-1", false, func() error {
+		atomic.AddInt32(&permitCalls, 1)
+		return nil
+	})
+	if backedOff.Skipped != 1 || backedOff.Attempted != 0 {
+		t.Fatalf("backoff result = %+v", backedOff)
+	}
+	if got := atomic.LoadInt32(&permitCalls); got != 2 {
+		t.Fatalf("backoff invoked permit; calls = %d", got)
+	}
+}
+
 func TestFailureBackoffIncreasesAndCaps(t *testing.T) {
 	client := newClient(nil, false)
 	now := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
