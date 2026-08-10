@@ -104,8 +104,12 @@ func (m *Manager) refreshWatchedPile(userID, deviceID string, beforeRemoteReques
 	if err := m.Save(); err != nil {
 		return WatchedPileRefreshResult{}, fmt.Errorf("save watched pile snapshot: %w", err)
 	}
-	if _, err := m.repository.RecordPortStatusTransitions(userID, []model.Pile{result.Pile}); err != nil {
-		return WatchedPileRefreshResult{}, fmt.Errorf("record watched pile status transitions: %w", err)
+	events, err := m.repository.RecordPortStatusTransitions(userID, []model.Pile{result.Pile})
+	if err != nil {
+		return result, fmt.Errorf("record watched pile status transitions: %w", err)
+	}
+	if err := m.processPortStatusEvents(events); err != nil {
+		return result, fmt.Errorf("deliver watched pile notifications: %w", err)
 	}
 	return result, nil
 }

@@ -8,9 +8,11 @@ import (
 	"log"
 	"math/big"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"charge-dashboard/internal/charger"
 	"charge-dashboard/internal/model"
 )
 
@@ -19,16 +21,20 @@ const (
 	defaultReminderSchedulerConcurrency  = 2
 	initialReminderFailureBackoff        = time.Minute
 	maxReminderFailureBackoff            = 6 * time.Hour
+	offlineNotificationMinimumDuration   = 30 * time.Minute
+	offlineNotificationMinimumChecks     = 3
 )
 
 const (
-	watchPauseGlobalDisabled  = "global_disabled"
-	watchPausePowerOff        = "scheduled_power_off"
-	watchPauseInactiveRule    = "inactive_rule_window"
-	watchPauseAccountDisabled = "account_refresh_disabled"
-	watchPauseQuota           = "quota_exhausted"
-	watchPauseBackoff         = "request_backoff"
-	watchPauseInFlight        = "in_flight"
+	watchPauseGlobalDisabled    = "global_disabled"
+	watchPausePowerOff          = "scheduled_power_off"
+	watchPauseInactiveRule      = "inactive_rule_window"
+	watchPauseAccountDisabled   = "account_refresh_disabled"
+	watchPauseQuota             = "quota_exhausted"
+	watchPauseBackoff           = "request_backoff"
+	watchPauseInFlight          = "in_flight"
+	watchPauseCredentialExpired = "credential_expired"
+	watchPausePileOffline       = "pile_offline_observed"
 )
 
 var (
@@ -155,6 +161,9 @@ func (m *Manager) runReminderSchedulerOnce(ctx context.Context, now time.Time) e
 		return err
 	}
 	now = now.UTC()
+	if err := m.recoverPendingIdleNotifications(defaultPortStatusEventRecoveryLimit); err != nil {
+		return fmt.Errorf("recover idle notifications: %w", err)
+	}
 	settings := normalizeRegistrationSettings(m.Settings())
 	targets, err := m.reminderTargets()
 	if err != nil {
@@ -314,6 +323,15 @@ func (m *Manager) prepareReminderTarget(
 		return model.WatchRefreshState{}, false, err
 	}
 	if inPowerOff {
+		if state.PausedReason == watchPauseCredentialExpired {
+			changed := state.ConsecutiveFailures != 0 || quotaReset
+			state.ConsecutiveFailures = 0
+			if !changed {
+				return state, false, nil
+			}
+			state.UpdatedAt = now
+			return state, false, m.repository.SaveWatchRefreshState(state)
+		}
 		powerChanged := state.PausedReason != watchPausePowerOff || state.NextAttemptAt.Before(restoreAt)
 		if powerChanged {
 			state.NextAttemptAt = restoreAt.Add(m.reminderRestoreJitter(
@@ -334,6 +352,13 @@ func (m *Manager) prepareReminderTarget(
 		state.NextAttemptAt = now
 	}
 	if state.PausedReason == watchPausePowerOff && state.NextAttemptAt.After(now) {
+		if quotaReset {
+			state.UpdatedAt = now
+			return state, false, m.repository.SaveWatchRefreshState(state)
+		}
+		return state, false, nil
+	}
+	if state.PausedReason == watchPauseCredentialExpired {
 		if quotaReset {
 			state.UpdatedAt = now
 			return state, false, m.repository.SaveWatchRefreshState(state)
@@ -418,6 +443,9 @@ func (m *Manager) executeReminderTarget(
 	cycleNow time.Time,
 ) error {
 	state := item.state
+	previousPauseReason := state.PausedReason
+	previousConsecutiveFailures := state.ConsecutiveFailures
+	previousLastSuccessAt := cloneTimePointer(state.LastSuccessAt)
 	result, refreshErr := m.refreshWatchedPile(item.target.userID, item.target.deviceID, func() error {
 		now := m.reminderSchedulerNow().UTC()
 		latestSettings := normalizeRegistrationSettings(m.Settings())
@@ -521,6 +549,8 @@ func (m *Manager) executeReminderTarget(
 			return m.repository.DeleteWatchRefreshState(item.target.userID, item.target.deviceID)
 		}
 		return m.pauseReminderState(&state, watchPauseInactiveRule, next, now)
+	case charger.IsAuthExpired(refreshErr):
+		return m.notifyCredentialExpired(item.target.userID, now)
 	case result.Skipped:
 		next := now.Add(initialReminderFailureBackoff)
 		if result.NextRetryAt != nil && result.NextRetryAt.After(next) {
@@ -536,7 +566,21 @@ func (m *Manager) executeReminderTarget(
 			next = *result.NextRetryAt
 		}
 		return m.pauseReminderState(&state, watchPauseBackoff, next, now)
+	case !result.Pile.Online:
+		// The request reservation temporarily marks the row in-flight. Restore
+		// the persisted offline streak before evaluating this successful check.
+		state.PausedReason = previousPauseReason
+		state.ConsecutiveFailures = previousConsecutiveFailures
+		state.LastSuccessAt = previousLastSuccessAt
+		return m.recordOfflineReminderResult(&state, item.target, now)
 	default:
+		if _, _, err := m.resolveNotification(
+			item.target.userID,
+			offlineNotificationDedupeKey(item.target.deviceID),
+			now,
+		); err != nil {
+			return fmt.Errorf("resolve pile offline notification: %w", err)
+		}
 		succeededAt := result.FetchedAt
 		if succeededAt.IsZero() {
 			succeededAt = cycleNow
@@ -550,6 +594,43 @@ func (m *Manager) executeReminderTarget(
 		state.UpdatedAt = now
 		return m.repository.SaveWatchRefreshState(state)
 	}
+}
+
+const defaultPortStatusEventRecoveryLimit = 1000
+
+func (m *Manager) recordOfflineReminderResult(
+	state *model.WatchRefreshState,
+	target reminderTarget,
+	now time.Time,
+) error {
+	if state.PausedReason != watchPausePileOffline || state.LastSuccessAt == nil {
+		firstObservedAt := now.UTC()
+		state.LastSuccessAt = &firstObservedAt
+		state.ConsecutiveFailures = 1
+	} else {
+		state.ConsecutiveFailures++
+	}
+	state.PausedReason = watchPausePileOffline
+
+	if state.ConsecutiveFailures >= offlineNotificationMinimumChecks &&
+		now.Sub(*state.LastSuccessAt) >= offlineNotificationMinimumDuration {
+		pileLabel := strings.TrimSpace(m.notificationPileLabel(target.userID, target.deviceID))
+		if _, _, err := m.recordNotificationOnce(model.Notification{
+			UserID: target.userID, Type: model.NotificationPileOffline, Severity: "warning",
+			Title:     "关注的充电桩持续离线",
+			Message:   pileLabel + " 已连续多次无法访问，请确认现场供电或稍后再试。",
+			DeviceID:  target.deviceID,
+			DedupeKey: offlineNotificationDedupeKey(target.deviceID), CreatedAt: now,
+		}); err != nil {
+			return fmt.Errorf("record pile offline notification: %w", err)
+		}
+	}
+
+	settings := normalizeRegistrationSettings(m.Settings())
+	base := time.Duration(settings.WatchRefreshIntervalMinutes) * time.Minute
+	state.NextAttemptAt = now.Add(m.reminderIntervalJitter(base))
+	state.UpdatedAt = now
+	return m.repository.SaveWatchRefreshState(*state)
 }
 
 func (m *Manager) currentReminderPileRules(userID, deviceID string) ([]model.WatchRule, error) {

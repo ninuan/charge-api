@@ -257,6 +257,67 @@ func (s *Store) SaveNotification(notification model.Notification) error {
 	return nil
 }
 
+// InsertNotificationIfAbsent persists a generated notification once. The
+// database's source-event and active-dedupe unique indexes are the authority,
+// so concurrent refresh workers cannot deliver the same fact twice.
+func (s *Store) InsertNotificationIfAbsent(notification model.Notification) (bool, error) {
+	if err := validateNotification(notification); err != nil {
+		return false, err
+	}
+	result, err := s.db.Exec(`
+		INSERT INTO notifications(
+			id, user_id, type, severity, title, message, device_id, port_id,
+			source_event_id, dedupe_key, read_at, resolved_at, created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING
+	`,
+		notification.ID,
+		notification.UserID,
+		string(notification.Type),
+		notification.Severity,
+		notification.Title,
+		notification.Message,
+		notification.DeviceID,
+		notification.PortID,
+		notification.SourceEventID,
+		notification.DedupeKey,
+		unixTimeOrNil(notification.ReadAt),
+		unixTimeOrNil(notification.ResolvedAt),
+		notification.CreatedAt.UTC().Unix(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert notification if absent: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read inserted notification result: %w", err)
+	}
+	return rows == 1, nil
+}
+
+func (s *Store) ResolveActiveNotification(userID, dedupeKey string, at time.Time) (model.Notification, bool, error) {
+	userID = strings.TrimSpace(userID)
+	dedupeKey = strings.TrimSpace(dedupeKey)
+	if userID == "" || dedupeKey == "" || at.IsZero() {
+		return model.Notification{}, false, fmt.Errorf("resolve notification requires user, dedupe key, and time")
+	}
+	resolvedAt := at.UTC().Truncate(time.Second)
+	notification, err := scanNotification(s.db.QueryRow(`
+		UPDATE notifications
+		SET resolved_at = ?
+		WHERE user_id = ? AND dedupe_key = ? AND resolved_at IS NULL
+		RETURNING id, user_id, type, severity, title, message, device_id, port_id,
+		          source_event_id, dedupe_key, read_at, resolved_at, created_at
+	`, resolvedAt.Unix(), userID, dedupeKey))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Notification{}, false, nil
+	}
+	if err != nil {
+		return model.Notification{}, false, fmt.Errorf("resolve active notification: %w", err)
+	}
+	return notification, true, nil
+}
+
 func (s *Store) ListNotifications(userID string, limit int) ([]model.Notification, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {

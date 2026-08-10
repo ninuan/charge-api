@@ -307,6 +307,44 @@ func (s *Store) PortStatusEvents(query PortStatusEventQuery) ([]model.PortStatus
 	return result, rows.Err()
 }
 
+// UnnotifiedIdleTransitions returns durable in-use -> idle facts which have no
+// notification yet. It is used as a recovery cursor after process crashes.
+func (s *Store) UnnotifiedIdleTransitions(limit int) ([]model.PortStatusEvent, error) {
+	if limit <= 0 {
+		limit = defaultPortStatusEventLimit
+	}
+	if limit > defaultPortStatusEventLimit {
+		limit = defaultPortStatusEventLimit
+	}
+	rows, err := s.db.Query(`
+		SELECT e.id, e.user_id, e.device_id, e.port_id, e.from_status, e.to_status,
+		       e.changed_at, e.used_seconds, e.remaining_text, e.source
+		FROM port_status_events e
+		WHERE e.from_status = ? AND e.to_status = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM notifications n WHERE n.source_event_id = e.id
+		  )
+		  AND EXISTS (
+			SELECT 1
+			FROM watch_rules r
+			WHERE r.user_id = e.user_id AND r.device_id = e.device_id
+			  AND r.port_id = e.port_id AND r.enabled = 1 AND r.notify_idle = 1
+			  AND r.created_at <= e.changed_at
+		  )
+		ORDER BY e.changed_at DESC, e.id DESC
+		LIMIT ?
+	`, string(model.PortInUse), string(model.PortIdle), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query unnotified idle transitions: %w", err)
+	}
+	defer rows.Close()
+	events, err := scanPortStatusEvents(rows, limit)
+	if err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 // PortStatusEventsForAnalysis returns the latest event before the requested
 // window for each selected port plus every event inside the window. The former
 // lets the analytics layer establish the state at the range boundary without

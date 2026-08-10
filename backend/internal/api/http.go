@@ -159,6 +159,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	notificationCh, err := s.manager.SubscribeNotifications(user.ID)
+	if err != nil {
+		writePublicOperationError(w, http.StatusInternalServerError, "subscribe notification stream", "暂时无法建立实时连接，请稍后重试。", err)
+		return
+	}
+	defer s.manager.UnsubscribeNotifications(user.ID, notificationCh)
 	ch, err := s.manager.Subscribe(user.ID)
 	if err != nil {
 		writePublicOperationError(w, http.StatusInternalServerError, "subscribe stream", "暂时无法建立实时连接，请稍后重试。", err)
@@ -181,6 +187,19 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if _, err = fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		case notification, ok := <-notificationCh:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(notification)
+			if err != nil {
+				log.Printf("marshal notification: %v", err)
+				continue
+			}
+			if _, err = fmt.Fprintf(w, "event: notification\ndata: %s\n\n", payload); err != nil {
 				return
 			}
 			flusher.Flush()

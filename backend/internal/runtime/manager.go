@@ -63,8 +63,10 @@ type Manager struct {
 	mu                sync.RWMutex
 	saveMu            sync.Mutex
 	watchMu           sync.Mutex
+	notificationMu    sync.Mutex
 	backgroundRefresh backgroundRefreshCoordinator
 	reminderScheduler reminderSchedulerCoordinator
+	notificationHub   notificationEventHub
 	repository        *persistence.Store
 	requests          []parser.CaptureRequest
 	minInterval       time.Duration

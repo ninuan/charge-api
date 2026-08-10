@@ -292,8 +292,8 @@ func (m *Manager) DeleteResolvedNotifications(userID string) (int64, error) {
 // RecordNotification is the internal notification entry point used by refresh
 // and credential services. User-facing HTTP handlers never expose creation.
 func (m *Manager) RecordNotification(notification model.Notification) (model.Notification, error) {
-	m.watchMu.Lock()
-	defer m.watchMu.Unlock()
+	m.notificationMu.Lock()
+	defer m.notificationMu.Unlock()
 	if _, err := m.runtimeFor(notification.UserID); err != nil {
 		return model.Notification{}, err
 	}
@@ -306,6 +306,7 @@ func (m *Manager) RecordNotification(notification model.Notification) (model.Not
 	if err := m.repository.SaveNotification(notification); err != nil {
 		return model.Notification{}, fmt.Errorf("record notification: %w", err)
 	}
+	m.notificationHub.publish(notification)
 	return notification, nil
 }
 

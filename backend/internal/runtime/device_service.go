@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -206,6 +207,9 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		m.recordRefreshMetrics(userID, info)
 		if charger.IsAuthExpired(err) {
 			m.recordMetric(userID, "cookie_error")
+			if notificationErr := m.notifyCredentialExpired(userID, time.Now().UTC()); notificationErr != nil {
+				err = errors.Join(err, fmt.Errorf("record expired credential notification: %w", notificationErr))
+			}
 		}
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
@@ -284,6 +288,11 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		m.recordRefreshMetrics(userID, info)
 		_ = runtime.client.UpdateCookie(previous)
 		runtime.recordFailure(charger.IsAuthExpired(err))
+		if charger.IsAuthExpired(err) {
+			if notificationErr := m.notifyCredentialExpired(userID, time.Now().UTC()); notificationErr != nil {
+				err = errors.Join(err, fmt.Errorf("record expired credential notification: %w", notificationErr))
+			}
+		}
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
@@ -299,10 +308,18 @@ func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) er
 	if len(piles) == 0 {
 		return nil
 	}
-	if _, err := m.repository.RecordPortStatusTransitions(userID, piles); err != nil {
+	events, err := m.repository.RecordPortStatusTransitions(userID, piles)
+	if err != nil {
 		return fmt.Errorf("record remote port status transitions: %w", err)
 	}
-	m.markBackgroundCredentialsValidated(userID, piles, time.Now())
+	if err := m.processPortStatusEvents(events); err != nil {
+		return fmt.Errorf("deliver remote port notifications: %w", err)
+	}
+	now := time.Now().UTC()
+	m.markBackgroundCredentialsValidated(userID, piles, now)
+	if err := m.resolveCredentialExpired(userID, now); err != nil {
+		return fmt.Errorf("resolve credential notification: %w", err)
+	}
 	return nil
 }
 
