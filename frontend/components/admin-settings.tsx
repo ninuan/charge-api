@@ -20,6 +20,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { adminApi } from "@/lib/admin-api"
 import type { InviteCodePage, RegistrationSettings } from "@/lib/types"
 
@@ -44,6 +45,19 @@ const toggles = [
   ],
 ] as const
 
+function minuteToTime(value: number) {
+  const normalized = Number.isFinite(value)
+    ? Math.max(0, Math.min(1439, value))
+    : 0
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`
+}
+
+function timeToMinute(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
 export function AdminSettings({
   settings,
   setSettings,
@@ -62,100 +76,329 @@ export function AdminSettings({
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="shadow-xs">
-        <CardHeader>
-          <CardTitle className="text-base">注册策略</CardTitle>
-          <CardDescription className="text-xs">
-            这些规则只影响之后创建或注册的账户。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={save}>
-            <FieldGroup>
-              {toggles.map(([key, label, description]) => (
-                <Field
-                  key={key}
-                  orientation="horizontal"
-                  className="rounded-lg border p-3"
-                >
-                  <Checkbox
-                    id={`setting-${key}`}
-                    checked={settings[key]}
-                    onCheckedChange={(checked) =>
+      <div className="grid content-start gap-4">
+        <Card className="shadow-xs">
+          <CardHeader>
+            <CardTitle className="text-base">注册策略</CardTitle>
+            <CardDescription className="text-xs">
+              这些规则只影响之后创建或注册的账户。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={save}>
+              <FieldGroup>
+                {toggles.map(([key, label, description]) => (
+                  <Field
+                    key={key}
+                    orientation="horizontal"
+                    className="rounded-lg border p-3"
+                  >
+                    <Checkbox
+                      id={`setting-${key}`}
+                      checked={settings[key]}
+                      onCheckedChange={(checked) =>
+                        setSettings({
+                          ...settings,
+                          [key]: checked,
+                        })
+                      }
+                    />
+                    <FieldContent>
+                      <FieldLabel htmlFor={`setting-${key}`}>
+                        {label}
+                      </FieldLabel>
+                      <FieldDescription>{description}</FieldDescription>
+                    </FieldContent>
+                  </Field>
+                ))}
+                <Field>
+                  <FieldLabel htmlFor="device-limit">默认设备额度</FieldLabel>
+                  <Input
+                    id="device-limit"
+                    type="number"
+                    value={settings.defaultDeviceLimit}
+                    onChange={(event) =>
                       setSettings({
                         ...settings,
-                        [key]: checked,
+                        defaultDeviceLimit: Number(event.target.value),
                       })
                     }
                   />
-                  <FieldContent>
-                    <FieldLabel htmlFor={`setting-${key}`}>{label}</FieldLabel>
-                    <FieldDescription>{description}</FieldDescription>
-                  </FieldContent>
+                  <p className="text-xs text-muted-foreground">
+                    每个新普通用户最多可添加的充电桩数量。
+                  </p>
                 </Field>
-              ))}
-              <Field>
-                <FieldLabel htmlFor="device-limit">默认设备额度</FieldLabel>
-                <Input
-                  id="device-limit"
-                  type="number"
-                  value={settings.defaultDeviceLimit}
-                  onChange={(event) =>
-                    setSettings({
-                      ...settings,
-                      defaultDeviceLimit: Number(event.target.value),
-                    })
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  每个新普通用户最多可添加的充电桩数量。
-                </p>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="retention">统计保留天数</FieldLabel>
-                <Input
-                  id="retention"
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={settings.statsRetentionDays}
-                  onChange={(event) =>
-                    setSettings({
-                      ...settings,
-                      statsRetentionDays: Number(event.target.value),
-                    })
-                  }
-                />
-                <FieldDescription>
-                  用于运营趋势和异常分析，范围为 1–365 天。
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="port-history-retention">
-                  端口历史保留天数
-                </FieldLabel>
-                <Input
-                  id="port-history-retention"
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={settings.portHistoryRetentionDays}
-                  onChange={(event) =>
-                    setSettings({
-                      ...settings,
-                      portHistoryRetentionDays: Number(event.target.value),
-                    })
-                  }
-                />
-                <FieldDescription>
-                  控制状态时间线、占用趋势和热力图的数据范围，范围为 1–365 天。
-                </FieldDescription>
-              </Field>
-              <Button type="submit">保存设置</Button>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
+                <Field>
+                  <FieldLabel htmlFor="retention">统计保留天数</FieldLabel>
+                  <Input
+                    id="retention"
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={settings.statsRetentionDays}
+                    onChange={(event) =>
+                      setSettings({
+                        ...settings,
+                        statsRetentionDays: Number(event.target.value),
+                      })
+                    }
+                  />
+                  <FieldDescription>
+                    用于运营趋势和异常分析，范围为 1–365 天。
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="port-history-retention">
+                    端口历史保留天数
+                  </FieldLabel>
+                  <Input
+                    id="port-history-retention"
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={settings.portHistoryRetentionDays}
+                    onChange={(event) =>
+                      setSettings({
+                        ...settings,
+                        portHistoryRetentionDays: Number(event.target.value),
+                      })
+                    }
+                  />
+                  <FieldDescription>
+                    控制状态时间线、占用趋势和热力图的数据范围，范围为 1–365
+                    天。
+                  </FieldDescription>
+                </Field>
+                <Button type="submit">保存设置</Button>
+              </FieldGroup>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-xs">
+          <CardHeader>
+            <CardTitle className="text-base">空闲提醒与后台调度</CardTitle>
+            <CardDescription className="text-xs">
+              后台以整桩为单位低频刷新；同一桩任一端口变为空闲时生成提醒。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={save}>
+              <FieldGroup>
+                <Field
+                  orientation="horizontal"
+                  className="rounded-lg border p-3"
+                >
+                  <FieldContent>
+                    <FieldLabel htmlFor="background-reminders">
+                      启用后台空闲提醒
+                    </FieldLabel>
+                    <FieldDescription>
+                      关闭后保留用户规则，但停止所有后台请求和新提醒。
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id="background-reminders"
+                    checked={settings.backgroundRemindersEnabled}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        backgroundRemindersEnabled: checked,
+                      })
+                    }
+                  />
+                </Field>
+
+                <FieldGroup className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="watch-refresh-interval">
+                      刷新间隔（分钟）
+                    </FieldLabel>
+                    <Input
+                      id="watch-refresh-interval"
+                      type="number"
+                      min={5}
+                      max={60}
+                      value={settings.watchRefreshIntervalMinutes}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          watchRefreshIntervalMinutes: Number(
+                            event.target.value
+                          ),
+                        })
+                      }
+                    />
+                    <FieldDescription>范围 5–60 分钟。</FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="watch-pile-limit">
+                      单用户提醒桩上限
+                    </FieldLabel>
+                    <Input
+                      id="watch-pile-limit"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={settings.watchPileLimitPerUser}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          watchPileLimitPerUser: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <FieldDescription>范围 1–20 台桩。</FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="watch-daily-quota">
+                      单用户每日请求额度
+                    </FieldLabel>
+                    <Input
+                      id="watch-daily-quota"
+                      type="number"
+                      min={1}
+                      max={10000}
+                      value={settings.watchDailyRefreshQuota}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          watchDailyRefreshQuota: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <FieldDescription>
+                      只计实际远端请求，缓存命中不扣额度。
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="notification-retention">
+                      通知保留天数
+                    </FieldLabel>
+                    <Input
+                      id="notification-retention"
+                      type="number"
+                      min={7}
+                      max={365}
+                      value={settings.notificationRetentionDays}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          notificationRetentionDays: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <FieldDescription>
+                      仅清理超过期限且已经解决的通知。
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+
+                <Field
+                  orientation="horizontal"
+                  className="rounded-lg border p-3"
+                >
+                  <FieldContent>
+                    <FieldLabel htmlFor="scheduled-power-off">
+                      启用学校计划断电窗口
+                    </FieldLabel>
+                    <FieldDescription>
+                      窗口内暂停请求且不发送离线提醒，恢复供电后分散重试。
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id="scheduled-power-off"
+                    checked={settings.scheduledPowerOffEnabled}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        scheduledPowerOffEnabled: checked,
+                      })
+                    }
+                  />
+                </Field>
+
+                <FieldGroup className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="power-off-start">
+                      断电开始时间
+                    </FieldLabel>
+                    <Input
+                      id="power-off-start"
+                      type="time"
+                      value={minuteToTime(
+                        settings.scheduledPowerOffStartMinute
+                      )}
+                      onChange={(event) => {
+                        const minute = timeToMinute(event.target.value)
+                        if (minute === null) return
+                        setSettings({
+                          ...settings,
+                          scheduledPowerOffStartMinute: minute,
+                        })
+                      }}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="power-off-end">
+                      恢复供电时间
+                    </FieldLabel>
+                    <Input
+                      id="power-off-end"
+                      type="time"
+                      value={minuteToTime(settings.scheduledPowerOffEndMinute)}
+                      onChange={(event) => {
+                        const minute = timeToMinute(event.target.value)
+                        if (minute === null) return
+                        setSettings({
+                          ...settings,
+                          scheduledPowerOffEndMinute: minute,
+                        })
+                      }}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="power-off-timezone">时区</FieldLabel>
+                    <Input
+                      id="power-off-timezone"
+                      value={settings.scheduledPowerOffTimezone}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          scheduledPowerOffTimezone: event.target.value,
+                        })
+                      }
+                    />
+                    <FieldDescription>例如 Asia/Shanghai。</FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="power-restore-jitter">
+                      恢复请求分散时间（分钟）
+                    </FieldLabel>
+                    <Input
+                      id="power-restore-jitter"
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={settings.powerRestoreJitterMinutes}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          powerRestoreJitterMinutes: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <FieldDescription>
+                      避免恢复供电时同时请求，范围 0–60 分钟。
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+                <Button type="submit">保存提醒策略</Button>
+              </FieldGroup>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
       <div className="grid content-start gap-4">
         <AppearanceSettings />
         <Card className="shadow-xs">

@@ -292,6 +292,31 @@ export interface OperationsStatus {
   lastBackupSizeBytes?: number
   backupState: "healthy" | "degraded" | "unavailable"
   backupMessage: string
+  notificationRows: number
+  resolvedNotificationRows: number
+  notificationRetentionDays: number
+  reminders: ReminderOperationsStatus
+}
+
+export interface ReminderOperationsStatus {
+  state: "healthy" | "degraded" | "disabled" | "power_off" | "stopped"
+  message: string
+  enabled: boolean
+  schedulerRunning: boolean
+  scheduledPowerOffActive: boolean
+  trackedPiles: number
+  duePiles: number
+  inFlightPiles: number
+  nextAttemptAt?: string
+  remoteAttempts24Hours: number
+  remoteSuccesses24Hours: number
+  remoteFailures24Hours: number
+  remoteSuccessRate24Hours: number
+  cacheHits24Hours: number
+  coalesced24Hours: number
+  quotaSkips24Hours: number
+  schedulerErrors24Hours: number
+  maxConsecutiveFailures: number
 }
 
 export interface AdminStats {

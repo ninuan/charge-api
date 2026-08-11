@@ -252,6 +252,63 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 	}
 }
 
+func TestPruneResolvedNotificationsKeepsActiveAndBoundaryRows(t *testing.T) {
+	store, err := OpenSQLite(
+		t.TempDir()+"/notifications.db",
+		bytes.Repeat([]byte{0x73}, CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	user := model.User{
+		ID: "retention-user", Username: "retention-user", PasswordHash: "hash",
+		Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Save(State{
+		Version: schemaVersion, Users: []model.User{user},
+		UserStates: map[string]UserState{user.ID: {}},
+	}); err != nil {
+		t.Fatalf("Save user: %v", err)
+	}
+	for _, notification := range []model.Notification{
+		{ID: "active-old", UserID: user.ID, Type: model.NotificationPileOffline, Severity: "warning", Title: "active", Message: "active", CreatedAt: now.Add(-100 * 24 * time.Hour)},
+		{ID: "resolved-old", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "old", Message: "old", CreatedAt: now.Add(-100 * 24 * time.Hour)},
+		{ID: "resolved-boundary", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "boundary", Message: "boundary", CreatedAt: now.Add(-90 * 24 * time.Hour)},
+		{ID: "resolved-new", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "new", Message: "new", CreatedAt: now.Add(-2 * 24 * time.Hour)},
+	} {
+		if err := store.SaveNotification(notification); err != nil {
+			t.Fatalf("SaveNotification %s: %v", notification.ID, err)
+		}
+	}
+	boundary := now.Add(-90 * 24 * time.Hour)
+	for id, resolvedAt := range map[string]time.Time{
+		"resolved-old":      boundary.Add(-time.Second),
+		"resolved-boundary": boundary,
+		"resolved-new":      now.Add(-time.Hour),
+	} {
+		if _, err := store.db.Exec(`UPDATE notifications SET resolved_at=? WHERE id=?`, resolvedAt.Unix(), id); err != nil {
+			t.Fatalf("resolve %s: %v", id, err)
+		}
+	}
+	deleted, err := store.PruneResolvedNotifications(boundary)
+	if err != nil || deleted != 1 {
+		t.Fatalf("PruneResolvedNotifications deleted %d, err %v; want 1", deleted, err)
+	}
+	rows, err := store.ListNotifications(user.ID, 10)
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	remaining := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		remaining[row.ID] = true
+	}
+	if remaining["resolved-old"] || !remaining["active-old"] || !remaining["resolved-boundary"] || !remaining["resolved-new"] {
+		t.Fatalf("unexpected retained notifications: %+v", remaining)
+	}
+}
+
 func TestLegacyFavoritesAndPortRulesNormalizeToOnePileReminder(t *testing.T) {
 	path := t.TempDir() + "/legacy-watch.db"
 	key := bytes.Repeat([]byte{0x72}, CookieKeySize)

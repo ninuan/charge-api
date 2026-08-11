@@ -918,13 +918,18 @@ func (s *Store) PruneMetrics(before time.Time) (int64, error) {
 }
 
 func (s *Store) pruneRowsInBatches(table, timeColumn string, before int64) (int64, error) {
+	return s.pruneRowsInBatchesWhere(table, timeColumn, before, "1=1")
+}
+
+func (s *Store) pruneRowsInBatchesWhere(table, timeColumn string, before int64, condition string) (int64, error) {
 	var total int64
 	query := fmt.Sprintf(
 		`DELETE FROM %s WHERE id IN (
-			SELECT id FROM %s WHERE %s < ? ORDER BY %s, id LIMIT ?
+			SELECT id FROM %s WHERE %s AND %s < ? ORDER BY %s, id LIMIT ?
 		)`,
 		table,
 		table,
+		condition,
 		timeColumn,
 		timeColumn,
 	)

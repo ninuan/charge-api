@@ -437,6 +437,44 @@ func TestReminderSchedulerChargesQuotaOnlyToSharedFlightLeader(t *testing.T) {
 	}
 }
 
+func TestReminderSchedulerTwentyFourHourRequestVolumeHonorsPowerOffWindow(t *testing.T) {
+	var requests int32
+	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[3]}`, testBackgroundPileID)
+	}))
+	deleteReminderRulesForUser(t, manager, other.ID)
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("LoadLocation: %v", err)
+	}
+	start := time.Date(2026, 8, 10, 7, 0, 0, 0, location).UTC()
+	now := start
+	setReminderTestClock(manager, &now)
+	for now.Before(start.Add(24 * time.Hour)) {
+		if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
+			t.Fatalf("scheduler cycle at %s: %v", now.In(location), err)
+		}
+		now = now.Add(10 * time.Minute)
+	}
+	if got := atomic.LoadInt32(&requests); got != 96 {
+		t.Fatalf("24-hour request volume = %d, want 96 outside 23:00-07:00", got)
+	}
+	remoteAttempts, err := manager.repository.MetricKindCount("watch_remote", start.Add(-time.Second))
+	if err != nil || remoteAttempts != 96 {
+		t.Fatalf("watch_remote metric = %d, err %v; want 96", remoteAttempts, err)
+	}
+	quotaDate, err := reminderQuotaDate(now.Add(-10*time.Minute), manager.Settings().ScheduledPowerOffTimezone)
+	if err != nil {
+		t.Fatalf("reminderQuotaDate: %v", err)
+	}
+	quotaUsed, err := manager.repository.WatchRefreshQuotaUsed(owner.ID, quotaDate)
+	if err != nil || quotaUsed != 0 {
+		t.Fatalf("power-off day quota = %d, err %v; want 0 before next restore", quotaUsed, err)
+	}
+}
+
 func TestReminderTimeWindowsHandleWeekdaysAndCrossMidnight(t *testing.T) {
 	mondayDaytime := model.WatchRule{
 		ActiveWeekdays: 1, ActiveStartMinute: 9 * 60, ActiveEndMinute: 10 * 60,

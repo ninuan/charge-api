@@ -33,6 +33,29 @@ describe("AdminOperations", () => {
       lastBackupSizeBytes: 1024,
       backupState: "healthy",
       backupMessage: "已发现最近数据库备份。",
+      notificationRows: 36,
+      resolvedNotificationRows: 12,
+      notificationRetentionDays: 90,
+      reminders: {
+        state: "healthy",
+        message: "后台提醒调度运行正常。",
+        enabled: true,
+        schedulerRunning: true,
+        scheduledPowerOffActive: false,
+        trackedPiles: 4,
+        duePiles: 1,
+        inFlightPiles: 0,
+        nextAttemptAt: "2026-08-05T10:10:00Z",
+        remoteAttempts24Hours: 20,
+        remoteSuccesses24Hours: 19,
+        remoteFailures24Hours: 1,
+        remoteSuccessRate24Hours: 95,
+        cacheHits24Hours: 8,
+        coalesced24Hours: 2,
+        quotaSkips24Hours: 0,
+        schedulerErrors24Hours: 0,
+        maxConsecutiveFailures: 0,
+      },
     })
     adminApiMock.audit.mockResolvedValue({
       items: [],
@@ -46,8 +69,10 @@ describe("AdminOperations", () => {
 
     expect(await screen.findByText("端口历史")).toBeInTheDocument()
     expect(screen.getByText("128 条")).toBeInTheDocument()
-    expect(screen.getByText(/保留 90 天/)).toBeInTheDocument()
-    expect(screen.getByText(/07\/01/)).toBeInTheDocument()
-    expect(screen.getByText(/08\/05/)).toBeInTheDocument()
+    expect(screen.getAllByText(/保留 90 天/)).toHaveLength(2)
+    expect(screen.getByText(/07\/01.*08\/05/)).toBeInTheDocument()
+    expect(screen.getByText("提醒调度")).toBeInTheDocument()
+    expect(screen.getByText("95.0%")).toBeInTheDocument()
+    expect(screen.getByText("36 条")).toBeInTheDocument()
   })
 })

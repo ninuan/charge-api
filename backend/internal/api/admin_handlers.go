@@ -122,6 +122,12 @@ func (s *Server) handleAdminOperations(w http.ResponseWriter, r *http.Request) {
 			Level: "warning", Message: status.BackupMessage, Time: at,
 		})
 	}
+	if status.Reminders.State == "degraded" {
+		_ = s.manager.RecordSystemIncident(model.SystemException{
+			ID: "operations-reminder", Username: "系统", Type: "reminder",
+			Level: "warning", Message: status.Reminders.Message, Time: status.CheckedAt,
+		})
+	}
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -161,6 +167,17 @@ func (s *Server) recordAdminAudit(
 ) {
 	if err := s.manager.RecordAdminAudit(
 		admin, action, targetType, targetID, targetLabel, result, "",
+	); err != nil {
+		logStructuredError("record_admin_audit", action, err)
+	}
+}
+
+func (s *Server) recordAdminAuditMessage(
+	admin model.CurrentUser,
+	action, targetType, targetID, targetLabel, result, message string,
+) {
+	if err := s.manager.RecordAdminAudit(
+		admin, action, targetType, targetID, targetLabel, result, message,
 	); err != nil {
 		logStructuredError("record_admin_audit", action, err)
 	}
@@ -552,16 +569,52 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, adminBodyLimit, &req) {
 			return
 		}
+		previous := s.manager.Settings()
 		if err := s.manager.UpdateSettings(req); err != nil {
-			s.recordAdminAudit(admin, "settings.update", "settings", "registration", "注册与保留策略", "failure")
+			s.recordAdminAuditMessage(admin, "settings.update", "settings", "system", "系统策略", "failure", err.Error())
 			writePublicOperationError(w, http.StatusBadRequest, "update settings", "保存系统策略失败，请检查设置后重试。", err)
 			return
 		}
-		s.recordAdminAudit(admin, "settings.update", "settings", "registration", "注册与保留策略", "success")
+		s.recordAdminAuditMessage(
+			admin, "settings.update", "settings", "system", "系统策略", "success",
+			settingsAuditMessage(previous, req),
+		)
 		writeJSON(w, http.StatusOK, s.manager.Settings())
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func settingsAuditMessage(previous, next model.RegistrationSettings) string {
+	groups := make([]string, 0, 4)
+	if previous.OpenRegistration != next.OpenRegistration ||
+		previous.InviteRequired != next.InviteRequired ||
+		previous.DefaultRefreshEnabled != next.DefaultRefreshEnabled ||
+		previous.DefaultDeviceLimit != next.DefaultDeviceLimit {
+		groups = append(groups, "注册策略")
+	}
+	if previous.StatsRetentionDays != next.StatsRetentionDays ||
+		previous.PortHistoryRetentionDays != next.PortHistoryRetentionDays ||
+		previous.NotificationRetentionDays != next.NotificationRetentionDays {
+		groups = append(groups, "数据保留")
+	}
+	if previous.BackgroundRemindersEnabled != next.BackgroundRemindersEnabled ||
+		previous.WatchRefreshIntervalMinutes != next.WatchRefreshIntervalMinutes ||
+		previous.WatchPileLimitPerUser != next.WatchPileLimitPerUser ||
+		previous.WatchDailyRefreshQuota != next.WatchDailyRefreshQuota {
+		groups = append(groups, "提醒调度")
+	}
+	if previous.ScheduledPowerOffEnabled != next.ScheduledPowerOffEnabled ||
+		previous.ScheduledPowerOffStartMinute != next.ScheduledPowerOffStartMinute ||
+		previous.ScheduledPowerOffEndMinute != next.ScheduledPowerOffEndMinute ||
+		previous.ScheduledPowerOffTimezone != next.ScheduledPowerOffTimezone ||
+		previous.PowerRestoreJitterMinutes != next.PowerRestoreJitterMinutes {
+		groups = append(groups, "计划断电")
+	}
+	if len(groups) == 0 {
+		return "设置内容未发生变化"
+	}
+	return "变更：" + strings.Join(groups, "、")
 }
 
 func (s *Server) handleAdminInvites(w http.ResponseWriter, r *http.Request) {

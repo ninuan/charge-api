@@ -549,19 +549,44 @@ type AuditPage struct {
 }
 
 type OperationsStatus struct {
-	DatabaseSizeBytes        int64      `json:"databaseSizeBytes"`
-	MetricRows               int64      `json:"metricRows"`
-	MetricRetentionDays      int        `json:"metricRetentionDays"`
-	PortHistoryRows          int64      `json:"portHistoryRows"`
-	PortHistoryRetentionDays int        `json:"portHistoryRetentionDays"`
-	PortHistoryOldestAt      *time.Time `json:"portHistoryOldestAt,omitempty"`
-	PortHistoryNewestAt      *time.Time `json:"portHistoryNewestAt,omitempty"`
-	IntegrityResult          string     `json:"integrityResult"`
-	CheckedAt                time.Time  `json:"checkedAt"`
-	LastBackupAt             *time.Time `json:"lastBackupAt,omitempty"`
-	LastBackupSizeBytes      int64      `json:"lastBackupSizeBytes,omitempty"`
-	BackupState              string     `json:"backupState"`
-	BackupMessage            string     `json:"backupMessage"`
+	DatabaseSizeBytes         int64                    `json:"databaseSizeBytes"`
+	MetricRows                int64                    `json:"metricRows"`
+	MetricRetentionDays       int                      `json:"metricRetentionDays"`
+	PortHistoryRows           int64                    `json:"portHistoryRows"`
+	PortHistoryRetentionDays  int                      `json:"portHistoryRetentionDays"`
+	PortHistoryOldestAt       *time.Time               `json:"portHistoryOldestAt,omitempty"`
+	PortHistoryNewestAt       *time.Time               `json:"portHistoryNewestAt,omitempty"`
+	IntegrityResult           string                   `json:"integrityResult"`
+	CheckedAt                 time.Time                `json:"checkedAt"`
+	LastBackupAt              *time.Time               `json:"lastBackupAt,omitempty"`
+	LastBackupSizeBytes       int64                    `json:"lastBackupSizeBytes,omitempty"`
+	BackupState               string                   `json:"backupState"`
+	BackupMessage             string                   `json:"backupMessage"`
+	NotificationRows          int64                    `json:"notificationRows"`
+	ResolvedNotificationRows  int64                    `json:"resolvedNotificationRows"`
+	NotificationRetentionDays int                      `json:"notificationRetentionDays"`
+	Reminders                 ReminderOperationsStatus `json:"reminders"`
+}
+
+type ReminderOperationsStatus struct {
+	State                    string     `json:"state"`
+	Message                  string     `json:"message"`
+	Enabled                  bool       `json:"enabled"`
+	SchedulerRunning         bool       `json:"schedulerRunning"`
+	ScheduledPowerOffActive  bool       `json:"scheduledPowerOffActive"`
+	TrackedPiles             int        `json:"trackedPiles"`
+	DuePiles                 int        `json:"duePiles"`
+	InFlightPiles            int        `json:"inFlightPiles"`
+	NextAttemptAt            *time.Time `json:"nextAttemptAt,omitempty"`
+	RemoteAttempts24Hours    int        `json:"remoteAttempts24Hours"`
+	RemoteSuccesses24Hours   int        `json:"remoteSuccesses24Hours"`
+	RemoteFailures24Hours    int        `json:"remoteFailures24Hours"`
+	RemoteSuccessRate24Hours float64    `json:"remoteSuccessRate24Hours"`
+	CacheHits24Hours         int        `json:"cacheHits24Hours"`
+	Coalesced24Hours         int        `json:"coalesced24Hours"`
+	QuotaSkips24Hours        int        `json:"quotaSkips24Hours"`
+	SchedulerErrors24Hours   int        `json:"schedulerErrors24Hours"`
+	MaxConsecutiveFailures   int        `json:"maxConsecutiveFailures"`
 }
 
 type TrafficStats struct {

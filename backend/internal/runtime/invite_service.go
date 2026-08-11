@@ -98,28 +98,49 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 		m.mu.Unlock()
 		return err
 	}
-	if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
+	if _, _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
 		return err
 	}
 	m.wakeReminderScheduler()
 	return nil
 }
 
-func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, error) {
+func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, int64, error) {
+	m.retentionMu.Lock()
+	defer m.retentionMu.Unlock()
+
 	settings := normalizeRegistrationSettings(m.Settings())
 	metricRows, err := m.repository.PruneMetrics(
 		now.UTC().AddDate(0, 0, -settings.StatsRetentionDays),
 	)
 	if err != nil {
-		return 0, 0, fmt.Errorf("prune metrics: %w", err)
+		return 0, 0, 0, fmt.Errorf("prune metrics: %w", err)
 	}
 	historyRows, err := m.repository.PrunePortStatusEvents(
 		now.UTC().AddDate(0, 0, -settings.PortHistoryRetentionDays),
 	)
 	if err != nil {
-		return metricRows, 0, fmt.Errorf("prune port history: %w", err)
+		return metricRows, 0, 0, fmt.Errorf("prune port history: %w", err)
 	}
-	return metricRows, historyRows, nil
+	notificationRows, err := m.repository.PruneResolvedNotifications(
+		now.UTC().AddDate(0, 0, -settings.NotificationRetentionDays),
+	)
+	if err != nil {
+		return metricRows, historyRows, 0, fmt.Errorf("prune resolved notifications: %w", err)
+	}
+	m.lastRetentionRun = now.UTC()
+	return metricRows, historyRows, notificationRows, nil
+}
+
+func (m *Manager) maybeRunRetentionMaintenance(now time.Time) error {
+	m.retentionMu.Lock()
+	lastRun := m.lastRetentionRun
+	m.retentionMu.Unlock()
+	if !lastRun.IsZero() && now.UTC().Sub(lastRun) < 6*time.Hour {
+		return nil
+	}
+	_, _, _, err := m.runRetentionMaintenance(now)
+	return err
 }
 
 func (m *Manager) InviteCodes() []model.InviteCode {

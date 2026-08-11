@@ -6,7 +6,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 backend_version="$(sed -n 's/^const Current = "\([^"]*\)"$/\1/p' "$ROOT_DIR/backend/internal/version/version.go")"
 frontend_version="$(cd "$ROOT_DIR/frontend" && node -p 'require("./package.json").version')"
-openapi_version="$(sed -n 's/^  version: //p' "$ROOT_DIR/docs/openapi/charge-console-v1.5.0.yaml" | head -1)"
+openapi_file="$ROOT_DIR/docs/openapi/charge-console-v$backend_version.yaml"
+if [[ ! -f "$openapi_file" ]]; then
+  echo "缺少 $backend_version 对应的 OpenAPI 文档：$openapi_file" >&2
+  exit 1
+fi
+openapi_version="$(sed -n 's/^  version: //p' "$openapi_file" | head -1)"
 
 if [[ -z "$backend_version" ]]; then
   echo "无法读取后端发布版本" >&2

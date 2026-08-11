@@ -123,6 +123,12 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordAudit: %v", err)
 	}
+	if err := store.RecordMetricCount("user-1", "watch_remote", 4, now); err != nil {
+		t.Fatalf("RecordMetricCount watch_remote: %v", err)
+	}
+	if err := store.RecordMetricCount("user-1", "watch_remote_ok", 3, now); err != nil {
+		t.Fatalf("RecordMetricCount watch_remote_ok: %v", err)
+	}
 	page, err := store.ListAudit(1, 20)
 	if err != nil {
 		t.Fatalf("ListAudit: %v", err)
@@ -140,5 +146,9 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 		!status.PortHistoryOldestAt.Equal(now.Add(-time.Hour)) ||
 		status.PortHistoryNewestAt == nil || !status.PortHistoryNewestAt.Equal(now) {
 		t.Fatalf("unexpected operations status: %+v", status)
+	}
+	metrics, err := store.ReminderMetricCounts(now.Add(-time.Hour))
+	if err != nil || metrics["watch_remote"] != 4 || metrics["watch_remote_ok"] != 3 {
+		t.Fatalf("ReminderMetricCounts = %+v, err %v", metrics, err)
 	}
 }

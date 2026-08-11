@@ -275,6 +275,12 @@ func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays i
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM metrics`).Scan(&result.MetricRows); err != nil {
 		return result, fmt.Errorf("count metrics: %w", err)
 	}
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN resolved_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+		FROM notifications
+	`).Scan(&result.NotificationRows, &result.ResolvedNotificationRows); err != nil {
+		return result, fmt.Errorf("summarize notifications: %w", err)
+	}
 	var oldestHistory, newestHistory sql.NullInt64
 	if err := s.db.QueryRow(`
 		SELECT COUNT(*), MIN(changed_at), MAX(changed_at)
@@ -316,6 +322,32 @@ func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays i
 	if time.Since(at) > 48*time.Hour {
 		result.BackupState = "degraded"
 		result.BackupMessage = "最近数据库备份已超过 48 小时，请检查定时任务。"
+	}
+	return result, nil
+}
+
+func (s *Store) ReminderMetricCounts(since time.Time) (map[string]int, error) {
+	rows, err := s.db.Query(`
+		SELECT kind, COALESCE(SUM(count), 0)
+		FROM metrics
+		WHERE created_at >= ? AND kind LIKE 'watch_%'
+		GROUP BY kind
+	`, since.UTC().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("query reminder metrics: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]int)
+	for rows.Next() {
+		var kind string
+		var count int
+		if err := rows.Scan(&kind, &count); err != nil {
+			return nil, fmt.Errorf("scan reminder metrics: %w", err)
+		}
+		result[kind] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate reminder metrics: %w", err)
 	}
 	return result, nil
 }

@@ -310,16 +310,28 @@ test("administrator handles a user and verifies the audit trail", async ({
   await page.getByLabel("端口历史保留天数").fill("120")
   await page.getByRole("button", { name: "保存设置" }).click()
   await expect(page.getByText("系统设置已保存")).toBeVisible()
+  await expect(
+    page.getByText("空闲提醒与后台调度", { exact: true })
+  ).toBeVisible()
+  await page.getByLabel("刷新间隔（分钟）").fill("12")
+  await page.getByRole("button", { name: "保存提醒策略" }).click()
+  await expect(page.getByText("系统设置已保存")).toBeVisible()
   await page.getByRole("tab", { name: "运维审计" }).click()
+  await expect(page.getByText(/后台按整桩低频刷新/)).toBeVisible()
+  await expect(page.getByText("关注充电桩")).toBeVisible()
+  await expect(page.getByText("24 小时请求成功率")).toBeVisible()
   await expect(page.getByText("数据与备份")).toBeVisible()
   await expect(page.getByText("端口历史")).toBeVisible()
+  await expect(page.getByText("站内通知")).toBeVisible()
   await expect(page.getByText(/保留 120 天/)).toBeVisible()
+  await page.getByRole("button", { name: "重新检查" }).click()
+  await expect(page.getByText("运维状态已重新检查")).toBeVisible()
   await expect(page.getByText("管理操作日志")).toBeVisible()
   await expect(page.getByText(/修改账户状态/).first()).toBeVisible()
   await expect(page.getByText(/重置密码/).first()).toBeVisible()
   await expect(page.getByText(/修改系统设置/).first()).toBeVisible()
   await page.screenshot({
-    path: "/tmp/charge-1.4.13-admin-operations.png",
+    path: "/tmp/charge-1.5.1-admin-operations.png",
     fullPage: false,
   })
 
@@ -331,7 +343,7 @@ test("administrator handles a user and verifies the audit trail", async ({
     )
   ).toBe(true)
   await page.screenshot({
-    path: "/tmp/charge-1.5.0-retention-operations-mobile.png",
+    path: "/tmp/charge-1.5.1-operations-mobile.png",
     fullPage: false,
   })
   await page.getByRole("tab", { name: "运营总览" }).click()

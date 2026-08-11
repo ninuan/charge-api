@@ -10,12 +10,14 @@ import (
 )
 
 const (
-	capacityUsers          = 100
-	capacityPortsPerUser   = 10
-	capacityHistoryDays    = 90
-	capacityEventsPerDay   = 4
-	capacityQueryThreshold = 2 * time.Second
-	capacityTrendThreshold = 2 * time.Second
+	capacityUsers                = 100
+	capacityPortsPerUser         = 10
+	capacityHistoryDays          = 90
+	capacityEventsPerDay         = 4
+	capacityRulesPerUser         = 5
+	capacityNotificationsPerUser = 100
+	capacityQueryThreshold       = 2 * time.Second
+	capacityTrendThreshold       = 2 * time.Second
 )
 
 // TestSQLiteCapacityBaseline is an opt-in release gate because it creates more
@@ -41,6 +43,7 @@ func TestSQLiteCapacityBaseline(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Hour)
 	seedStarted := time.Now()
 	seedCapacityHistory(t, store.db, userIDs, now)
+	seedReminderCapacity(t, store.db, userIDs, now)
 	seedDuration := time.Since(seedStarted)
 
 	if _, err := store.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
@@ -89,6 +92,35 @@ func TestSQLiteCapacityBaseline(t *testing.T) {
 	if requests != capacityUsers*30 {
 		t.Fatalf("30-day request count=%d, want %d", requests, capacityUsers*30)
 	}
+
+	reminderQueryStarted := time.Now()
+	notifications, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: userIDs[0], Status: "all", Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("query capacity notifications: %v", err)
+	}
+	if len(notifications.Items) != 50 || notifications.NextCursor == "" || notifications.UnreadCount != capacityNotificationsPerUser/2 {
+		t.Fatalf("capacity notification page = %+v", notifications)
+	}
+	operations, err := store.OperationsStatus(90, 90)
+	if err != nil {
+		t.Fatalf("query capacity operations: %v", err)
+	}
+	if operations.NotificationRows != capacityUsers*capacityNotificationsPerUser {
+		t.Fatalf("capacity notification rows=%d", operations.NotificationRows)
+	}
+	reminderQueryDuration := time.Since(reminderQueryStarted)
+	if reminderQueryDuration > capacityQueryThreshold {
+		t.Fatalf("reminder operations query took %s, threshold %s", reminderQueryDuration, capacityQueryThreshold)
+	}
+	prunedNotifications, err := store.PruneResolvedNotifications(now.Add(-capacityHistoryDays * 24 * time.Hour))
+	if err != nil {
+		t.Fatalf("prune capacity notifications: %v", err)
+	}
+	if prunedNotifications != capacityUsers*capacityNotificationsPerUser/2 {
+		t.Fatalf("pruned notifications=%d, want %d", prunedNotifications, capacityUsers*capacityNotificationsPerUser/2)
+	}
 	if trendDuration > capacityTrendThreshold {
 		t.Fatalf("30-day admin trend took %s, threshold %s", trendDuration, capacityTrendThreshold)
 	}
@@ -113,17 +145,70 @@ func TestSQLiteCapacityBaseline(t *testing.T) {
 	}
 
 	t.Logf(
-		"capacity baseline: users=%d ports=%d retained_events=%d database=%.1f MiB migration=%s seed=%s seven_day_query=%s thirty_day_trend=%s cleanup=%s",
+		"capacity baseline: users=%d ports=%d reminders=%d notifications=%d retained_events=%d database=%.1f MiB migration=%s seed=%s seven_day_query=%s thirty_day_trend=%s reminder_query=%s cleanup=%s",
 		capacityUsers,
 		capacityUsers*capacityPortsPerUser,
+		capacityUsers*capacityRulesPerUser,
+		capacityUsers*capacityNotificationsPerUser,
 		eventCount,
 		float64(databaseInfo.Size())/(1024*1024),
 		migrationDuration.Round(time.Millisecond),
 		seedDuration.Round(time.Millisecond),
 		queryDuration.Round(time.Millisecond),
 		trendDuration.Round(time.Millisecond),
+		reminderQueryDuration.Round(time.Millisecond),
 		cleanupDuration.Round(time.Millisecond),
 	)
+}
+
+func seedReminderCapacity(t *testing.T, db *sql.DB, userIDs []string, now time.Time) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin reminder capacity seed: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for userIndex, userID := range userIDs {
+		for ruleIndex := 0; ruleIndex < capacityRulesPerUser; ruleIndex++ {
+			deviceID := fmt.Sprintf("capacity-reminder-%03d-%02d", userIndex, ruleIndex)
+			if _, err := tx.Exec(`
+				INSERT INTO watch_rules(
+					id,user_id,device_id,enabled,active_weekdays,
+					active_start_minute,active_end_minute,timezone,created_at,updated_at
+				) VALUES(?,?,?,?,127,0,0,'Asia/Shanghai',?,?)
+			`, "capacity-rule-"+deviceID, userID, deviceID, 1, now.Unix(), now.Unix()); err != nil {
+				t.Fatalf("insert capacity watch rule: %v", err)
+			}
+			if _, err := tx.Exec(`
+				INSERT INTO watch_refresh_states(
+					user_id,device_id,next_attempt_at,quota_date,quota_used,updated_at
+				) VALUES(?,?,?,?,?,?)
+			`, userID, deviceID, now.Add(time.Duration(ruleIndex)*time.Minute).Unix(), now.Format("2006-01-02"), ruleIndex, now.Unix()); err != nil {
+				t.Fatalf("insert capacity watch state: %v", err)
+			}
+		}
+		for notificationIndex := 0; notificationIndex < capacityNotificationsPerUser; notificationIndex++ {
+			resolvedAt := any(nil)
+			readAt := any(nil)
+			createdAt := now.Add(-time.Duration(notificationIndex) * time.Hour)
+			if notificationIndex < capacityNotificationsPerUser/2 {
+				resolvedAt = now.Add(-(capacityHistoryDays + 1) * 24 * time.Hour).Unix()
+				readAt = createdAt.Unix()
+			}
+			if _, err := tx.Exec(`
+				INSERT INTO notifications(
+					id,user_id,type,severity,title,message,device_id,
+					read_at,resolved_at,created_at
+				) VALUES(?,?,'pile_recovered','info','恢复在线','容量基线通知',?,?,?,?)
+			`, fmt.Sprintf("capacity-notification-%03d-%03d", userIndex, notificationIndex), userID,
+				fmt.Sprintf("capacity-reminder-%03d-00", userIndex), readAt, resolvedAt, createdAt.Unix()); err != nil {
+				t.Fatalf("insert capacity notification: %v", err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit reminder capacity seed: %v", err)
+	}
 }
 
 func extendV7CapacityFixture(t *testing.T, path string) []string {

@@ -12,10 +12,118 @@ import (
 
 func (m *Manager) OperationsStatus() (model.OperationsStatus, error) {
 	settings := normalizeRegistrationSettings(m.Settings())
-	return m.repository.OperationsStatus(
+	status, err := m.repository.OperationsStatus(
 		settings.StatsRetentionDays,
 		settings.PortHistoryRetentionDays,
 	)
+	if err != nil {
+		return model.OperationsStatus{}, err
+	}
+	status.NotificationRetentionDays = settings.NotificationRetentionDays
+	reminders, err := m.reminderOperationsStatus(settings, status.CheckedAt)
+	if err != nil {
+		return model.OperationsStatus{}, err
+	}
+	status.Reminders = reminders
+	return status, nil
+}
+
+func (m *Manager) reminderOperationsStatus(settings model.RegistrationSettings, now time.Time) (model.ReminderOperationsStatus, error) {
+	result := model.ReminderOperationsStatus{
+		Enabled:          settings.BackgroundRemindersEnabled,
+		SchedulerRunning: m.reminderSchedulerRunning(),
+	}
+	inPowerOff, _, err := scheduledPowerOffWindow(now, settings)
+	if err != nil {
+		return result, fmt.Errorf("check reminder power-off window: %w", err)
+	}
+	result.ScheduledPowerOffActive = inPowerOff
+	targets, err := m.reminderTargets()
+	if err != nil {
+		return result, fmt.Errorf("list reminder operation targets: %w", err)
+	}
+	result.TrackedPiles = len(targets)
+	activeTargets := make(map[reminderTargetKey]struct{}, len(targets))
+	for _, target := range targets {
+		activeTargets[reminderTargetKey{userID: target.userID, deviceID: target.deviceID}] = struct{}{}
+	}
+	states, err := m.repository.ListWatchRefreshStates("")
+	if err != nil {
+		return result, fmt.Errorf("list reminder operation states: %w", err)
+	}
+	matchedStates := 0
+	for _, state := range states {
+		if _, active := activeTargets[reminderTargetKey{userID: state.UserID, deviceID: state.DeviceID}]; !active {
+			continue
+		}
+		matchedStates++
+		if result.NextAttemptAt == nil || state.NextAttemptAt.Before(*result.NextAttemptAt) {
+			at := state.NextAttemptAt
+			result.NextAttemptAt = &at
+		}
+		if state.PausedReason == watchPauseInFlight {
+			result.InFlightPiles++
+		}
+		if state.ConsecutiveFailures > result.MaxConsecutiveFailures {
+			result.MaxConsecutiveFailures = state.ConsecutiveFailures
+		}
+		if !state.NextAttemptAt.After(now) && reminderStateCanBecomeDue(state.PausedReason) {
+			result.DuePiles++
+		}
+	}
+	if matchedStates < len(targets) {
+		result.DuePiles += len(targets) - matchedStates
+		if result.NextAttemptAt == nil {
+			at := now
+			result.NextAttemptAt = &at
+		}
+	}
+	metrics, err := m.repository.ReminderMetricCounts(now.Add(-24 * time.Hour))
+	if err != nil {
+		return result, err
+	}
+	result.RemoteAttempts24Hours = metrics["watch_remote"]
+	result.RemoteSuccesses24Hours = metrics["watch_remote_ok"]
+	result.RemoteFailures24Hours = metrics["watch_remote_failed"]
+	result.CacheHits24Hours = metrics["watch_cache"]
+	result.Coalesced24Hours = metrics["watch_coalesced"]
+	result.QuotaSkips24Hours = metrics["watch_quota_skipped"]
+	result.SchedulerErrors24Hours = metrics["watch_scheduler_error"]
+	if result.RemoteAttempts24Hours > 0 {
+		result.RemoteSuccessRate24Hours = math.Round(
+			float64(result.RemoteSuccesses24Hours)/float64(result.RemoteAttempts24Hours)*1000,
+		) / 10
+	}
+	switch {
+	case !result.Enabled:
+		result.State = "disabled"
+		result.Message = "后台提醒已由管理员关闭。"
+	case result.ScheduledPowerOffActive:
+		result.State = "power_off"
+		result.Message = "当前处于计划断电窗口，后台请求已暂停。"
+	case !result.SchedulerRunning:
+		result.State = "stopped"
+		result.Message = "提醒调度器当前未运行。"
+	case result.SchedulerErrors24Hours >= 3:
+		result.State = "degraded"
+		result.Message = fmt.Sprintf("过去 24 小时调度循环连续异常 %d 次。", result.SchedulerErrors24Hours)
+	case result.RemoteAttempts24Hours >= 3 && result.RemoteFailures24Hours >= 3 && result.RemoteSuccessRate24Hours < 50:
+		result.State = "degraded"
+		result.Message = fmt.Sprintf("过去 24 小时后台请求成功率仅 %.1f%%。", result.RemoteSuccessRate24Hours)
+	default:
+		result.State = "healthy"
+		result.Message = "后台提醒调度运行正常。"
+	}
+	return result, nil
+}
+
+func reminderStateCanBecomeDue(reason string) bool {
+	switch reason {
+	case "", watchPauseBackoff, watchPausePileOffline:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Manager) RecordHealthCheck(
@@ -90,11 +198,7 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 			})
 		}
 	}
-	settings := normalizeRegistrationSettings(m.Settings())
-	operations, operationsErr := m.repository.OperationsStatus(
-		settings.StatsRetentionDays,
-		settings.PortHistoryRetentionDays,
-	)
+	operations, operationsErr := m.OperationsStatus()
 	if operationsErr != nil {
 		exceptions = append(exceptions, model.SystemException{
 			ID: "operations-database", Username: "系统", Type: "database",
@@ -109,6 +213,12 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 		exceptions = append(exceptions, model.SystemException{
 			ID: "operations-backup", Username: "系统", Type: "backup",
 			Level: "warning", Message: operations.BackupMessage, Time: at,
+		})
+	}
+	if operationsErr == nil && operations.Reminders.State == "degraded" {
+		exceptions = append(exceptions, model.SystemException{
+			ID: "operations-reminder", Username: "系统", Type: "reminder",
+			Level: "warning", Message: operations.Reminders.Message, Time: now,
 		})
 	}
 	sort.SliceStable(exceptions, func(i, j int) bool {

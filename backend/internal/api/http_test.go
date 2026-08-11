@@ -104,7 +104,7 @@ func TestHealthExposesReleaseVersion(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode health response: %v", err)
 	}
-	if payload["status"] != "ok" || payload["version"] != "1.5.0" {
+	if payload["status"] != "ok" || payload["version"] != "1.5.1" {
 		t.Fatalf("unexpected health response: %+v", payload)
 	}
 }

@@ -161,6 +161,9 @@ func (m *Manager) runReminderSchedulerOnce(ctx context.Context, now time.Time) e
 		return err
 	}
 	now = now.UTC()
+	if err := m.maybeRunRetentionMaintenance(now); err != nil {
+		return fmt.Errorf("run retention maintenance: %w", err)
+	}
 	if err := m.recoverPendingPileAvailabilityNotifications(defaultPortStatusEventRecoveryLimit); err != nil {
 		return fmt.Errorf("recover pile availability notifications: %w", err)
 	}
@@ -229,6 +232,13 @@ launchLoop:
 		return err
 	}
 	return ctx.Err()
+}
+
+func (m *Manager) reminderSchedulerRunning() bool {
+	coordinator := &m.reminderScheduler
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	return coordinator.running
 }
 
 func (m *Manager) reminderTargets() ([]reminderTarget, error) {

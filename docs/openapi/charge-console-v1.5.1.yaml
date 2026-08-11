@@ -14,6 +14,8 @@ tags:
     description: 当前登录普通用户所绑定充电桩的历史分析
   - name: Admin Trends
     description: 管理员运营趋势分析
+  - name: Admin Operations
+    description: 管理员提醒策略、调度状态与数据保留运维
   - name: Watch Rules
     description: 当前普通用户按充电桩设置的空闲提醒规则
   - name: Notifications
@@ -379,6 +381,78 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "503":
           $ref: "#/components/responses/AdminTrendsUnavailable"
+  /api/admin/settings:
+    get:
+      operationId: getAdminSettings
+      summary: 获取系统注册、提醒与保留策略
+      tags: [Admin Operations]
+      responses:
+        "200":
+          description: 当前完整系统策略
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationSettings"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+    put:
+      operationId: updateAdminSettings
+      summary: 更新系统注册、提醒与保留策略
+      description: 修改结果会写入管理员审计日志，并立即唤醒提醒调度器。
+      tags: [Admin Operations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistrationSettings"
+      responses:
+        "200":
+          description: 保存后的完整系统策略
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationSettings"
+        "400":
+          description: 参数范围或时区无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/admin/operations:
+    get:
+      operationId: getAdminOperations
+      summary: 获取数据库、备份、通知与提醒调度状态
+      tags: [Admin Operations]
+      responses:
+        "200":
+          description: 当前运维状态和过去 24 小时提醒调度指标
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsStatus"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/AdminRequired"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          description: 数据库运维信息暂时不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/piles/{deviceId}/history:
     get:
       operationId: getDeviceHistory
@@ -710,6 +784,231 @@ components:
             code: NOTIFICATION_UNAVAILABLE
             error: 通知功能暂时不可用，请稍后重试
   schemas:
+    RegistrationSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - openRegistration
+        - inviteRequired
+        - defaultDeviceLimit
+        - defaultRefreshEnabled
+        - statsRetentionDays
+        - portHistoryRetentionDays
+        - backgroundRemindersEnabled
+        - watchRefreshIntervalMinutes
+        - watchPileLimitPerUser
+        - watchDailyRefreshQuota
+        - notificationRetentionDays
+        - scheduledPowerOffEnabled
+        - scheduledPowerOffStartMinute
+        - scheduledPowerOffEndMinute
+        - scheduledPowerOffTimezone
+        - powerRestoreJitterMinutes
+      properties:
+        openRegistration:
+          type: boolean
+        inviteRequired:
+          type: boolean
+        defaultDeviceLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        defaultRefreshEnabled:
+          type: boolean
+        statsRetentionDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        portHistoryRetentionDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        backgroundRemindersEnabled:
+          type: boolean
+        watchRefreshIntervalMinutes:
+          type: integer
+          minimum: 5
+          maximum: 60
+        watchPileLimitPerUser:
+          type: integer
+          minimum: 1
+          maximum: 20
+        watchDailyRefreshQuota:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        notificationRetentionDays:
+          type: integer
+          minimum: 7
+          maximum: 365
+        scheduledPowerOffEnabled:
+          type: boolean
+        scheduledPowerOffStartMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        scheduledPowerOffEndMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        scheduledPowerOffTimezone:
+          type: string
+          maxLength: 64
+        powerRestoreJitterMinutes:
+          type: integer
+          minimum: 0
+          maximum: 60
+    ReminderOperationsStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - message
+        - enabled
+        - schedulerRunning
+        - scheduledPowerOffActive
+        - trackedPiles
+        - duePiles
+        - inFlightPiles
+        - remoteAttempts24Hours
+        - remoteSuccesses24Hours
+        - remoteFailures24Hours
+        - remoteSuccessRate24Hours
+        - cacheHits24Hours
+        - coalesced24Hours
+        - quotaSkips24Hours
+        - schedulerErrors24Hours
+        - maxConsecutiveFailures
+      properties:
+        state:
+          type: string
+          enum: [healthy, degraded, disabled, power_off, stopped]
+        message:
+          type: string
+        enabled:
+          type: boolean
+        schedulerRunning:
+          type: boolean
+        scheduledPowerOffActive:
+          type: boolean
+        trackedPiles:
+          type: integer
+          minimum: 0
+        duePiles:
+          type: integer
+          minimum: 0
+        inFlightPiles:
+          type: integer
+          minimum: 0
+        nextAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        remoteAttempts24Hours:
+          type: integer
+          minimum: 0
+        remoteSuccesses24Hours:
+          type: integer
+          minimum: 0
+        remoteFailures24Hours:
+          type: integer
+          minimum: 0
+        remoteSuccessRate24Hours:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        cacheHits24Hours:
+          type: integer
+          minimum: 0
+        coalesced24Hours:
+          type: integer
+          minimum: 0
+        quotaSkips24Hours:
+          type: integer
+          minimum: 0
+        schedulerErrors24Hours:
+          type: integer
+          minimum: 0
+        maxConsecutiveFailures:
+          type: integer
+          minimum: 0
+    OperationsStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - databaseSizeBytes
+        - metricRows
+        - metricRetentionDays
+        - portHistoryRows
+        - portHistoryRetentionDays
+        - integrityResult
+        - checkedAt
+        - backupState
+        - backupMessage
+        - notificationRows
+        - resolvedNotificationRows
+        - notificationRetentionDays
+        - reminders
+      properties:
+        databaseSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        metricRows:
+          type: integer
+          format: int64
+          minimum: 0
+        metricRetentionDays:
+          type: integer
+          minimum: 1
+        portHistoryRows:
+          type: integer
+          format: int64
+          minimum: 0
+        portHistoryRetentionDays:
+          type: integer
+          minimum: 1
+        portHistoryOldestAt:
+          type: string
+          format: date-time
+          nullable: true
+        portHistoryNewestAt:
+          type: string
+          format: date-time
+          nullable: true
+        integrityResult:
+          type: string
+        checkedAt:
+          type: string
+          format: date-time
+        lastBackupAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastBackupSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        backupState:
+          type: string
+          enum: [healthy, degraded, unavailable]
+        backupMessage:
+          type: string
+        notificationRows:
+          type: integer
+          format: int64
+          minimum: 0
+        resolvedNotificationRows:
+          type: integer
+          format: int64
+          minimum: 0
+        notificationRetentionDays:
+          type: integer
+          minimum: 7
+          maximum: 365
+        reminders:
+          $ref: "#/components/schemas/ReminderOperationsStatus"
     WatchOverview:
       type: object
       additionalProperties: false

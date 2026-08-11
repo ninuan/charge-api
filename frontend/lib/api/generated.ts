@@ -4,6 +4,44 @@
  */
 
 export interface paths {
+    "/api/admin/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取数据库、备份、通知与提醒调度状态 */
+        get: operations["getAdminOperations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取系统注册、提醒与保留策略 */
+        get: operations["getAdminSettings"];
+        /**
+         * 更新系统注册、提醒与保留策略
+         * @description 修改结果会写入管理员审计日志，并立即唤醒提醒调度器。
+         */
+        put: operations["updateAdminSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/trends": {
         parameters: {
             query?: never;
@@ -388,6 +426,36 @@ export interface components {
         NotificationStatusFilter: "all" | "unread" | "resolved";
         /** @enum {string} */
         NotificationType: "pile_available" | "credential_expired" | "pile_offline" | "pile_recovered";
+        OperationsStatus: {
+            backupMessage: string;
+            /** @enum {string} */
+            backupState: "healthy" | "degraded" | "unavailable";
+            /** Format: date-time */
+            checkedAt: string;
+            /** Format: int64 */
+            databaseSizeBytes: number;
+            integrityResult: string;
+            /** Format: date-time */
+            lastBackupAt?: string | null;
+            /** Format: int64 */
+            lastBackupSizeBytes?: number;
+            metricRetentionDays: number;
+            /** Format: int64 */
+            metricRows: number;
+            notificationRetentionDays: number;
+            /** Format: int64 */
+            notificationRows: number;
+            /** Format: date-time */
+            portHistoryNewestAt?: string | null;
+            /** Format: date-time */
+            portHistoryOldestAt?: string | null;
+            portHistoryRetentionDays: number;
+            /** Format: int64 */
+            portHistoryRows: number;
+            reminders: components["schemas"]["ReminderOperationsStatus"];
+            /** Format: int64 */
+            resolvedNotificationRows: number;
+        };
         PortHistoryMetrics: {
             /** Format: int64 */
             averageSessionSeconds: number | null;
@@ -437,6 +505,47 @@ export interface components {
         };
         /** @enum {string} */
         PortStatus: "idle" | "in_use" | "offline";
+        RegistrationSettings: {
+            backgroundRemindersEnabled: boolean;
+            defaultDeviceLimit: number;
+            defaultRefreshEnabled: boolean;
+            inviteRequired: boolean;
+            notificationRetentionDays: number;
+            openRegistration: boolean;
+            portHistoryRetentionDays: number;
+            powerRestoreJitterMinutes: number;
+            scheduledPowerOffEnabled: boolean;
+            scheduledPowerOffEndMinute: number;
+            scheduledPowerOffStartMinute: number;
+            scheduledPowerOffTimezone: string;
+            statsRetentionDays: number;
+            watchDailyRefreshQuota: number;
+            watchPileLimitPerUser: number;
+            watchRefreshIntervalMinutes: number;
+        };
+        ReminderOperationsStatus: {
+            cacheHits24Hours: number;
+            coalesced24Hours: number;
+            duePiles: number;
+            enabled: boolean;
+            inFlightPiles: number;
+            maxConsecutiveFailures: number;
+            message: string;
+            /** Format: date-time */
+            nextAttemptAt?: string | null;
+            quotaSkips24Hours: number;
+            remoteAttempts24Hours: number;
+            remoteFailures24Hours: number;
+            remoteSuccesses24Hours: number;
+            /** Format: double */
+            remoteSuccessRate24Hours: number;
+            scheduledPowerOffActive: boolean;
+            schedulerErrors24Hours: number;
+            schedulerRunning: boolean;
+            /** @enum {string} */
+            state: "healthy" | "degraded" | "disabled" | "power_off" | "stopped";
+            trackedPiles: number;
+        };
         UpdatedCount: {
             /** Format: int64 */
             updated: number;
@@ -823,11 +932,14 @@ export type NotificationPreferenceUpdateRequest = components['schemas']['Notific
 export type NotificationSeverity = components['schemas']['NotificationSeverity'];
 export type NotificationStatusFilter = components['schemas']['NotificationStatusFilter'];
 export type NotificationType = components['schemas']['NotificationType'];
+export type OperationsStatus = components['schemas']['OperationsStatus'];
 export type PortHistoryMetrics = components['schemas']['PortHistoryMetrics'];
 export type PortHistoryResponse = components['schemas']['PortHistoryResponse'];
 export type PortHistorySummary = components['schemas']['PortHistorySummary'];
 export type PortHistoryTimelineItem = components['schemas']['PortHistoryTimelineItem'];
 export type PortStatus = components['schemas']['PortStatus'];
+export type RegistrationSettings = components['schemas']['RegistrationSettings'];
+export type ReminderOperationsStatus = components['schemas']['ReminderOperationsStatus'];
 export type UpdatedCount = components['schemas']['UpdatedCount'];
 export type WatchOverview = components['schemas']['WatchOverview'];
 export type WatchRule = components['schemas']['WatchRule'];
@@ -864,6 +976,97 @@ export type HeaderCsvContentDisposition = components['headers']['CSVContentDispo
 export type HeaderPrivateNoStore = components['headers']['PrivateNoStore'];
 export type $defs = Record<string, never>;
 export interface operations {
+    getAdminOperations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前运维状态和过去 24 小时提醒调度指标 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationsStatus"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 数据库运维信息暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAdminSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前完整系统策略 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationSettings"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+        };
+    };
+    updateAdminSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistrationSettings"];
+            };
+        };
+        responses: {
+            /** @description 保存后的完整系统策略 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationSettings"];
+                };
+            };
+            /** @description 参数范围或时区无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+        };
+    };
     getAdminTrends: {
         parameters: {
             query?: {

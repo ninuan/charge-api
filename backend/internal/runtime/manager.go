@@ -63,6 +63,8 @@ type Manager struct {
 	saveMu            sync.Mutex
 	watchMu           sync.Mutex
 	notificationMu    sync.Mutex
+	retentionMu       sync.Mutex
+	lastRetentionRun  time.Time
 	backgroundRefresh backgroundRefreshCoordinator
 	reminderScheduler reminderSchedulerCoordinator
 	notificationHub   notificationEventHub
@@ -191,7 +193,7 @@ func NewManager(
 				return nil, err
 			}
 		}
-		if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
+		if _, _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
 			return nil, fmt.Errorf("run startup retention maintenance: %w", err)
 		}
 		return m, nil
@@ -233,7 +235,7 @@ func NewManager(
 			return nil, err
 		}
 	}
-	if _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
+	if _, _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
 		return nil, fmt.Errorf("run startup retention maintenance: %w", err)
 	}
 	return m, nil

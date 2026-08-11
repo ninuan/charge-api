@@ -123,4 +123,36 @@ describe("AdminSettings", () => {
       portHistoryRetentionDays: 120,
     })
   })
+
+  it("updates reminder scheduling and power-off controls", async () => {
+    const user = userEvent.setup()
+    const setSettings = vi.fn()
+
+    render(
+      <AdminSettings
+        settings={settings}
+        setSettings={setSettings}
+        invitePage={null}
+        reload={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByRole("switch", { name: "启用后台空闲提醒" }))
+    expect(setSettings).toHaveBeenCalledWith({
+      ...settings,
+      backgroundRemindersEnabled: false,
+    })
+
+    fireEvent.change(screen.getByLabelText("断电开始时间"), {
+      target: { value: "22:30" },
+    })
+    expect(setSettings).toHaveBeenLastCalledWith({
+      ...settings,
+      scheduledPowerOffStartMinute: 1350,
+    })
+
+    const retention = screen.getByLabelText("通知保留天数")
+    expect(retention).toHaveAttribute("min", "7")
+    expect(retention).toHaveAttribute("max", "365")
+  })
 })
