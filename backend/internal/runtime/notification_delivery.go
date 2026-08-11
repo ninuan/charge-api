@@ -207,7 +207,7 @@ func (m *Manager) processOnePileAvailability(
 	sourceEventID := event.ID
 	_, _, err = m.recordNotificationOnceLocked(model.Notification{
 		UserID: userID, Type: model.NotificationPileAvailable, Severity: "info",
-		Title:    "关注的充电桩有空闲口",
+		Title:    "充电桩有空闲口",
 		Message:  pileAvailabilityMessage(m.notificationPileLabel(userID, pile.ID), idlePortIDs),
 		DeviceID: pile.ID, PortID: &portID, SourceEventID: &sourceEventID,
 		DedupeKey: fmt.Sprintf("pile_available:%d", event.ID), CreatedAt: event.ChangedAt,

@@ -627,7 +627,7 @@ func (m *Manager) recordOfflineReminderResult(
 		pileLabel := strings.TrimSpace(m.notificationPileLabel(target.userID, target.deviceID))
 		if _, _, err := m.recordNotificationOnce(model.Notification{
 			UserID: target.userID, Type: model.NotificationPileOffline, Severity: "warning",
-			Title:     "关注的充电桩持续离线",
+			Title:     "充电桩持续离线",
 			Message:   pileLabel + " 已连续多次无法访问，请确认现场供电或稍后再试。",
 			DeviceID:  target.deviceID,
 			DedupeKey: offlineNotificationDedupeKey(target.deviceID), CreatedAt: now,

@@ -72,6 +72,7 @@ describe("AdminOperations", () => {
     expect(screen.getAllByText(/保留 90 天/)).toHaveLength(2)
     expect(screen.getByText(/07\/01.*08\/05/)).toBeInTheDocument()
     expect(screen.getByText("提醒调度")).toBeInTheDocument()
+    expect(screen.getByText("空闲提醒充电桩")).toBeInTheDocument()
     expect(screen.getByText("95.0%")).toBeInTheDocument()
     expect(screen.getByText("36 条")).toBeInTheDocument()
   })

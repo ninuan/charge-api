@@ -64,13 +64,13 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 		return fmt.Errorf("端口历史保留天数需要在 1 到 365 之间")
 	}
 	if settings.WatchRefreshIntervalMinutes < 5 || settings.WatchRefreshIntervalMinutes > 60 {
-		return fmt.Errorf("关注刷新间隔需要在 5 到 60 分钟之间")
+		return fmt.Errorf("空闲提醒刷新间隔需要在 5 到 60 分钟之间")
 	}
 	if settings.WatchPileLimitPerUser < 1 || settings.WatchPileLimitPerUser > 20 {
-		return fmt.Errorf("单用户关注充电桩上限需要在 1 到 20 之间")
+		return fmt.Errorf("单用户空闲提醒充电桩上限需要在 1 到 20 之间")
 	}
 	if settings.WatchDailyRefreshQuota < 1 || settings.WatchDailyRefreshQuota > 10000 {
-		return fmt.Errorf("单用户每日关注刷新额度需要在 1 到 10000 之间")
+		return fmt.Errorf("单用户每日空闲提醒刷新额度需要在 1 到 10000 之间")
 	}
 	if settings.NotificationRetentionDays < 7 || settings.NotificationRetentionDays > 365 {
 		return fmt.Errorf("通知保留天数需要在 7 到 365 之间")

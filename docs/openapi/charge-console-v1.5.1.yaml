@@ -24,11 +24,11 @@ paths:
   /api/watch-rules:
     get:
       operationId: listWatchRules
-      summary: 获取当前用户的全部关注规则
+      summary: 获取当前用户的全部整桩空闲提醒规则
       tags: [Watch Rules]
       responses:
         "200":
-          description: 按更新时间倒序返回的关注规则
+          description: 按更新时间倒序返回的空闲提醒规则
           headers:
             Cache-Control:
               $ref: "#/components/headers/PrivateNoStore"
@@ -58,7 +58,7 @@ paths:
               $ref: "#/components/schemas/WatchRuleCreateRequest"
       responses:
         "201":
-          description: 已创建的关注规则
+          description: 已创建的空闲提醒规则
           headers:
             Cache-Control:
               $ref: "#/components/headers/PrivateNoStore"
@@ -85,7 +85,7 @@ paths:
       - $ref: "#/components/parameters/WatchRuleId"
     patch:
       operationId: updateWatchRule
-      summary: 更新关注规则状态和生效时段
+      summary: 更新空闲提醒规则状态和生效时段
       tags: [Watch Rules]
       requestBody:
         required: true
@@ -95,7 +95,7 @@ paths:
               $ref: "#/components/schemas/WatchRuleUpdateRequest"
       responses:
         "200":
-          description: 更新后的关注规则
+          description: 更新后的空闲提醒规则
           headers:
             Cache-Control:
               $ref: "#/components/headers/PrivateNoStore"
@@ -119,11 +119,11 @@ paths:
           $ref: "#/components/responses/WatchUnavailable"
     delete:
       operationId: deleteWatchRule
-      summary: 删除关注规则
+      summary: 删除空闲提醒规则
       tags: [Watch Rules]
       responses:
         "204":
-          description: 关注规则已删除
+          description: 空闲提醒规则已删除
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -137,7 +137,7 @@ paths:
   /api/watch-overview:
     get:
       operationId: getWatchOverview
-      summary: 获取当前用户的关注额度与后台提醒策略摘要
+      summary: 获取当前用户的空闲提醒额度与后台策略摘要
       tags: [Watch Rules]
       responses:
         "200":
@@ -572,7 +572,7 @@ components:
       name: ruleId
       in: path
       required: true
-      description: 当前用户关注规则 ID
+      description: 当前用户空闲提醒规则 ID
       schema:
         type: string
         maxLength: 128
@@ -706,23 +706,23 @@ components:
             code: ADMIN_TRENDS_UNAVAILABLE
             error: 运营趋势暂时不可用，请稍后重试
     WatchInvalid:
-      description: 关注规则字段、星期、时段或时区无效
+      description: 空闲提醒规则字段、星期、时段或时区无效
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/CodedErrorResponse"
           example:
             code: WATCH_RULE_INVALID
-            error: 关注规则内容无效
+            error: 空闲提醒规则内容无效
     WatchTargetNotFound:
-      description: 充电桩不属于当前用户或端口不存在
+      description: 充电桩不属于当前用户
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/CodedErrorResponse"
           example:
             code: WATCH_TARGET_NOT_FOUND
-            error: 未找到当前账户下的充电桩或端口
+            error: 未找到当前账户下的充电桩
     WatchRuleNotFound:
       description: 规则不存在或不属于当前用户
       content:
@@ -731,7 +731,7 @@ components:
             $ref: "#/components/schemas/CodedErrorResponse"
           example:
             code: WATCH_RULE_NOT_FOUND
-            error: 未找到关注规则
+            error: 未找到空闲提醒规则
     WatchConflict:
       description: 目标已存在，或达到规则/提醒桩数量限制
       content:
@@ -739,14 +739,14 @@ components:
           schema:
             $ref: "#/components/schemas/CodedErrorResponse"
     WatchUnavailable:
-      description: 关注规则存储暂时不可用
+      description: 空闲提醒规则存储暂时不可用
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/CodedErrorResponse"
           example:
             code: WATCH_UNAVAILABLE
-            error: 关注功能暂时不可用，请稍后重试
+            error: 空闲提醒功能暂时不可用，请稍后重试
     NotificationPreferenceInvalid:
       description: 通知偏好、免打扰时间或时区无效
       content:

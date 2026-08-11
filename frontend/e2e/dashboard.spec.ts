@@ -318,7 +318,7 @@ test("administrator handles a user and verifies the audit trail", async ({
   await expect(page.getByText("系统设置已保存")).toBeVisible()
   await page.getByRole("tab", { name: "运维审计" }).click()
   await expect(page.getByText(/后台按整桩低频刷新/)).toBeVisible()
-  await expect(page.getByText("关注充电桩")).toBeVisible()
+  await expect(page.getByText("空闲提醒充电桩")).toBeVisible()
   await expect(page.getByText("24 小时请求成功率")).toBeVisible()
   await expect(page.getByText("数据与备份")).toBeVisible()
   await expect(page.getByText("端口历史")).toBeVisible()

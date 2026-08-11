@@ -51,7 +51,8 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 	}
 	select {
 	case notification := <-stream:
-		if notification.Type != model.NotificationPileAvailable || notification.SourceEventID == nil || *notification.SourceEventID != events[0].ID {
+		if notification.Type != model.NotificationPileAvailable || notification.Title != "充电桩有空闲口" ||
+			notification.SourceEventID == nil || *notification.SourceEventID != events[0].ID {
 			t.Fatalf("unexpected streamed notification: %+v", notification)
 		}
 	case <-time.After(time.Second):
@@ -267,7 +268,8 @@ func TestOfflineNotificationWaitsForPowerRestoreThreeChecksAndThirtyMinutes(t *t
 		t.Fatalf("threshold offline state = %+v, err %v", state, stateErr)
 	}
 	notifications, err := manager.repository.ListNotifications(owner.ID, 20)
-	if err != nil || len(notifications) != 1 || notifications[0].Type != model.NotificationPileOffline || notifications[0].ResolvedAt != nil {
+	if err != nil || len(notifications) != 1 || notifications[0].Type != model.NotificationPileOffline ||
+		notifications[0].Title != "充电桩持续离线" || notifications[0].ResolvedAt != nil {
 		t.Fatalf("offline threshold notifications = %+v, err %v", notifications, err)
 	}
 

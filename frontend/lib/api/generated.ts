@@ -206,7 +206,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取当前用户的关注额度与后台提醒策略摘要 */
+        /** 获取当前用户的空闲提醒额度与后台策略摘要 */
         get: operations["getWatchOverview"];
         put?: never;
         post?: never;
@@ -223,7 +223,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取当前用户的全部关注规则 */
+        /** 获取当前用户的全部整桩空闲提醒规则 */
         get: operations["listWatchRules"];
         put?: never;
         /** 为充电桩创建空闲提醒规则 */
@@ -239,7 +239,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description 当前用户关注规则 ID */
+                /** @description 当前用户空闲提醒规则 ID */
                 ruleId: components["parameters"]["WatchRuleId"];
             };
             cookie?: never;
@@ -247,11 +247,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 删除关注规则 */
+        /** 删除空闲提醒规则 */
         delete: operations["deleteWatchRule"];
         options?: never;
         head?: never;
-        /** 更新关注规则状态和生效时段 */
+        /** 更新空闲提醒规则状态和生效时段 */
         patch: operations["updateWatchRule"];
         trace?: never;
     };
@@ -823,7 +823,7 @@ export interface components {
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
-        /** @description 关注规则字段、星期、时段或时区无效 */
+        /** @description 空闲提醒规则字段、星期、时段或时区无效 */
         WatchInvalid: {
             headers: {
                 [name: string]: unknown;
@@ -832,7 +832,7 @@ export interface components {
                 /**
                  * @example {
                  *       "code": "WATCH_RULE_INVALID",
-                 *       "error": "关注规则内容无效"
+                 *       "error": "空闲提醒规则内容无效"
                  *     }
                  */
                 "application/json": components["schemas"]["CodedErrorResponse"];
@@ -847,13 +847,13 @@ export interface components {
                 /**
                  * @example {
                  *       "code": "WATCH_RULE_NOT_FOUND",
-                 *       "error": "未找到关注规则"
+                 *       "error": "未找到空闲提醒规则"
                  *     }
                  */
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
-        /** @description 充电桩不属于当前用户或端口不存在 */
+        /** @description 充电桩不属于当前用户 */
         WatchTargetNotFound: {
             headers: {
                 [name: string]: unknown;
@@ -862,13 +862,13 @@ export interface components {
                 /**
                  * @example {
                  *       "code": "WATCH_TARGET_NOT_FOUND",
-                 *       "error": "未找到当前账户下的充电桩或端口"
+                 *       "error": "未找到当前账户下的充电桩"
                  *     }
                  */
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
-        /** @description 关注规则存储暂时不可用 */
+        /** @description 空闲提醒规则存储暂时不可用 */
         WatchUnavailable: {
             headers: {
                 [name: string]: unknown;
@@ -877,7 +877,7 @@ export interface components {
                 /**
                  * @example {
                  *       "code": "WATCH_UNAVAILABLE",
-                 *       "error": "关注功能暂时不可用，请稍后重试"
+                 *       "error": "空闲提醒功能暂时不可用，请稍后重试"
                  *     }
                  */
                 "application/json": components["schemas"]["CodedErrorResponse"];
@@ -897,7 +897,7 @@ export interface components {
         PortId: number;
         /** @description IANA 时区名称；省略时使用 Asia/Shanghai */
         Timezone: string;
-        /** @description 当前用户关注规则 ID */
+        /** @description 当前用户空闲提醒规则 ID */
         WatchRuleId: string;
     };
     requestBodies: never;
@@ -1400,7 +1400,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 按更新时间倒序返回的关注规则 */
+            /** @description 按更新时间倒序返回的空闲提醒规则 */
             200: {
                 headers: {
                     "Cache-Control": components["headers"]["PrivateNoStore"];
@@ -1429,7 +1429,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已创建的关注规则 */
+            /** @description 已创建的空闲提醒规则 */
             201: {
                 headers: {
                     "Cache-Control": components["headers"]["PrivateNoStore"];
@@ -1453,14 +1453,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description 当前用户关注规则 ID */
+                /** @description 当前用户空闲提醒规则 ID */
                 ruleId: components["parameters"]["WatchRuleId"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description 关注规则已删除 */
+            /** @description 空闲提醒规则已删除 */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -1479,7 +1479,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description 当前用户关注规则 ID */
+                /** @description 当前用户空闲提醒规则 ID */
                 ruleId: components["parameters"]["WatchRuleId"];
             };
             cookie?: never;
@@ -1490,7 +1490,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 更新后的关注规则 */
+            /** @description 更新后的空闲提醒规则 */
             200: {
                 headers: {
                     "Cache-Control": components["headers"]["PrivateNoStore"];

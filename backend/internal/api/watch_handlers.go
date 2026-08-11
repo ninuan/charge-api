@@ -69,7 +69,7 @@ func (s *Server) handleWatchRuleActions(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Cache-Control", "private, no-store")
 	ruleID := strings.TrimPrefix(r.URL.Path, "/api/watch-rules/")
 	if !validAPIResourceID(ruleID) || strings.Contains(ruleID, "/") {
-		writeCodedError(w, http.StatusNotFound, "WATCH_RULE_NOT_FOUND", "未找到关注规则")
+		writeCodedError(w, http.StatusNotFound, "WATCH_RULE_NOT_FOUND", "未找到空闲提醒规则")
 		return
 	}
 	switch r.Method {
@@ -222,7 +222,7 @@ func (s *Server) writeWatchError(w http.ResponseWriter, operation string, err er
 	case errors.Is(err, appruntime.ErrWatchTargetNotFound):
 		writeCodedError(w, http.StatusNotFound, "WATCH_TARGET_NOT_FOUND", "未找到当前账户下的充电桩")
 	case errors.Is(err, appruntime.ErrWatchRuleNotFound):
-		writeCodedError(w, http.StatusNotFound, "WATCH_RULE_NOT_FOUND", "未找到关注规则")
+		writeCodedError(w, http.StatusNotFound, "WATCH_RULE_NOT_FOUND", "未找到空闲提醒规则")
 	case errors.Is(err, appruntime.ErrWatchRuleConflict):
 		writeCodedError(w, http.StatusConflict, "WATCH_RULE_CONFLICT", "该充电桩已设置空闲提醒")
 	case errors.Is(err, appruntime.ErrWatchPileLimit):

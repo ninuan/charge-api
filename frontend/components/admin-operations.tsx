@@ -223,7 +223,7 @@ export function AdminOperations() {
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   {
-                    label: "关注充电桩",
+                    label: "空闲提醒充电桩",
                     value: `${operations.reminders.trackedPiles} 台`,
                     detail: `待执行 ${operations.reminders.duePiles} 台 · 执行中 ${operations.reminders.inFlightPiles} 台`,
                     icon: BellRingIcon,
