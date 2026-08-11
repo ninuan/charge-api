@@ -18,9 +18,11 @@ type Binding = { bound: boolean; openidSuffix?: string; nickname?: string; messa
 type QR = { sessionId: string; imageUrl?: string; imageBase64?: string }
 type Poll = { sessionId: string; status: string; message?: string }
 
-export function YybLoginDialog() {
+export function YybLoginDialog({ open: controlledOpen, onOpenChange }: { open?: boolean; onOpenChange?: (open: boolean) => void } = {}) {
   const { updateCookie } = useDashboard()
-  const [open, setOpen] = useState(false)
+  const [localOpen, setLocalOpen] = useState(false)
+  const open = controlledOpen ?? localOpen
+  const setOpen = onOpenChange ?? setLocalOpen
   const [advanced, setAdvanced] = useState(false)
   const [binding, setBinding] = useState<Binding>({ bound: false })
   const [qr, setQr] = useState<QR | null>(null)

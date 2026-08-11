@@ -57,4 +57,45 @@ describe("watchApi", () => {
       })
     )
   })
+
+  it("pages and manages durable notifications", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/notifications?"))
+        return new Response(
+          JSON.stringify({ items: [], unreadCount: 0, nextCursor: "next-1" })
+        )
+      if (path.endsWith("/read-all"))
+        return new Response(JSON.stringify({ updated: 2 }))
+      if (path.endsWith("/resolved"))
+        return new Response(JSON.stringify({ deleted: 1 }))
+      return new Response(JSON.stringify({ id: "notice-1", readAt: "now" }))
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await watchApi.notifications({
+      status: "unread",
+      cursor: "cursor-1",
+      limit: 10,
+    })
+    await watchApi.markNotificationRead("notice/1")
+    await watchApi.markAllNotificationsRead()
+    await watchApi.clearResolvedNotifications()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notifications?status=unread&limit=10&cursor=cursor-1",
+      expect.objectContaining({ credentials: "include" })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notifications/notice%2F1/read",
+      expect.objectContaining({ method: "POST" })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notifications/read-all",
+      expect.objectContaining({ method: "POST" })
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notifications/resolved",
+      expect.objectContaining({ method: "DELETE" })
+    )
+  })
 })

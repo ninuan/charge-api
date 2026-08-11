@@ -4,6 +4,7 @@ import type {
   AdminTrendRange,
   AdminTrendsResponse,
   DeviceHistoryResponse,
+  Notification,
   NotificationPreference,
   PortHistoryMetrics,
   PortHistoryResponse,
@@ -159,6 +160,9 @@ async function mockEmptyWatchResources(page: Page) {
         updatedAt: "2026-08-10T00:00:00Z",
       },
     })
+  )
+  await page.route("**/api/notifications**", (route) =>
+    route.fulfill({ status: 200, json: { items: [], unreadCount: 0 } })
   )
 }
 
@@ -698,6 +702,9 @@ test("dashboard creates and manages whole-pile cross-midnight reminders", async 
     }
     await route.fulfill({ status: 200, json: preference })
   })
+  await page.route("**/api/notifications**", (route) =>
+    route.fulfill({ status: 200, json: { items: [], unreadCount: 0 } })
+  )
   await page.route("**/api/watch-rules", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({ status: 200, json: rules })
@@ -726,7 +733,9 @@ test("dashboard creates and manages whole-pile cross-midnight reminders", async 
   await page.getByLabel("结束时间").fill("06:30")
   await expect(page.getByText(/22:30–06:30（跨午夜）/)).toBeVisible()
   await page.getByRole("button", { name: "创建规则" }).click()
-  await expect(page.getByRole("button", { name: "已设置空闲提醒" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "已设置空闲提醒" })
+  ).toBeVisible()
 
   await page.getByRole("button", { name: "空闲提醒", exact: true }).click()
   const sheet = page.getByRole("dialog", { name: "空闲提醒管理" })
@@ -841,4 +850,250 @@ test("dashboard history sheet supports port navigation and mobile layout", async
     path: "/tmp/charge-1.5.0-history-mobile.png",
     fullPage: false,
   })
+})
+
+test("notification center closes the durable and browser alert loop on mobile", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.addInitScript(() => {
+    class LocalEventSource {
+      static OPEN = 1
+      readyState = LocalEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      listeners = new Map<
+        string,
+        Array<(event: MessageEvent<string>) => void>
+      >()
+
+      constructor() {
+        ;(
+          window as typeof window & { __notificationStream?: LocalEventSource }
+        ).__notificationStream = this
+        setTimeout(() => this.onopen?.(new Event("open")), 0)
+      }
+
+      addEventListener(
+        name: string,
+        listener: (event: MessageEvent<string>) => void
+      ) {
+        const listeners = this.listeners.get(name) ?? []
+        listeners.push(listener)
+        this.listeners.set(name, listeners)
+      }
+
+      emit(name: string, value: unknown) {
+        const event = new MessageEvent(name, { data: JSON.stringify(value) })
+        this.listeners.get(name)?.forEach((listener) => listener(event))
+      }
+
+      close() {}
+    }
+
+    class LocalNotification {
+      static permission: NotificationPermission = "default"
+      static requestPermission = async () => {
+        LocalNotification.permission = "granted"
+        return "granted" as const
+      }
+      onclick: (() => void) | null = null
+
+      constructor(title: string, options?: NotificationOptions) {
+        ;(
+          window as typeof window & {
+            __browserNotifications?: Array<{
+              title: string
+              options?: NotificationOptions
+            }>
+          }
+        ).__browserNotifications?.push({ title, options })
+      }
+
+      close() {}
+    }
+
+    ;(
+      window as typeof window & {
+        __browserNotifications?: Array<{
+          title: string
+          options?: NotificationOptions
+        }>
+      }
+    ).__browserNotifications = []
+    Object.defineProperty(window, "EventSource", {
+      configurable: true,
+      value: LocalEventSource,
+    })
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: LocalNotification,
+    })
+  })
+
+  const notifications: Notification[] = [
+    {
+      id: "notice-idle",
+      userId: user.id,
+      type: "pile_available",
+      severity: "info",
+      title: "松园 3 号楼有空闲口",
+      message: "整桩从无空闲变为至少一个空闲口。",
+      deviceId: snapshot.piles[0].id,
+      portId: 3,
+      createdAt: "2026-08-11T09:00:00Z",
+    },
+    {
+      id: "notice-credential",
+      userId: user.id,
+      type: "credential_expired",
+      severity: "critical",
+      title: "扫码凭据已失效",
+      message: "请重新扫码登录后恢复后台提醒。",
+      createdAt: "2026-08-11T08:00:00Z",
+    },
+  ]
+  const preference: NotificationPreference = {
+    userId: user.id,
+    browserEnabled: false,
+    quietHoursEnabled: false,
+    quietStartMinute: 1320,
+    quietEndMinute: 480,
+    timezone: "Asia/Shanghai",
+    updatedAt: "2026-08-11T00:00:00Z",
+  }
+
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({ status: 200, json: user })
+  )
+  await page.route("**/api/piles", (route) =>
+    route.fulfill({ status: 200, json: snapshot })
+  )
+  await page.route("**/api/watch-rules", (route) =>
+    route.fulfill({ status: 200, json: [] })
+  )
+  await page.route("**/api/watch-overview", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        reminderPileCount: 0,
+        reminderPileLimit: 5,
+        dailyQuotaUsed: 0,
+        dailyQuotaLimit: 480,
+        quotaDate: "2026-08-11",
+        refreshIntervalMinutes: 10,
+        backgroundRemindersEnabled: true,
+        accountRefreshEnabled: true,
+        scheduledPowerOffEnabled: true,
+        scheduledPowerOffStartMinute: 1380,
+        scheduledPowerOffEndMinute: 420,
+        scheduledPowerOffTimezone: "Asia/Shanghai",
+      },
+    })
+  )
+  await page.route("**/api/notification-preferences", async (route) => {
+    if (route.request().method() === "PATCH") {
+      Object.assign(preference, route.request().postDataJSON())
+      preference.updatedAt = "2026-08-11T09:01:00Z"
+    }
+    await route.fulfill({ status: 200, json: preference })
+  })
+  await page.route("**/api/notifications**", async (route) => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === "GET") {
+      const status = url.searchParams.get("status") ?? "all"
+      const items = notifications.filter((notification) =>
+        status === "unread"
+          ? !notification.readAt
+          : status === "resolved"
+            ? Boolean(notification.resolvedAt)
+            : true
+      )
+      await route.fulfill({
+        status: 200,
+        json: {
+          items,
+          unreadCount: notifications.filter(
+            (notification) => !notification.readAt
+          ).length,
+        },
+      })
+      return
+    }
+    const readMatch = url.pathname.match(/\/api\/notifications\/([^/]+)\/read$/)
+    if (readMatch) {
+      const notification = notifications.find(
+        (candidate) => candidate.id === decodeURIComponent(readMatch[1])
+      )
+      if (notification) notification.readAt = "2026-08-11T09:02:00Z"
+      await route.fulfill({ status: 200, json: notification })
+      return
+    }
+    await route.fulfill({ status: 200, json: { updated: 0, deleted: 0 } })
+  })
+  await page.route("**/api/session/yyb-binding", (route) =>
+    route.fulfill({ status: 200, json: { bound: false } })
+  )
+
+  await page.goto("/dashboard")
+  const trigger = page.getByRole("button", { name: "通知，2 条未读" })
+  await expect(trigger).toBeVisible()
+  await trigger.click()
+  const sheet = page.getByRole("dialog", { name: "通知中心" })
+  await expect(sheet).toBeVisible()
+  await sheet.getByRole("button", { name: "允许通知" }).click()
+  await expect(
+    sheet.getByRole("switch", { name: "浏览器即时提醒" })
+  ).toBeChecked()
+
+  await sheet.getByText("松园 3 号楼有空闲口").click()
+  await expect(page.getByLabel("3 号充电口")).toHaveClass(
+    /notification-target-glow/
+  )
+
+  await page.getByRole("button", { name: "通知，1 条未读" }).click()
+  await page.getByText("扫码凭据已失效").click()
+  await expect(
+    page.getByRole("dialog", { name: "扫码登录远端账号" })
+  ).toBeVisible()
+  await page
+    .getByRole("dialog", { name: "扫码登录远端账号" })
+    .getByRole("button", { name: "关闭", exact: true })
+    .first()
+    .click()
+
+  const incoming: Notification = {
+    id: "notice-offline",
+    userId: user.id,
+    type: "pile_offline",
+    severity: "warning",
+    title: "松园 3 号楼持续离线",
+    message: "非计划断电时段已连续检查失败。",
+    deviceId: snapshot.piles[0].id,
+    createdAt: "2026-08-11T09:03:00Z",
+  }
+  await page.evaluate((notification) => {
+    ;(
+      window as typeof window & {
+        __notificationStream?: { emit: (name: string, value: unknown) => void }
+      }
+    ).__notificationStream?.emit("notification", notification)
+  }, incoming)
+
+  await expect(
+    page.getByRole("button", { name: "通知，1 条未读" })
+  ).toBeVisible()
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __browserNotifications?: unknown[]
+          }
+        ).__browserNotifications?.length
+    )
+  ).toBe(1)
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(375)
 })

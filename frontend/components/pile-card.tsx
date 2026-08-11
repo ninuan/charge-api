@@ -49,6 +49,7 @@ type Props = {
   onHistory: (id: string) => void
   reminderEnabled: boolean
   onConfigureReminder: (id: string) => void
+  targetPortId?: number | null
 }
 
 function portMeta(port: Port) {
@@ -73,11 +74,7 @@ function portMeta(port: Port) {
   }
 }
 
-function PortStatusCard({
-  port,
-}: {
-  port: Port
-}) {
+function PortStatusCard({ port, targeted }: { port: Port; targeted: boolean }) {
   const cardRef = useRef<HTMLElement>(null)
   const mounted = useRef(false)
   const previousStatus = useRef(port.status)
@@ -116,7 +113,7 @@ function PortStatusCard({
     <section
       ref={setCardRef}
       aria-label={`${port.id} 号充电口`}
-      className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm ${meta.className}`}
+      className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm ${meta.className} ${targeted ? "notification-target-glow" : ""}`}
       onAnimationEnd={(event) => {
         if (event.target !== event.currentTarget) return
         event.currentTarget.classList.remove(
@@ -166,6 +163,7 @@ function PileCardComponent({
   onHistory,
   reminderEnabled,
   onConfigureReminder,
+  targetPortId,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -351,6 +349,7 @@ function PileCardComponent({
               <PortStatusCard
                 key={port.id}
                 port={port}
+                targeted={targetPortId === port.id}
               />
             ))}
           </CardContent>
@@ -498,6 +497,7 @@ export const PileCard = memo(
     prev.onHistory === next.onHistory &&
     prev.onConfigureReminder === next.onConfigureReminder &&
     prev.reminderEnabled === next.reminderEnabled &&
+    prev.targetPortId === next.targetPortId &&
     prev.canMoveUp === next.canMoveUp &&
     prev.canMoveDown === next.canMoveDown &&
     prev.reordering === next.reordering &&

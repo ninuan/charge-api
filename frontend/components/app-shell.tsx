@@ -32,12 +32,14 @@ export function AppShell({
   title,
   description,
   actions,
+  notificationAction,
   children,
 }: {
   compact?: boolean
   title: string
   description: string
   actions?: ReactNode
+  notificationAction?: ReactNode
   children: ReactNode
 }) {
   const router = useRouter()
@@ -127,8 +129,13 @@ export function AppShell({
               </p>
             </div>
           </div>
-          <div className="hidden items-center gap-3 md:flex">
+          <div className="ml-auto hidden items-center gap-3 md:flex">
             {actions}
+          </div>
+          {notificationAction ? (
+            <div className="ml-auto shrink-0 md:ml-0">{notificationAction}</div>
+          ) : null}
+          <div className="hidden items-center gap-3 md:flex">
             {identity}
             <Button
               variant="ghost"
@@ -139,59 +146,60 @@ export function AppShell({
               退出
             </Button>
           </div>
-          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-            <SheetTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="md:hidden"
-                  aria-label="打开菜单"
-                />
-              }
-            >
-              <MenuIcon />
-            </SheetTrigger>
-            <SheetContent
-              side="right"
-              className="w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-5"
-            >
-              <SheetTitle className="pr-8">账户与操作</SheetTitle>
-              <div className="mt-6 grid gap-5">
-                {identity}
-                <section className="grid gap-2 border-b pb-5">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    当前页面
-                  </p>
-                  <div
-                    className="grid gap-2"
-                    onClick={(event) => {
-                      if (
-                        event.target instanceof Element &&
-                        event.target.closest("button, a")
-                      )
-                        setMenuOpen(false)
-                    }}
-                  >
-                    {actions}
-                  </div>
-                </section>
-                <section className="grid gap-2">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    账户操作
-                  </p>
-                  <Button
-                    variant="outline"
-                    className="w-full border-destructive/25 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => void handleLogout()}
-                  >
-                    <LogOutIcon />
-                    退出登录
-                  </Button>
-                </section>
-              </div>
-            </SheetContent>
-          </Sheet>
+          <div
+            className={`items-center gap-1 md:hidden ${
+              notificationAction ? "flex" : "ml-auto flex"
+            }`}
+          >
+            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+              <SheetTrigger
+                render={
+                  <Button variant="ghost" size="icon" aria-label="打开菜单" />
+                }
+              >
+                <MenuIcon />
+              </SheetTrigger>
+              <SheetContent
+                side="right"
+                className="w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-5"
+              >
+                <SheetTitle className="pr-8">账户与操作</SheetTitle>
+                <div className="mt-6 grid gap-5">
+                  {identity}
+                  <section className="grid gap-2 border-b pb-5">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      当前页面
+                    </p>
+                    <div
+                      className="grid gap-2"
+                      onClick={(event) => {
+                        if (
+                          event.target instanceof Element &&
+                          event.target.closest("button, a")
+                        )
+                          setMenuOpen(false)
+                      }}
+                    >
+                      {actions}
+                    </div>
+                  </section>
+                  <section className="grid gap-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      账户操作
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="w-full border-destructive/25 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => void handleLogout()}
+                    >
+                      <LogOutIcon />
+                      退出登录
+                    </Button>
+                  </section>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
       </header>
       <main

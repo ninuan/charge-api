@@ -15,6 +15,12 @@ vi.mock("@/lib/watch-context", () => ({
   ),
 }))
 
+vi.mock("@/lib/notification-context", () => ({
+  NotificationProvider: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="notification-provider">{children}</div>
+  ),
+}))
+
 describe("DashboardLayout", () => {
   it("provides dashboard and watch state only within the dashboard route", () => {
     render(
@@ -27,5 +33,8 @@ describe("DashboardLayout", () => {
       "看板内容"
     )
     expect(screen.getByTestId("watch-provider")).toHaveTextContent("看板内容")
+    expect(screen.getByTestId("notification-provider")).toHaveTextContent(
+      "看板内容"
+    )
   })
 })

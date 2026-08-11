@@ -1,6 +1,11 @@
 import type {
+  DeletedCount,
+  Notification,
+  NotificationPage,
   NotificationPreference,
   NotificationPreferenceUpdateRequest,
+  NotificationStatusFilter,
+  UpdatedCount,
   WatchOverview,
   WatchRule,
   WatchRuleCreateRequest,
@@ -43,5 +48,40 @@ export const watchApi = {
       "/api/notification-preferences",
       { method: "PATCH", headers: jsonHeaders, body: JSON.stringify(payload) },
       "更新免打扰设置失败"
+    ),
+  notifications: ({
+    status = "all",
+    cursor,
+    limit = 20,
+  }: {
+    status?: NotificationStatusFilter
+    cursor?: string
+    limit?: number
+  } = {}) => {
+    const query = new URLSearchParams({ status, limit: String(limit) })
+    if (cursor) query.set("cursor", cursor)
+    return request<NotificationPage>(
+      `/api/notifications?${query}`,
+      {},
+      "加载通知失败，请稍后重试"
+    )
+  },
+  markNotificationRead: (notificationId: string) =>
+    request<Notification>(
+      `/api/notifications/${encodeURIComponent(notificationId)}/read`,
+      { method: "POST" },
+      "标记通知已读失败，请稍后重试"
+    ),
+  markAllNotificationsRead: () =>
+    request<UpdatedCount>(
+      "/api/notifications/read-all",
+      { method: "POST" },
+      "全部标记已读失败，请稍后重试"
+    ),
+  clearResolvedNotifications: () =>
+    request<DeletedCount>(
+      "/api/notifications/resolved",
+      { method: "DELETE" },
+      "清理已解决通知失败，请稍后重试"
     ),
 }

@@ -54,12 +54,14 @@ describe("AppShell", () => {
         title="看板"
         description="说明"
         actions={<button type="button">使用说明</button>}
+        notificationAction={<button type="button">通知</button>}
       >
         <p>主要内容</p>
       </AppShell>
     )
 
     expect(screen.getAllByRole("button", { name: "使用说明" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "通知" })).toHaveLength(1)
     expect(screen.getByRole("link", { name: "进入账户中心" })).toHaveAttribute(
       "href",
       "/account"

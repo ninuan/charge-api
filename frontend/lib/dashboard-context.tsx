@@ -12,6 +12,7 @@ import {
 } from "react"
 
 import { request } from "@/lib/http"
+import type { Notification } from "@/lib/api/generated"
 import type { DashboardSnapshot, Pile } from "@/lib/types"
 
 const initialSnapshot: DashboardSnapshot = {
@@ -61,6 +62,10 @@ type DashboardContextValue = {
   updateCookie: (cookie: string) => Promise<void>
   connectStream: () => void
   disconnectStream: () => void
+  subscribeNotifications: (
+    listener: (notification: Notification) => void
+  ) => () => void
+  subscribeStreamOpen: (listener: () => void) => () => void
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null)
@@ -73,6 +78,22 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const streamRef = useRef<EventSource | null>(null)
   const streamWantedRef = useRef(false)
   const lastServerStampRef = useRef(0)
+  const notificationListenersRef = useRef(
+    new Set<(notification: Notification) => void>()
+  )
+  const streamOpenListenersRef = useRef(new Set<() => void>())
+
+  const subscribeNotifications = useCallback(
+    (listener: (notification: Notification) => void) => {
+      notificationListenersRef.current.add(listener)
+      return () => notificationListenersRef.current.delete(listener)
+    },
+    []
+  )
+  const subscribeStreamOpen = useCallback((listener: () => void) => {
+    streamOpenListenersRef.current.add(listener)
+    return () => streamOpenListenersRef.current.delete(listener)
+  }, [])
 
   const applySnapshot = useCallback((next: DashboardSnapshot) => {
     const stamp = Date.parse(next.updatedAt)
@@ -212,11 +233,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setStreamState("connecting")
     const stream = new EventSource("/api/stream", { withCredentials: true })
     streamRef.current = stream
-    stream.onopen = () => setStreamState("connected")
+    stream.onopen = () => {
+      setStreamState("connected")
+      streamOpenListenersRef.current.forEach((listener) => listener())
+    }
     stream.addEventListener("snapshot", (event) => {
       try {
         applySnapshot(
           JSON.parse((event as MessageEvent<string>).data) as DashboardSnapshot
+        )
+        setStreamState("connected")
+      } catch {
+        setStreamState("error")
+      }
+    })
+    stream.addEventListener("notification", (event) => {
+      try {
+        const notification = JSON.parse(
+          (event as MessageEvent<string>).data
+        ) as Notification
+        notificationListenersRef.current.forEach((listener) =>
+          listener(notification)
         )
         setStreamState("connected")
       } catch {
@@ -228,12 +265,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const connectStream = useCallback(() => {
     streamWantedRef.current = true
-    // 后台标签页先不建流，等回到前台再连，避免隐藏页持续解析推送。
-    if (
-      typeof document !== "undefined" &&
-      document.visibilityState === "hidden"
-    )
-      return
+    // 1.5.1 的浏览器提醒依赖网页打开期间的 SSE，后台标签页也保持连接。
     openStream()
   }, [openStream])
 
@@ -244,23 +276,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setStreamState("idle")
   }, [])
 
-  useEffect(() => {
-    // 切到后台时挂起 SSE（省电并释放服务端连接），回到前台立即重连；
-    // 服务端在订阅建立时会立刻下发一帧最新快照，因此无需额外补拉。
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        if (!streamRef.current) return
-        streamRef.current.close()
-        streamRef.current = null
-        setStreamState("idle")
-        return
-      }
-      if (streamWantedRef.current) openStream()
-    }
-    document.addEventListener("visibilitychange", handleVisibility)
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibility)
-  }, [openStream])
+  useEffect(
+    () => () => {
+      streamRef.current?.close()
+      streamRef.current = null
+    },
+    []
+  )
 
   const value = useMemo(
     () => ({
@@ -278,6 +300,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       updateCookie,
       connectStream,
       disconnectStream,
+      subscribeNotifications,
+      subscribeStreamOpen,
     }),
     [
       addPile,
@@ -291,6 +315,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       refreshFromCapture,
       reset,
       snapshot,
+      subscribeNotifications,
+      subscribeStreamOpen,
       streamState,
       updateCookie,
       updatePile,

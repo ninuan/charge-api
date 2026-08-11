@@ -4,6 +4,7 @@ import {
   ActivityIcon,
   BatteryChargingIcon,
   BellRingIcon,
+  BellIcon,
   BookOpenCheckIcon,
   PlugZapIcon,
   PlusIcon,
@@ -48,6 +49,9 @@ import {
   serializeDashboardQuery,
 } from "@/lib/dashboard-query"
 import { useWatch } from "@/lib/watch-context"
+import { useNotifications } from "@/lib/notification-context"
+import { notificationNavigateEvent } from "@/lib/notification-navigation"
+import type { Notification as AppNotification } from "@/lib/api/generated"
 
 // 三个对话框只在点击后才需要，从首包拆出；占位按钮与真实触发按钮
 // 同样式同尺寸，chunk 加载完成前后不产生布局跳动。
@@ -106,6 +110,21 @@ const WatchRuleDialog = dynamic(
   () => import("@/components/watch-rule-dialog").then((m) => m.WatchRuleDialog),
   { ssr: false }
 )
+const NotificationCenter = dynamic(
+  () =>
+    import("@/components/notification-center").then(
+      (m) => m.NotificationCenter
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Button variant="outline" disabled>
+        <BellIcon />
+        通知
+      </Button>
+    ),
+  }
+)
 
 function formatTime(value?: string) {
   return value
@@ -139,10 +158,8 @@ export default function DashboardPage() {
     updatePile,
     reorderPiles,
   } = useDashboard()
-  const {
-    rules: watchRules,
-    load: loadWatch,
-  } = useWatch()
+  const { rules: watchRules, load: loadWatch } = useWatch()
+  const { load: loadNotifications } = useNotifications()
   const [refreshing, setRefreshing] = useState(false)
   const [reordering, setReordering] = useState(false)
   const [initialLoadFinished, setInitialLoadFinished] = useState(false)
@@ -151,6 +168,11 @@ export default function DashboardPage() {
   const [historyPileId, setHistoryPileId] = useState<string | null>(null)
   const [watchManagementOpen, setWatchManagementOpen] = useState(false)
   const [watchTarget, setWatchTarget] = useState<WatchEditorTarget | null>(null)
+  const [credentialOpen, setCredentialOpen] = useState(false)
+  const [notificationTarget, setNotificationTarget] = useState<{
+    deviceId: string
+    portId?: number | null
+  } | null>(null)
   const [queryReady, setQueryReady] = useState(false)
   // 输入框即时回显，筛选计算滞后一拍，键入时不再同步重渲染整个卡片列表。
   const deferredSearch = useDeferredValue(search)
@@ -198,6 +220,48 @@ export default function DashboardPage() {
     [clearSession, router]
   )
 
+  const handleNotificationNavigate = useCallback(
+    (notification: AppNotification) => {
+      if (notification.type === "credential_expired") {
+        setCredentialOpen(true)
+        return
+      }
+      if (!notification.deviceId) return
+      setSearch("")
+      setFilter("all")
+      setNotificationTarget({
+        deviceId: notification.deviceId,
+        portId: notification.portId,
+      })
+    },
+    []
+  )
+
+  useEffect(() => {
+    const handleNavigate = (event: Event) =>
+      handleNotificationNavigate((event as CustomEvent<AppNotification>).detail)
+    window.addEventListener(notificationNavigateEvent, handleNavigate)
+    return () =>
+      window.removeEventListener(notificationNavigateEvent, handleNavigate)
+  }, [handleNotificationNavigate])
+
+  useEffect(() => {
+    if (!notificationTarget) return
+    const scrollTimer = window.setTimeout(() => {
+      document
+        .getElementById(`pile-${notificationTarget.deviceId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 50)
+    const clearTimer = window.setTimeout(
+      () => setNotificationTarget(null),
+      1_800
+    )
+    return () => {
+      window.clearTimeout(scrollTimer)
+      window.clearTimeout(clearTimer)
+    }
+  }, [notificationTarget])
+
   useEffect(() => {
     let active = true
     async function load() {
@@ -208,6 +272,7 @@ export default function DashboardPage() {
         await Promise.all([
           fetchSnapshot(),
           loadWatch().catch((reason) => handleError(reason)),
+          loadNotifications().catch((reason) => handleError(reason)),
         ])
         if (active) connectStream()
       } catch (reason) {
@@ -319,6 +384,12 @@ export default function DashboardPage() {
       compact
       title="充电桩运营看板"
       description="端口占用、刷新状态与筛选结果一处查看；已启用提醒的充电桩会按设定时段低频检查。"
+      notificationAction={
+        <NotificationCenter
+          piles={snapshot.piles}
+          onNavigate={handleNotificationNavigate}
+        />
+      }
       actions={
         <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center [&_button]:w-full md:[&_button]:w-auto">
           <span className="hidden items-center gap-1.5 text-xs text-muted-foreground lg:inline-flex">
@@ -344,7 +415,10 @@ export default function DashboardPage() {
             <BellRingIcon />
             空闲提醒
           </Button>
-          <YybLoginDialog />
+          <YybLoginDialog
+            open={credentialOpen}
+            onOpenChange={setCredentialOpen}
+          />
           <AddPileDialog />
           <Button
             variant="outline"
@@ -465,7 +539,16 @@ export default function DashboardPage() {
         ) : (
           <div className="grid gap-4">
             {entries.map((entry) => (
-              <div key={entry.pile.id} className="pile-card-enter">
+              <div
+                key={entry.pile.id}
+                id={`pile-${entry.pile.id}`}
+                className={`pile-card-enter ${
+                  notificationTarget?.deviceId === entry.pile.id &&
+                  !notificationTarget.portId
+                    ? "notification-target-glow"
+                    : ""
+                }`}
+              >
                 <PileCard
                   pile={entry.pile}
                   visiblePortIds={entry.portIds}
@@ -478,10 +561,14 @@ export default function DashboardPage() {
                   onMove={handleMove}
                   onHistory={openHistory}
                   reminderEnabled={watchRules.some(
-                    (rule) =>
-                      rule.deviceId === entry.pile.id && rule.enabled
+                    (rule) => rule.deviceId === entry.pile.id && rule.enabled
                   )}
                   onConfigureReminder={configureReminder}
+                  targetPortId={
+                    notificationTarget?.deviceId === entry.pile.id
+                      ? notificationTarget.portId
+                      : null
+                  }
                 />
               </div>
             ))}
