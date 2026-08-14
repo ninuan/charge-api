@@ -19,6 +19,15 @@ describe("dashboard modal layouts", () => {
 
     const navigation = await screen.findByText("操作路径")
     expect(navigation.closest("aside")).toHaveClass("sticky", "top-0")
+    expect(
+      screen.getByRole("link", { name: /设置空闲提醒/ })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "设置空闲提醒" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/请在通知中心点击“允许通知”，并保持网页打开/)
+    ).toBeInTheDocument()
   })
 
   it("uses a wide QR-login dialog instead of the default narrow dialog", async () => {

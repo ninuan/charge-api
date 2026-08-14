@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,10 +26,12 @@ type rawPayload struct {
 }
 
 type rawUsedStatus struct {
-	Index         int    `json:"i"`
-	UsedSeconds   int    `json:"u"`
-	RemainingText string `json:"s"`
+	Index          int    `json:"i"`
+	UsedSeconds    int    `json:"u"`
+	ConfiguredText string `json:"s"`
 }
+
+var configuredDurationPattern = regexp.MustCompile(`^(?:(\d+)\s*小时)?(?:(\d+)\s*分钟)?(?:(\d+)\s*秒)?$`)
 
 type CaptureRequest struct {
 	Name    string
@@ -126,7 +130,7 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 			if usedStatus, ok := usedStatusMap[i]; ok {
 				usedSeconds = usedStatus.UsedSeconds
 				usedText = formatDuration(usedSeconds)
-				remainingText = strings.TrimSpace(usedStatus.RemainingText)
+				remainingText = remainingDurationText(usedStatus.ConfiguredText, usedSeconds)
 			}
 			if usedSeconds > 0 {
 				minutes = (usedSeconds + 59) / 60
@@ -222,6 +226,47 @@ func formatDuration(seconds int) string {
 	default:
 		return fmt.Sprintf("%d秒", remainingSeconds)
 	}
+}
+
+func remainingDurationText(configuredText string, usedSeconds int) string {
+	text := strings.TrimSpace(configuredText)
+	if text == "" {
+		return ""
+	}
+	if strings.Join(strings.Fields(text), "") == "充满自停" {
+		return "充满自停"
+	}
+
+	totalSeconds, ok := parseDurationSeconds(text)
+	if !ok {
+		return text
+	}
+	remainingSeconds := totalSeconds - usedSeconds
+	if remainingSeconds <= 0 {
+		return "0分钟"
+	}
+	return formatDuration(remainingSeconds)
+}
+
+func parseDurationSeconds(text string) (int, bool) {
+	matches := configuredDurationPattern.FindStringSubmatch(strings.TrimSpace(text))
+	if matches == nil || (matches[1] == "" && matches[2] == "" && matches[3] == "") {
+		return 0, false
+	}
+
+	units := []int{3600, 60, 1}
+	total := 0
+	for index, unit := range units {
+		if matches[index+1] == "" {
+			continue
+		}
+		value, err := strconv.Atoi(matches[index+1])
+		if err != nil {
+			return 0, false
+		}
+		total += value * unit
+	}
+	return total, true
 }
 
 func ParseCaptureDir(dir string) ([]model.Pile, error) {

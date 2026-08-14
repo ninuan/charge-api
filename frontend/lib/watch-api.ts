@@ -30,19 +30,19 @@ export const watchApi = {
     request<WatchRule>(
       "/api/watch-rules",
       { method: "POST", headers: jsonHeaders, body: JSON.stringify(payload) },
-      "创建空闲提醒规则失败"
+      "创建空闲提醒失败"
     ),
   updateRule: (ruleId: string, payload: WatchRuleUpdateRequest) =>
     request<WatchRule>(
       `/api/watch-rules/${encodeURIComponent(ruleId)}`,
       { method: "PATCH", headers: jsonHeaders, body: JSON.stringify(payload) },
-      "更新空闲提醒规则失败"
+      "更新空闲提醒失败"
     ),
   deleteRule: (ruleId: string) =>
     request<void>(
       `/api/watch-rules/${encodeURIComponent(ruleId)}`,
       { method: "DELETE" },
-      "删除空闲提醒规则失败"
+      "删除空闲提醒失败"
     ),
   updatePreference: (payload: NotificationPreferenceUpdateRequest) =>
     request<NotificationPreference>(

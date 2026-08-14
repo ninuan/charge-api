@@ -69,6 +69,48 @@ describe("PileCard", () => {
     expect(screen.getByText("设备暂不可访问")).toBeInTheDocument()
   })
 
+  it("shows a calculated duration or full-charge stop for in-use ports", () => {
+    const inUsePile: Pile = {
+      ...pile,
+      ports: [
+        {
+          ...pile.ports[0],
+          status: "in_use",
+          usedSeconds: 5400,
+          usedText: "1小时30分钟",
+          remainingText: "6小时30分钟",
+        },
+        {
+          ...pile.ports[1],
+          status: "in_use",
+          usedSeconds: 3600,
+          usedText: "1小时",
+          remainingText: "充满自停",
+        },
+      ],
+    }
+
+    render(
+      <PileCard
+        pile={inUsePile}
+        visiblePortIds={[1, 2]}
+        filtering={false}
+        canMoveUp={false}
+        canMoveDown
+        reordering={false}
+        onMove={vi.fn()}
+        onHistory={vi.fn()}
+        onRemove={vi.fn()}
+        onUpdate={vi.fn()}
+        {...watchProps}
+      />
+    )
+
+    expect(screen.getByText("剩余 6小时30分钟")).toBeInTheDocument()
+    expect(screen.getByText("充满自停")).toBeInTheDocument()
+    expect(screen.queryByText("剩余 充满自停")).not.toBeInTheDocument()
+  })
+
   it("exposes direct move controls and disables unavailable directions", async () => {
     const onMove = vi.fn()
     render(
@@ -175,6 +217,8 @@ describe("PileCard", () => {
     expect(reminderButton).toHaveAttribute("aria-pressed", "true")
     await userEvent.click(reminderButton)
     expect(onConfigureReminder).toHaveBeenCalledWith("pile-1")
-    expect(screen.queryByRole("button", { name: /1 号充电口.*提醒/ })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: /1 号充电口.*提醒/ })
+    ).toBeNull()
   })
 })

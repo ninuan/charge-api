@@ -85,7 +85,8 @@ describe("WatchRuleDialog", () => {
     })
     expect(screen.getByText(/22:30–06:30（跨午夜）/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "创建规则" }))
+    expect(screen.getByText(/结束时间早于开始时间时/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "创建提醒" }))
 
     await waitFor(() =>
       expect(watchContextMock.createRule).toHaveBeenCalledWith({

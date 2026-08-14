@@ -383,7 +383,7 @@ export default function DashboardPage() {
     <AppShell
       compact
       title="充电桩运营看板"
-      description="端口占用、刷新状态与筛选结果一处查看；已启用提醒的充电桩会按设定时段低频检查。"
+      description="查看充电口状态，设置空闲提醒，快速找到可用充电口。"
       notificationAction={
         <NotificationCenter
           piles={snapshot.piles}

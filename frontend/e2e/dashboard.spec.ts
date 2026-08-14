@@ -744,7 +744,7 @@ test("dashboard creates and manages whole-pile cross-midnight reminders", async 
   await page.getByLabel("开始时间").fill("22:30")
   await page.getByLabel("结束时间").fill("06:30")
   await expect(page.getByText(/22:30–06:30（跨午夜）/)).toBeVisible()
-  await page.getByRole("button", { name: "创建规则" }).click()
+  await page.getByRole("button", { name: "创建提醒" }).click()
   await expect(
     page.getByRole("button", { name: "已设置空闲提醒" })
   ).toBeVisible()

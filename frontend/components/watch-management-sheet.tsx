@@ -133,7 +133,7 @@ function QuietHoursForm({
               启用免打扰
             </FieldLabel>
             <FieldDescription>
-              时区固定为中国标准时间（Asia/Shanghai）。
+              开启后，这段时间内不会弹出浏览器提醒。
             </FieldDescription>
           </FieldContent>
           <Switch
@@ -273,7 +273,7 @@ export function WatchManagementSheet({
           <SheetHeader className="sticky top-0 z-10 border-b bg-popover/95 py-4 pr-14 pl-5 backdrop-blur sm:pr-14 sm:pl-6">
             <SheetTitle>空闲提醒管理</SheetTitle>
             <SheetDescription>
-              按充电桩设置时段；任意端口从占用变为空闲时提醒一次。
+              选择充电桩和提醒时段，有空闲充电口时通知你。
             </SheetDescription>
           </SheetHeader>
 
@@ -296,7 +296,7 @@ export function WatchManagementSheet({
                 </Card>
                 <Card size="sm">
                   <CardHeader>
-                    <CardDescription>今日后台检查</CardDescription>
+                    <CardDescription>今日已检查</CardDescription>
                     <CardTitle className="text-xl tabular-nums">
                       {overview.dailyQuotaUsed}/{overview.dailyQuotaLimit}
                     </CardTitle>
@@ -311,8 +311,8 @@ export function WatchManagementSheet({
                 <AlertTitle>后台提醒当前已暂停</AlertTitle>
                 <AlertDescription>
                   {overview.accountRefreshEnabled
-                    ? "管理员关闭了全局后台提醒，规则仍会保留。"
-                    : "管理员暂停了当前账户的远端刷新，规则恢复后才会继续检查。"}
+                    ? "管理员暂时关闭了空闲提醒。你的设置会继续保留。"
+                    : "你的空闲提醒暂时不可用。设置恢复后会自动继续。"}
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -334,7 +334,7 @@ export function WatchManagementSheet({
                   <div>
                     <h3 className="font-medium">已设置提醒的充电桩</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      停用会保留时段设置，删除才会移出列表。
+                      暂时停用不会丢失已经选择的时段。
                     </p>
                   </div>
                   <Button
@@ -355,7 +355,7 @@ export function WatchManagementSheet({
                       </EmptyMedia>
                       <EmptyTitle>还没有空闲提醒</EmptyTitle>
                       <EmptyDescription>
-                        选择一台充电桩和生效时段，系统会按桩号低频检查全部端口。
+                        选择一台充电桩，设置希望收到提醒的星期和时间。
                       </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
@@ -386,7 +386,9 @@ export function WatchManagementSheet({
                             <Switch
                               size="sm"
                               aria-label={
-                                rule.enabled ? "停用规则" : "启用规则"
+                                rule.enabled
+                                  ? "停用空闲提醒"
+                                  : "启用空闲提醒"
                               }
                               checked={rule.enabled}
                               disabled={pending}
@@ -452,7 +454,7 @@ export function WatchManagementSheet({
                   <CardHeader>
                     <CardTitle>免打扰时段</CardTitle>
                     <CardDescription>
-                      站内通知仍会完整记录；即时浏览器提示将在该时段保持安静。
+                      在这段时间不弹出浏览器提醒，通知仍会保留在通知中心。
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -471,9 +473,9 @@ export function WatchManagementSheet({
                 {overview ? (
                   <Card>
                     <CardHeader>
-                      <CardTitle>后台检查策略</CardTitle>
+                      <CardTitle>提醒时间</CardTitle>
                       <CardDescription>
-                        系统按桩号请求，一次读取整桩全部端口。
+                        系统会根据你的提醒设置查看空闲情况。
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -481,10 +483,10 @@ export function WatchManagementSheet({
                         <GaugeIcon className="size-5 text-muted-foreground" />
                         <div>
                           <p className="text-xs text-muted-foreground">
-                            最低间隔
+                            检查频率
                           </p>
                           <p className="mt-1 font-medium">
-                            约 {overview.refreshIntervalMinutes} 分钟
+                            约每 {overview.refreshIntervalMinutes} 分钟一次
                           </p>
                         </div>
                       </div>
@@ -492,7 +494,7 @@ export function WatchManagementSheet({
                         <PowerOffIcon className="size-5 text-muted-foreground" />
                         <div>
                           <p className="text-xs text-muted-foreground">
-                            计划断电保护
+                            夜间暂停
                           </p>
                           <p className="mt-1 font-medium">
                             {overview.scheduledPowerOffEnabled
@@ -525,7 +527,7 @@ export function WatchManagementSheet({
             <DialogDescription>
               {deleteCandidate
                 ? `${pileLabel(piles, deleteCandidate.deviceId)} · ${ruleLabel()}，`
-                : "该规则"}
+                : "这条提醒"}
               将从提醒列表移除，已有站内通知不会删除。
             </DialogDescription>
           </DialogHeader>

@@ -4,6 +4,7 @@ import { BookOpenCheckIcon, CheckCircle2Icon, MousePointer2Icon, ShieldCheckIcon
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import { useCloseAppShellMenu } from "@/components/app-shell"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useAuth } from "@/lib/auth-context"
@@ -12,13 +13,15 @@ const steps = [
   ["准备微信", "确保可以扫码登录", ["准备一台可以正常使用微信的手机。", "确认微信可以扫码并完成授权。", "本系统不会要求输入微信密码。"]],
   ["打开扫码登录", "在系统里生成二维码", ["回到用户看板页面。", "点击右上角的“扫码登录”。", "在弹窗中点击“生成二维码”。", "等待二维码显示出来，不要关闭弹窗。"]],
   ["使用微信扫码", "完成授权登录", ["使用微信扫描页面里的二维码。", "按微信页面提示完成确认。", "扫码后回到系统页面，扫码状态会自动更新。"]],
-  ["确认绑定状态", "让系统保存登录凭据", ["扫码完成后，点击“确认绑定”。", "如果提示“扫码登录已生效”，说明当前账号已经绑定成功。", "如果当前账号已经添加过充电桩，系统会尝试自动更新登录凭据。"]],
+  ["确认绑定状态", "完成当前账号绑定", ["扫码完成后，点击“确认绑定”。", "如果提示“扫码登录已生效”，说明当前账号已经绑定成功。", "如果已经添加过充电桩，绑定成功后即可继续刷新查看。"]],
   ["添加充电桩", "输入桩号或设备长 ID", ["回到用户看板页面。", "点击“添加充电桩”。", "输入桩号或设备长 ID。", "点击添加后，系统会自动查询并保存该充电桩。"]],
-  ["刷新查看状态", "查看充电口占用情况", ["添加成功后，充电桩会出现在看板中。", "点击“刷新状态”获取最新充电口占用情况。", "系统会显示每个充电口是空闲、使用中、离线还是异常。", "短时间重复刷新会优先返回缓存。"]],
+  ["刷新查看状态", "查看充电口占用情况", ["添加成功后，充电桩会出现在看板中。", "点击“刷新状态”获取最新充电口占用情况。", "系统会显示每个充电口是空闲、使用中、离线还是异常。", "刚刷新过时，页面可能继续显示最近一次结果。"]],
+  ["设置空闲提醒", "有空闲充电口时及时通知你", ["在看板中找到需要提醒的充电桩，点击“设置空闲提醒”。", "选择需要提醒的星期和时间，点击“创建提醒”。", "当这台充电桩从没有空闲口变为有空闲口时，通知中心会提醒你。", "如需浏览器弹窗提醒，请在通知中心点击“允许通知”，并保持网页打开。", "点击看板顶部的“空闲提醒”，可以修改时段、暂时停用或删除提醒。"]],
 ] as const
 
 export function UsageGuideDialog() {
   const { currentUser, acknowledgeUsageGuide } = useAuth()
+  const closeAppShellMenu = useCloseAppShellMenu()
   const [open, setOpen] = useState(false)
   const [required, setRequired] = useState(false)
   const [reachedEnd, setReachedEnd] = useState(false)
@@ -48,11 +51,11 @@ export function UsageGuideDialog() {
   function openReference() { setRequired(false); setReachedEnd(true); setOpen(true) }
   async function close() {
     if (required && !reachedEnd) return
-    if (!required) return setOpen(false)
+    if (!required) { setOpen(false); closeAppShellMenu(); return }
     setSaving(true)
-    try { await acknowledgeUsageGuide(); setRequired(false); setOpen(false) } catch (reason) { toast.error((reason as Error).message) } finally { setSaving(false) }
+    try { await acknowledgeUsageGuide(); setRequired(false); setOpen(false); closeAppShellMenu() } catch (reason) { toast.error((reason as Error).message) } finally { setSaving(false) }
   }
-  function handleOpen(next: boolean) { if (!next && required && !reachedEnd) return; setOpen(next) }
+  function handleOpen(next: boolean) { if (!next && required && !reachedEnd) return; setOpen(next); if (!next) closeAppShellMenu() }
   // 读到过底部就保持已读：往回翻不该撤销"已看完"。
   function checkEnd(target: HTMLElement) { setReachedEnd((current) => current || target.scrollTop + target.clientHeight >= target.scrollHeight - 8) }
 
@@ -60,7 +63,7 @@ export function UsageGuideDialog() {
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogTrigger render={<Button variant="outline" onClick={openReference}><BookOpenCheckIcon />使用说明</Button>} />
       <DialogContent showCloseButton={!required || reachedEnd} className="grid h-[min(46rem,calc(100dvh-2rem))] w-[min(64rem,calc(100%-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none">
-        <DialogHeader className="border-b p-5 sm:p-6"><div className="flex gap-3"><span className="rounded-lg bg-muted p-2"><BookOpenCheckIcon className="size-5" /></span><div><DialogTitle>扫码登录与充电桩添加说明</DialogTitle>{required && <DialogDescription className="mt-2">首次进入前请完整看完说明。完成扫码登录后，就可以添加充电桩并查看充电口状态。</DialogDescription>}</div></div></DialogHeader>
+        <DialogHeader className="border-b p-5 sm:p-6"><div className="flex gap-3"><span className="rounded-lg bg-muted p-2"><BookOpenCheckIcon className="size-5" /></span><div><DialogTitle>Charge Console 使用说明</DialogTitle>{required && <DialogDescription className="mt-2">首次使用请先了解扫码绑定、添加充电桩和空闲提醒。</DialogDescription>}</div></div></DialogHeader>
         <div ref={scrollRef} className="min-h-0 overflow-y-auto p-5 sm:p-6" onScroll={(event) => checkEnd(event.currentTarget)}>
           <div className="grid gap-6 md:grid-cols-[12rem_1fr]">
             <aside className="sticky top-0 hidden self-start border-r pr-4 md:block"><p className="text-xs font-medium text-muted-foreground">操作路径</p><ol className="mt-3 space-y-3">{steps.map(([title], index) => <li key={title}><a className="text-sm hover:underline" href={`#guide-${index + 1}`}>{index + 1}. {title}</a></li>)}</ol></aside>

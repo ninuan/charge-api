@@ -144,7 +144,7 @@ function BrowserNotificationSetting() {
         <BellOffIcon />
         <AlertTitle>浏览器通知权限已被拒绝</AlertTitle>
         <AlertDescription>
-          请在浏览器地址栏旁的网站设置中将“通知”改为允许；本页不会反复弹出授权请求。
+          请在浏览器的网站通知设置中开启权限。站内通知仍可正常查看。
         </AlertDescription>
       </Alert>
     )
@@ -155,7 +155,7 @@ function BrowserNotificationSetting() {
         <BellIcon />
         <AlertTitle>在网页打开时接收即时提醒</AlertTitle>
         <AlertDescription>
-          授权后，整桩出现空闲口或发生需处理的异常时可收到浏览器通知。
+          开启后，网页保持打开时会弹出空闲和异常提醒。
         </AlertDescription>
         <div className="absolute top-2 right-2">
           <Button
@@ -185,8 +185,8 @@ function BrowserNotificationSetting() {
       </AlertTitle>
       <AlertDescription>
         {preference?.quietHoursEnabled
-          ? `${formatPowerWindow(preference.quietStartMinute, preference.quietEndMinute)} 免打扰；站内记录不受影响。`
-          : "免打扰已关闭；恢复在线消息仍只保留在站内。"}
+          ? `${formatPowerWindow(preference.quietStartMinute, preference.quietEndMinute)} 不弹出浏览器提醒，通知仍会保留。`
+          : "浏览器提醒已开启。网页打开时会及时通知你。"}
       </AlertDescription>
     </Alert>
   )
@@ -448,7 +448,7 @@ export function NotificationCenter({
                         : "暂时没有通知"}
                   </EmptyTitle>
                   <EmptyDescription>
-                    只有设置整桩空闲提醒后，系统才会按桩号低频检查并记录结果。
+                    设置空闲提醒后，有空闲充电口或需要处理的问题时会在这里通知你。
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>

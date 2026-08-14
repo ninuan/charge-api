@@ -9,7 +9,13 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { type ReactNode, useState } from "react"
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useState,
+} from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +32,12 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/lib/auth-context"
+
+const AppShellMenuContext = createContext<() => void>(() => {})
+
+export function useCloseAppShellMenu() {
+  return useContext(AppShellMenuContext)
+}
 
 export function AppShell({
   compact = false,
@@ -45,6 +57,7 @@ export function AppShell({
   const router = useRouter()
   const { currentUser, isAdmin, logout, ready } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
 
   async function handleLogout() {
     await logout()
@@ -107,7 +120,8 @@ export function AppShell({
   )
 
   return (
-    <div className="min-h-dvh bg-muted/35 text-foreground">
+    <AppShellMenuContext.Provider value={closeMenu}>
+      <div className="min-h-dvh bg-muted/35 text-foreground">
       <a
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2"
         href="#main-content"
@@ -176,8 +190,12 @@ export function AppShell({
                         if (
                           event.target instanceof Element &&
                           event.target.closest("button, a")
-                        )
+                        ) {
+                          const action = event.target.closest("button, a")
+                          if (action?.getAttribute("aria-haspopup") === "dialog")
+                            return
                           setMenuOpen(false)
+                        }
                       }}
                     >
                       {actions}
@@ -228,6 +246,7 @@ export function AppShell({
         {heading}
         {children}
       </main>
-    </div>
+      </div>
+    </AppShellMenuContext.Provider>
   )
 }

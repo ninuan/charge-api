@@ -7,8 +7,15 @@ import {
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { useState } from "react"
 
-import { AppShell } from "@/components/app-shell"
+import { AppShell, useCloseAppShellMenu } from "@/components/app-shell"
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 const { authState } = vi.hoisted(() => ({
   authState: {
@@ -26,6 +33,25 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }) }))
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => authState,
 }))
+
+function DialogAction() {
+  const [open, setOpen] = useState(false)
+  const closeMenu = useCloseAppShellMenu()
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) closeMenu()
+  }
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger render={<button type="button" />}>
+        使用说明
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>说明内容</DialogTitle>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 describe("AppShell", () => {
   afterEach(() => cleanup())
@@ -122,6 +148,44 @@ describe("AppShell", () => {
 
     await user.click(
       within(drawer as HTMLElement).getByRole("button", { name: "使用说明" })
+    )
+    await waitFor(() => expect(drawer).not.toBeVisible())
+  })
+
+  it("keeps the mobile menu mounted until its action dialog closes", async () => {
+    authState.currentUser = { username: "alice" }
+    authState.isAdmin = false
+    authState.ready = true
+    const user = userEvent.setup()
+    render(
+      <AppShell
+        title="看板"
+        description="说明"
+        actions={<DialogAction />}
+      >
+        <p>主要内容</p>
+      </AppShell>
+    )
+
+    await user.click(screen.getByRole("button", { name: "打开菜单" }))
+    const drawer = screen
+      .getByText("账户与操作")
+      .closest("[data-slot=sheet-content]")
+    await user.click(
+      within(drawer as HTMLElement).getByRole("button", {
+        name: "使用说明",
+      })
+    )
+
+    expect(
+      screen.getByRole("dialog", { name: "说明内容" })
+    ).toHaveTextContent("说明内容")
+    expect(drawer).toBeVisible()
+
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "说明内容" })
+      ).getByRole("button", { name: "关闭" })
     )
     await waitFor(() => expect(drawer).not.toBeVisible())
   })

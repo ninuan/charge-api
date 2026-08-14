@@ -146,7 +146,7 @@ export function WatchRuleDialog({
         <DialogHeader>
           <DialogTitle>{rule ? "编辑空闲提醒" : "添加空闲提醒"}</DialogTitle>
           <DialogDescription>
-            以整台充电桩为单位检查；只要任意充电口从占用变为空闲，就发送一次提醒。
+            选择你需要充电的时段，有空闲充电口时通知你。
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
@@ -186,10 +186,10 @@ export function WatchRuleDialog({
               <FieldContent>
                 <FieldLabel>
                   <BellRingIcon className="size-4" />
-                  整桩空闲提醒
+                  提醒范围
                 </FieldLabel>
                 <FieldDescription>
-                  仅在所选时段低频请求该桩号，一次同时读取全部十个端口；已有空闲口时不会重复提醒。
+                  整台充电桩。任意充电口从使用中变为空闲时提醒一次。
                 </FieldDescription>
               </FieldContent>
             </Field>
@@ -260,14 +260,14 @@ export function WatchRuleDialog({
               {startMinute != null && endMinute != null
                 ? formatActiveTime(startMinute, endMinute)
                 : "请选择有效时间"}
-              。开始与结束相同表示全天，开始晚于结束表示跨午夜。
+              。开始与结束相同表示全天；结束时间早于开始时间时，提醒会持续到第二天。
             </p>
 
             <Field orientation="horizontal">
               <FieldContent>
-                <FieldLabel htmlFor="watch-enabled">规则状态</FieldLabel>
+                <FieldLabel htmlFor="watch-enabled">启用提醒</FieldLabel>
                 <FieldDescription>
-                  停用后保留设置，但不会参与后台刷新。
+                  关闭后不再接收提醒，已经选择的时段会保留。
                 </FieldDescription>
               </FieldContent>
               <Switch
@@ -294,7 +294,7 @@ export function WatchRuleDialog({
                     className="animate-spin"
                   />
                 ) : null}
-                {saving ? "保存中…" : rule ? "保存修改" : "创建规则"}
+                {saving ? "保存中…" : rule ? "保存修改" : "创建提醒"}
               </Button>
             </DialogFooter>
           </FieldGroup>

@@ -117,13 +117,19 @@ describe("WatchManagementSheet", () => {
     expect(screen.getByText("7/480")).toBeInTheDocument()
     expect(screen.getByText("工作日 · 08:00–22:00")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("switch", { name: "停用规则" }))
+    expect(
+      screen.getByText("暂时停用不会丢失已经选择的时段。")
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("switch", { name: "停用空闲提醒" })
+    )
     expect(watchContextMock.updateRule).toHaveBeenCalledWith("rule-1", {
       enabled: false,
     })
 
     await user.click(screen.getByRole("tab", { name: "提醒设置" }))
     expect(screen.getByText("23:00–07:00")).toBeInTheDocument()
+    expect(screen.getByText("提醒时间")).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText("开始时间"), {
       target: { value: "23:00" },
     })

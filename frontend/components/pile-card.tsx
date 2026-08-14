@@ -138,7 +138,11 @@ function PortStatusCard({ port, targeted }: { port: Port; targeted: boolean }) {
               <Clock3Icon className="size-3" />
               已用 {port.usedText ?? "--"}
             </p>
-            <p>剩余 {port.remainingText ?? "--"}</p>
+            <p>
+              {port.remainingText === "充满自停"
+                ? "充满自停"
+                : `剩余 ${port.remainingText ?? "--"}`}
+            </p>
           </>
         ) : port.status === "idle" ? (
           <p>等待使用</p>
