@@ -257,7 +257,9 @@ function portHistory(portId: number): PortHistoryResponse {
 
 test("administrator handles a user and verifies the audit trail", async ({
   page,
-}) => {
+}, testInfo) => {
+  const username = `e2e-user-${testInfo.repeatEachIndex}-${testInfo.retry}`
+
   await page.goto("/login")
   await page.getByLabel("用户名").fill("admin")
   await page.locator("#password").fill("localadmin123")
@@ -266,7 +268,7 @@ test("administrator handles a user and verifies the audit trail", async ({
   await expect(page).toHaveURL(/\/admin\/?$/)
   await expect(page.getByRole("heading", { name: "运营总览" })).toBeVisible()
   await page.getByRole("button", { name: "创建用户" }).click()
-  await page.locator("#new-username").fill("e2e-user")
+  await page.locator("#new-username").fill(username)
   await page.locator("#new-password").fill("password123")
   await page.getByRole("button", { name: "确认创建" }).click()
   await expect(page.getByText("用户已创建")).toBeVisible()
@@ -274,16 +276,16 @@ test("administrator handles a user and verifies the audit trail", async ({
   await page.getByRole("tab", { name: "用户管理" }).click()
   await expect(page).toHaveURL(/\/admin\/?\?tab=users$/)
   await expect(page.getByRole("heading", { name: "筛选用户" })).toBeVisible()
-  await page.getByPlaceholder("用户名").fill("e2e-user")
+  await page.getByPlaceholder("用户名").fill(username)
   await page.getByRole("button", { name: "应用筛选" }).click()
   await expect(
-    page.getByLabel("用户目录").getByText("e2e-user", { exact: true })
+    page.getByLabel("用户目录").getByText(username, { exact: true })
   ).toBeVisible()
   await page
     .getByLabel("用户目录")
-    .getByRole("button", { name: "管理用户 e2e-user" })
+    .getByRole("button", { name: `管理用户 ${username}` })
     .click()
-  await expect(page.getByRole("heading", { name: /e2e-user/ })).toBeVisible()
+  await expect(page.getByRole("heading", { name: username })).toBeVisible()
   await expect(page.getByText("当前登录会话")).toBeVisible()
   await page.getByRole("button", { name: "停用账户" }).click()
   await expect(page.getByText("用户已停用")).toBeVisible()
@@ -315,7 +317,7 @@ test("administrator handles a user and verifies the audit trail", async ({
   ).toBeVisible()
   await page.getByLabel("刷新间隔（分钟）").fill("12")
   await page.getByRole("button", { name: "保存提醒策略" }).click()
-  await expect(page.getByText("系统设置已保存")).toBeVisible()
+  await expect(page.getByText("系统设置已保存").last()).toBeVisible()
   await page.getByRole("tab", { name: "运维审计" }).click()
   await expect(page.getByText(/后台按整桩低频刷新/)).toBeVisible()
   await expect(page.getByText("空闲提醒充电桩")).toBeVisible()
