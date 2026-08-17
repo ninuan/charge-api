@@ -1,9 +1,11 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
+	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/model"
 )
 
@@ -29,7 +31,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.hcaptcha.Verify(r.Context(), req.CaptchaToken, ip); err != nil {
-		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "HCAPTCHA_INVALID", "verify login hcaptcha", "人机验证失败，请重试。", err)
+		s.writeHCaptchaFailure(w, ip, "verify login hcaptcha", err)
 		return
 	}
 
@@ -75,7 +77,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.hcaptcha.Verify(r.Context(), req.CaptchaToken, ip); err != nil {
-		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "HCAPTCHA_INVALID", "verify register hcaptcha", "人机验证失败，请重试。", err)
+		s.writeHCaptchaFailure(w, ip, "verify register hcaptcha", err)
 		return
 	}
 
@@ -93,6 +95,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, session)
 	writeJSON(w, http.StatusCreated, user)
+}
+
+func (s *Server) writeHCaptchaFailure(w http.ResponseWriter, ip string, operation string, err error) {
+	if auth.IsHCaptchaUnavailable(err) {
+		log.Printf("%s: %v", operation, err)
+		writeCodedError(w, http.StatusServiceUnavailable, "HCAPTCHA_UNAVAILABLE", "人机验证服务暂时不可用，请联系管理员或稍后重试。")
+		return
+	}
+	s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "HCAPTCHA_INVALID", operation, "人机验证失败，请重试。", err)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

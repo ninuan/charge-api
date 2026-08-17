@@ -4,6 +4,7 @@ const publicErrorMessages: Record<string, string> = {
   REGISTER_INPUT_INVALID: "用户名需要 3-64 个字符，密码需要 8-128 个字符",
   REGISTER_CAPTCHA_INVALID: "图片验证码错误或已过期，请重新获取。",
   HCAPTCHA_INVALID: "人机验证失败，请重试。",
+  HCAPTCHA_UNAVAILABLE: "人机验证服务暂时不可用，请联系管理员或稍后重试。",
   RATE_LIMITED: "请求过于频繁，请稍后再试",
   YYB_BINDING_REQUIRED: "请先完成扫码登录绑定，再添加充电桩",
   PILE_IDENTIFIER_REQUIRED: "请输入桩号或设备长ID",

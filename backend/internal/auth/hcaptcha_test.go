@@ -56,16 +56,19 @@ func TestHCaptchaVerifierDisabled(t *testing.T) {
 
 func TestHCaptchaVerifierRejectsInvalidAndProviderFailures(t *testing.T) {
 	tests := []struct {
-		name       string
-		token      string
-		statusCode int
-		body       string
+		name        string
+		token       string
+		statusCode  int
+		body        string
+		unavailable bool
+		reason      string
 	}{
-		{name: "provider rejects token", token: "bad", statusCode: http.StatusOK, body: `{"success":false,"error-codes":["expired-input-response"]}`},
-		{name: "provider rate limited", token: "token", statusCode: http.StatusTooManyRequests, body: `{"success":false}`},
-		{name: "provider unavailable", token: "token", statusCode: http.StatusServiceUnavailable, body: `upstream unavailable`},
-		{name: "invalid json", token: "token", statusCode: http.StatusOK, body: `{not-json`},
-		{name: "oversized response", token: "token", statusCode: http.StatusOK, body: strings.Repeat("x", hcaptchaBodyMaxBytes+1)},
+		{name: "provider rejects token", token: "bad", statusCode: http.StatusOK, body: `{"success":false,"error-codes":["expired-input-response"]}`, reason: "expired-input-response"},
+		{name: "sitekey and secret mismatch", token: "token", statusCode: http.StatusOK, body: `{"success":false,"error-codes":["sitekey-secret-mismatch"]}`, unavailable: true, reason: "sitekey-secret-mismatch"},
+		{name: "provider rate limited", token: "token", statusCode: http.StatusTooManyRequests, body: `{"success":false}`, unavailable: true, reason: "provider-http-429"},
+		{name: "provider unavailable", token: "token", statusCode: http.StatusServiceUnavailable, body: `upstream unavailable`, unavailable: true, reason: "provider-http-503"},
+		{name: "invalid json", token: "token", statusCode: http.StatusOK, body: `{not-json`, unavailable: true, reason: "provider-response-invalid-json"},
+		{name: "oversized response", token: "token", statusCode: http.StatusOK, body: strings.Repeat("x", hcaptchaBodyMaxBytes+1), unavailable: true, reason: "provider-response-too-large"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,8 +83,14 @@ func TestHCaptchaVerifierRejectsInvalidAndProviderFailures(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected verification error")
 			}
-			if strings.Contains(err.Error(), "secret-not-for-errors") || strings.Contains(err.Error(), "expired-input-response") {
-				t.Fatalf("error leaked provider details: %v", err)
+			if strings.Contains(err.Error(), "secret-not-for-errors") || strings.Contains(err.Error(), test.token) {
+				t.Fatalf("error leaked credentials: %v", err)
+			}
+			if got := IsHCaptchaUnavailable(err); got != test.unavailable {
+				t.Fatalf("unavailable = %t, want %t: %v", got, test.unavailable, err)
+			}
+			if !strings.Contains(err.Error(), test.reason) {
+				t.Fatalf("error = %q, want safe reason %q", err, test.reason)
 			}
 		})
 	}
@@ -117,8 +126,20 @@ func TestHCaptchaVerifierHonorsClientTimeout(t *testing.T) {
 	client.Timeout = 5 * time.Millisecond
 	verifier := newHCaptchaVerifier("site", "secret", server.URL, client)
 	err := verifier.Verify(context.Background(), "token", "")
-	if err == nil || err.Error() != "人机验证服务暂时不可用" {
+	if err == nil || !IsHCaptchaUnavailable(err) || !strings.Contains(err.Error(), "provider-timeout") {
 		t.Fatalf("timeout error = %v", err)
+	}
+}
+
+func TestSafeHCaptchaErrorCodesRejectsUntrustedDetails(t *testing.T) {
+	got := safeHCaptchaErrorCodes([]string{
+		"expired-input-response",
+		"expired-input-response",
+		"secret=do-not-log",
+		strings.Repeat("x", 65),
+	})
+	if len(got) != 1 || got[0] != "expired-input-response" {
+		t.Fatalf("safe codes = %#v", got)
 	}
 }
 

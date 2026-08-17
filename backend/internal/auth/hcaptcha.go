@@ -3,10 +3,12 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,6 +29,23 @@ type HCaptchaVerifier struct {
 type hcaptchaResponse struct {
 	Success    bool     `json:"success"`
 	ErrorCodes []string `json:"error-codes"`
+}
+
+type hcaptchaVerificationError struct {
+	unavailable bool
+	reason      string
+}
+
+func (e *hcaptchaVerificationError) Error() string {
+	return "hcaptcha verification failed: " + e.reason
+}
+
+// IsHCaptchaUnavailable reports whether verification failed because the
+// provider or its server-side configuration is unavailable. Callers should
+// not count these failures against the user.
+func IsHCaptchaUnavailable(err error) bool {
+	var verificationError *hcaptchaVerificationError
+	return errors.As(err, &verificationError) && verificationError.unavailable
 }
 
 func NewHCaptchaVerifier(siteKey string, secret string) *HCaptchaVerifier {
@@ -59,13 +78,13 @@ func (v *HCaptchaVerifier) Verify(ctx context.Context, token string, remoteIP st
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return fmt.Errorf("请完成人机验证")
+		return newHCaptchaError(false, "missing-response")
 	}
 	if len(token) > hcaptchaTokenMaxBytes {
-		return fmt.Errorf("人机验证 token 无效")
+		return newHCaptchaError(false, "response-too-large")
 	}
 	if v.client == nil || v.verifyURL == "" {
-		return fmt.Errorf("人机验证服务未正确配置")
+		return newHCaptchaError(true, "verifier-not-configured")
 	}
 
 	form := url.Values{
@@ -85,26 +104,87 @@ func (v *HCaptchaVerifier) Verify(ctx context.Context, token string, remoteIP st
 
 	resp, err := v.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("人机验证服务暂时不可用")
+		if errors.Is(err, context.DeadlineExceeded) {
+			return newHCaptchaError(true, "provider-timeout")
+		}
+		return newHCaptchaError(true, "provider-request-failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("人机验证服务暂时不可用")
+		return newHCaptchaError(true, fmt.Sprintf("provider-http-%d", resp.StatusCode))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, hcaptchaBodyMaxBytes+1))
 	if err != nil {
-		return fmt.Errorf("读取人机验证结果失败")
+		return newHCaptchaError(true, "provider-response-read-failed")
 	}
 	if len(body) > hcaptchaBodyMaxBytes {
-		return fmt.Errorf("人机验证结果过大")
+		return newHCaptchaError(true, "provider-response-too-large")
 	}
 	var result hcaptchaResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("解析人机验证结果失败")
+		return newHCaptchaError(true, "provider-response-invalid-json")
 	}
 	if !result.Success {
-		return fmt.Errorf("人机验证失败，请重试")
+		reasons := safeHCaptchaErrorCodes(result.ErrorCodes)
+		unavailable := false
+		for _, reason := range reasons {
+			if isHCaptchaConfigurationError(reason) {
+				unavailable = true
+				break
+			}
+		}
+		return newHCaptchaError(unavailable, strings.Join(reasons, ","))
 	}
 	return nil
+}
+
+func newHCaptchaError(unavailable bool, reason string) error {
+	return &hcaptchaVerificationError{unavailable: unavailable, reason: reason}
+}
+
+func safeHCaptchaErrorCodes(codes []string) []string {
+	unique := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		code = strings.TrimSpace(code)
+		if code == "" || len(code) > 64 {
+			continue
+		}
+		safe := true
+		for _, character := range code {
+			if (character < 'a' || character > 'z') &&
+				(character < '0' || character > '9') &&
+				character != '-' && character != '_' {
+				safe = false
+				break
+			}
+		}
+		if safe {
+			unique[code] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		return []string{"provider-rejected-response"}
+	}
+	result := make([]string, 0, len(unique))
+	for code := range unique {
+		result = append(result, code)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func isHCaptchaConfigurationError(code string) bool {
+	switch code {
+	case "missing-input-secret",
+		"invalid-input-secret",
+		"sitekey-secret-mismatch",
+		"not-using-dummy-passcode",
+		"missing-remoteip",
+		"invalid-remoteip",
+		"bad-request":
+		return true
+	default:
+		return false
+	}
 }
