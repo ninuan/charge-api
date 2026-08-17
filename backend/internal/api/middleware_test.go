@@ -151,6 +151,7 @@ func TestSecurityHeadersAreSetOnEveryResponse(t *testing.T) {
 		"base-uri 'none'",
 		"frame-src 'none'",
 		"connect-src 'self'",
+		"https://static.cloudflareinsights.com",
 	} {
 		if !strings.Contains(policy, directive) {
 			t.Fatalf("CSP %q is missing %q", policy, directive)

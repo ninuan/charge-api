@@ -17,7 +17,9 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"img-src 'self' data: https:; " +
 	"font-src 'self' data:; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"script-src 'self' 'unsafe-inline'; " +
+	// Cloudflare Web Analytics 在代理层自动注入版本化 Beacon；数据仍通过
+	// 当前域名的 /cdn-cgi/rum 上报，因此 connect-src 保持只允许 self。
+	"script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; " +
 	"frame-src 'none'; " +
 	"connect-src 'self'"
 
