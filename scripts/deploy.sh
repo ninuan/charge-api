@@ -189,7 +189,20 @@ cd ../backend
 go build -o charge-server.new ./cmd/server
 mv charge-server.new charge-server
 sudo systemctl restart $SERVICE_NAME
-curl --silent --fail --max-time 15 $HEALTH_URL >/dev/null
+health_ready=0
+for _ in {1..15}; do
+  if curl --silent --fail --max-time 2 $HEALTH_URL >/dev/null; then
+    health_ready=1
+    break
+  fi
+  sleep 1
+done
+if [[ "\$health_ready" -ne 1 ]]; then
+  echo "Charge health check failed after restart. Recent service diagnostics:" >&2
+  sudo systemctl --no-pager --full status $SERVICE_NAME || true
+  sudo journalctl -u $SERVICE_NAME -n 80 --no-pager || true
+  exit 1
+fi
 echo "Remote service is healthy: $HEALTH_URL"
 REMOTE
 
