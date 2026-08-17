@@ -16,10 +16,10 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"form-action 'self'; " +
 	"img-src 'self' data: https:; " +
 	"font-src 'self' data:; " +
-	"style-src 'self' 'unsafe-inline'; " +
-	"script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
-	"frame-src https://challenges.cloudflare.com; " +
-	"connect-src 'self'"
+	"style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com; " +
+	"script-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com; " +
+	"frame-src https://hcaptcha.com https://*.hcaptcha.com; " +
+	"connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com"
 
 func WithSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

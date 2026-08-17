@@ -704,6 +704,30 @@ func TestRegisterRequiresCaptcha(t *testing.T) {
 	}
 }
 
+func TestAuthConfigExposesHCaptchaWithoutSecret(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	server.hcaptcha = auth.NewHCaptchaVerifier("public-site-key", "private-secret-key")
+	recorder := httptest.NewRecorder()
+	server.handleAuthConfig(recorder, httptest.NewRequest(http.MethodGet, "/api/auth/config", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("auth config returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var config map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&config); err != nil {
+		t.Fatalf("decode auth config: %v", err)
+	}
+	if config["hcaptchaEnabled"] != true || config["hcaptchaSiteKey"] != "public-site-key" {
+		t.Fatalf("unexpected hcaptcha config: %#v", config)
+	}
+	if strings.Contains(recorder.Body.String(), "private-secret-key") {
+		t.Fatalf("auth config leaked hcaptcha secret: %s", recorder.Body.String())
+	}
+	if _, exists := config["turnstileEnabled"]; exists {
+		t.Fatalf("legacy turnstile field is still exposed: %#v", config)
+	}
+}
+
 func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 	server, manager, _ := newTestServer(t)
 	invite, err := manager.CreateInvite("TEST-INVITE", nil)
@@ -834,7 +858,7 @@ func newTestServer(t *testing.T) (*Server, *appruntime.Manager, *auth.SessionMan
 	}
 	sessions := auth.NewSessionManager(time.Hour)
 	t.Cleanup(sessions.Close)
-	return NewServer(manager, sessions, auth.NewTurnstileVerifier("", "", ""), auth.NewAuthGuard()), manager, sessions
+	return NewServer(manager, sessions, auth.NewHCaptchaVerifier("", ""), auth.NewAuthGuard()), manager, sessions
 }
 
 func newTestServerWithDevice(t *testing.T, deviceID string) (*Server, *appruntime.Manager, *auth.SessionManager, model.User) {
@@ -870,7 +894,7 @@ func newTestServerWithDevice(t *testing.T, deviceID string) (*Server, *appruntim
 	}
 	sessions := auth.NewSessionManager(time.Hour)
 	t.Cleanup(sessions.Close)
-	return NewServer(manager, sessions, auth.NewTurnstileVerifier("", "", ""), auth.NewAuthGuard()), manager, sessions, user
+	return NewServer(manager, sessions, auth.NewHCaptchaVerifier("", ""), auth.NewAuthGuard()), manager, sessions, user
 }
 
 func findUser(t *testing.T, manager *appruntime.Manager, username string) model.CurrentUser {

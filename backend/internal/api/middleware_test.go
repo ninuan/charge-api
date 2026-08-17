@@ -149,7 +149,8 @@ func TestSecurityHeadersAreSetOnEveryResponse(t *testing.T) {
 		"frame-ancestors 'none'",
 		"object-src 'none'",
 		"base-uri 'none'",
-		"https://challenges.cloudflare.com",
+		"https://hcaptcha.com",
+		"https://*.hcaptcha.com",
 	} {
 		if !strings.Contains(policy, directive) {
 			t.Fatalf("CSP %q is missing %q", policy, directive)

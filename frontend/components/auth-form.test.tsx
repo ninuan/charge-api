@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -8,6 +8,7 @@ import { AuthForm } from "@/components/auth-form"
 describe("AuthForm", () => {
   afterEach(() => {
     cleanup()
+    delete window.hcaptcha
     vi.unstubAllGlobals()
   })
 
@@ -17,7 +18,7 @@ describe("AuthForm", () => {
       .fn()
       .mockResolvedValueOnce(new Response("upstream boom", { status: 502 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ turnstileEnabled: false }), {
+        new Response(JSON.stringify({ hcaptchaEnabled: false }), {
           status: 200,
         })
       )
@@ -46,7 +47,7 @@ describe("AuthForm", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ turnstileEnabled: false }), {
+        new Response(JSON.stringify({ hcaptchaEnabled: false }), {
           status: 200,
         })
       )
@@ -95,6 +96,74 @@ describe("AuthForm", () => {
     )
   })
 
+  it("requires hCaptcha and submits the verified token", async () => {
+    const onSuccess = vi.fn()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            hcaptchaEnabled: true,
+            hcaptchaSiteKey: "public-site-key",
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "u1",
+            username: "alice",
+            role: "user",
+            enabled: true,
+          }),
+          { status: 200 }
+        )
+      )
+    vi.stubGlobal("fetch", fetchMock)
+    let providerOptions: Record<string, unknown> = {}
+    const reset = vi.fn()
+    window.hcaptcha = {
+      render: vi.fn((_element, options) => {
+        providerOptions = options
+        return "auth-widget"
+      }),
+      reset,
+      remove: vi.fn(),
+    }
+    const user = userEvent.setup()
+
+    render(
+      <AuthProvider>
+        <AuthForm mode="login" onSuccess={onSuccess} />
+      </AuthProvider>
+    )
+
+    await user.type(await screen.findByLabelText("用户名"), "alice")
+    await user.type(screen.getByLabelText("密码"), "secret")
+    expect(screen.getByRole("button", { name: "登录" })).toBeDisabled()
+    await waitFor(() => expect(window.hcaptcha?.render).toHaveBeenCalled())
+    act(() => {
+      ;(providerOptions.callback as (token: string) => void)("hcaptcha-token")
+    })
+
+    await user.click(screen.getByRole("button", { name: "登录" }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("/dashboard"))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/auth/login",
+      expect.objectContaining({
+        body: JSON.stringify({
+          username: "alice",
+          password: "secret",
+          captchaToken: "hcaptcha-token",
+        }),
+      })
+    )
+    expect(reset).toHaveBeenCalledWith("auth-widget")
+  })
+
   it("loads the existing registration image challenge and submits its answer unchanged", async () => {
     const onSuccess = vi.fn()
     const fetchMock = vi
@@ -102,7 +171,7 @@ describe("AuthForm", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            turnstileEnabled: false,
+            hcaptchaEnabled: false,
             registerCaptchaEnabled: true,
           }),
           { status: 200 }
@@ -168,7 +237,7 @@ describe("AuthForm", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            turnstileEnabled: false,
+            hcaptchaEnabled: false,
             registerCaptchaEnabled: true,
           }),
           { status: 200 }
@@ -201,18 +270,16 @@ describe("AuthForm", () => {
   it("hides the optional invite field while public registration is open", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              turnstileEnabled: false,
-              registrationOpen: true,
-              inviteRequired: true,
-            }),
-            { status: 200 }
-          )
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            hcaptchaEnabled: false,
+            registrationOpen: true,
+            inviteRequired: true,
+          }),
+          { status: 200 }
         )
+      )
     )
 
     render(

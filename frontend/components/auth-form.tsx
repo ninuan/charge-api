@@ -10,9 +10,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
-  TurnstileWidget,
-  type TurnstileWidgetHandle,
-} from "@/components/turnstile-widget"
+  HCaptchaWidget,
+  type HCaptchaWidgetHandle,
+} from "@/components/hcaptcha-widget"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,8 +29,8 @@ import { resolveHomeRoute } from "@/lib/routing"
 type AuthMode = "login" | "register"
 
 type AuthConfig = {
-  turnstileEnabled?: boolean
-  turnstileSiteKey?: string
+  hcaptchaEnabled?: boolean
+  hcaptchaSiteKey?: string
   authConfigVersion?: number
   registerCaptchaEnabled?: boolean
   registrationOpen?: boolean
@@ -59,7 +59,7 @@ export function AuthForm({
   const [captchaImage, setCaptchaImage] = useState("")
   const [captchaAnswer, setCaptchaAnswer] = useState("")
   const [captchaLoading, setCaptchaLoading] = useState(false)
-  const turnstileRef = useRef<TurnstileWidgetHandle>(null)
+  const hcaptchaRef = useRef<HCaptchaWidgetHandle>(null)
 
   const registrationAvailable =
     (config?.registrationOpen ?? true) || (config?.inviteRequired ?? false)
@@ -84,9 +84,9 @@ export function AuthForm({
     }
   }, [])
 
-  const resetTurnstile = useCallback(() => {
+  const resetHCaptcha = useCallback(() => {
     setCaptchaToken("")
-    turnstileRef.current?.reset()
+    hcaptchaRef.current?.reset()
   }, [])
 
   // 配置加载失败时提交按钮会一直禁用，必须给用户一个重试入口，
@@ -137,7 +137,7 @@ export function AuthForm({
       (config.authConfigVersion ?? 0) < 2
     )
       return setError("后端服务仍是旧版本，请重启后端服务后再使用邀请码注册")
-    if (config?.turnstileEnabled && !captchaToken)
+    if (config?.hcaptchaEnabled && !captchaToken)
       return setError("请先完成人机验证")
     if (
       mode === "register" &&
@@ -173,7 +173,7 @@ export function AuthForm({
       if (mode === "register") await loadCaptcha()
     } finally {
       setSubmitting(false)
-      resetTurnstile()
+      resetHCaptcha()
     }
   }
 
@@ -301,11 +301,10 @@ export function AuthForm({
             </div>
           </Field>
         )}
-        {config?.turnstileEnabled && config.turnstileSiteKey && (
-          <TurnstileWidget
-            ref={turnstileRef}
-            siteKey={config.turnstileSiteKey}
-            action={mode}
+        {config?.hcaptchaEnabled && config.hcaptchaSiteKey && (
+          <HCaptchaWidget
+            ref={hcaptchaRef}
+            siteKey={config.hcaptchaSiteKey}
             onVerified={setCaptchaToken}
             onExpired={() => setCaptchaToken("")}
             onError={() => setCaptchaToken("")}
@@ -325,7 +324,7 @@ export function AuthForm({
             submitting ||
             captchaLoading ||
             (mode === "register" && !registrationAvailable) ||
-            (config?.turnstileEnabled && !captchaToken)
+            (config?.hcaptchaEnabled && !captchaToken)
           }
         >
           {submitting && (

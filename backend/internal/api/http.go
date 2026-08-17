@@ -38,7 +38,7 @@ var qrSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 type Server struct {
 	manager             *appruntime.Manager
 	sessions            *auth.SessionManager
-	turnstile           *auth.TurnstileVerifier
+	hcaptcha            *auth.HCaptchaVerifier
 	authGuard           *auth.AuthGuard
 	captcha             *auth.CaptchaStore
 	yybClient           yybSessionClient
@@ -82,13 +82,13 @@ func (s *Server) consumeDevForceAuthExpired() bool {
 func NewServer(
 	manager *appruntime.Manager,
 	sessions *auth.SessionManager,
-	turnstile *auth.TurnstileVerifier,
+	hcaptcha *auth.HCaptchaVerifier,
 	authGuard *auth.AuthGuard,
 ) *Server {
 	return &Server{
 		manager:            manager,
 		sessions:           sessions,
-		turnstile:          turnstile,
+		hcaptcha:           hcaptcha,
 		authGuard:          authGuard,
 		captcha:            auth.NewCaptchaStore(),
 		healthDegradations: make(map[string]string),

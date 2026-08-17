@@ -28,8 +28,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.allowAuthIdentity(w, ip, req.Username) {
 		return
 	}
-	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "login"); err != nil {
-		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "TURNSTILE_INVALID", "verify login turnstile", "人机验证失败，请重试。", err)
+	if err := s.hcaptcha.Verify(r.Context(), req.CaptchaToken, ip); err != nil {
+		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "HCAPTCHA_INVALID", "verify login hcaptcha", "人机验证失败，请重试。", err)
 		return
 	}
 
@@ -74,8 +74,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthFailure(w, ip, req.Username, http.StatusBadRequest, "REGISTER_CAPTCHA_INVALID", "verify register captcha", "图片验证码错误或已过期，请重新获取。", err)
 		return
 	}
-	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "register"); err != nil {
-		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "TURNSTILE_INVALID", "verify register turnstile", "人机验证失败，请重试。", err)
+	if err := s.hcaptcha.Verify(r.Context(), req.CaptchaToken, ip); err != nil {
+		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "HCAPTCHA_INVALID", "verify register hcaptcha", "人机验证失败，请重试。", err)
 		return
 	}
 
@@ -216,9 +216,9 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authConfigVersion":      2,
-		"turnstileEnabled":       s.turnstile.Enabled(),
-		"turnstileSiteKey":       s.turnstile.SiteKey(),
+		"authConfigVersion":      3,
+		"hcaptchaEnabled":        s.hcaptcha.Enabled(),
+		"hcaptchaSiteKey":        s.hcaptcha.SiteKey(),
 		"registerCaptchaEnabled": true,
 		"registrationOpen":       s.manager.Settings().OpenRegistration,
 		"inviteRequired":         s.manager.Settings().InviteRequired,

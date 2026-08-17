@@ -4,6 +4,11 @@
 
 ## 1.5.1 - 2026-08-11
 
+### 安全维护
+
+- 登录和注册的外部人机验证由 Cloudflare Turnstile 替换为 hCaptcha，现有账户、会话和 SQLite 数据不受影响。
+- 升级前需在服务器配置 `HCAPTCHA_REQUIRED`、`HCAPTCHA_SITE_KEY` 和 `HCAPTCHA_SECRET_KEY`；旧 `TURNSTILE_*` 配置不再生效。
+
 ### 新增
 
 - 新增按整桩设置的空闲提醒：一个充电桩任一端口从忙碌变为空闲时生成提醒，不再要求逐端口配置。
