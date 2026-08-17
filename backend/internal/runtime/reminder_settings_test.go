@@ -57,6 +57,7 @@ func TestNormalizeRegistrationSettingsPreservesExplicitlyDisabledReminders(t *te
 	settings := normalizeRegistrationSettings(model.RegistrationSettings{
 		DefaultDeviceLimit: 10, StatsRetentionDays: 90, PortHistoryRetentionDays: 90,
 		BackgroundRemindersEnabled:   false,
+		RecurringRemindersEnabled:    false,
 		WatchRefreshIntervalMinutes:  defaultWatchIntervalMinutes,
 		WatchPileLimitPerUser:        defaultWatchPileLimit,
 		WatchDailyRefreshQuota:       defaultWatchDailyQuota,
@@ -67,7 +68,7 @@ func TestNormalizeRegistrationSettingsPreservesExplicitlyDisabledReminders(t *te
 		ScheduledPowerOffTimezone:    defaultPowerOffTimezone,
 		PowerRestoreJitterMinutes:    defaultPowerRestoreJitter,
 	})
-	if settings.BackgroundRemindersEnabled || settings.ScheduledPowerOffEnabled {
+	if settings.BackgroundRemindersEnabled || settings.RecurringRemindersEnabled || settings.ScheduledPowerOffEnabled {
 		t.Fatalf("explicit disabled settings were overwritten: %+v", settings)
 	}
 }
@@ -75,6 +76,7 @@ func TestNormalizeRegistrationSettingsPreservesExplicitlyDisabledReminders(t *te
 func assertReminderSettingDefaults(t *testing.T, settings model.RegistrationSettings) {
 	t.Helper()
 	if !settings.BackgroundRemindersEnabled ||
+		!settings.RecurringRemindersEnabled ||
 		settings.WatchRefreshIntervalMinutes != 10 ||
 		settings.WatchPileLimitPerUser != 5 ||
 		settings.WatchDailyRefreshQuota != 480 ||

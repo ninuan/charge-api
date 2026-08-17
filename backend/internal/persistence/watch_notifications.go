@@ -22,22 +22,29 @@ type NotificationPageQuery struct {
 }
 
 func (s *Store) SaveWatchRule(rule model.WatchRule) error {
+	rule = normalizeWatchRuleLifecycle(rule)
 	if err := validateWatchRule(rule); err != nil {
 		return err
 	}
 	result, err := s.db.Exec(`
 		INSERT INTO watch_rules(
-			id, user_id, device_id, port_id, notify_idle, enabled,
+			id, user_id, device_id, port_id, notify_idle, mode, enabled,
 			active_weekdays, active_start_minute, active_end_minute, timezone,
+			expires_at, completed_at, completion_reason, stop_after_notify,
 			created_at, updated_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			device_id = excluded.device_id,
+			mode = excluded.mode,
 			enabled = excluded.enabled,
 			active_weekdays = excluded.active_weekdays,
 			active_start_minute = excluded.active_start_minute,
 			active_end_minute = excluded.active_end_minute,
 			timezone = excluded.timezone,
+			expires_at = excluded.expires_at,
+			completed_at = excluded.completed_at,
+			completion_reason = excluded.completion_reason,
+			stop_after_notify = excluded.stop_after_notify,
 			updated_at = excluded.updated_at
 		WHERE watch_rules.user_id = excluded.user_id
 	`,
@@ -46,11 +53,16 @@ func (s *Store) SaveWatchRule(rule model.WatchRule) error {
 		rule.DeviceID,
 		nil,
 		false,
+		rule.Mode,
 		rule.Enabled,
 		rule.ActiveWeekdays,
 		rule.ActiveStartMinute,
 		rule.ActiveEndMinute,
 		rule.Timezone,
+		unixTimeOrNil(rule.ExpiresAt),
+		unixTimeOrNil(rule.CompletedAt),
+		rule.CompletionReason,
+		rule.StopAfterNotify,
 		rule.CreatedAt.UTC().Unix(),
 		rule.UpdatedAt.UTC().Unix(),
 	)
@@ -73,8 +85,9 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 		return nil, fmt.Errorf("watch rules require a user")
 	}
 	rows, err := s.db.Query(`
-		SELECT id, user_id, device_id, enabled,
+		SELECT id, user_id, device_id, mode, enabled,
 		       active_weekdays, active_start_minute, active_end_minute, timezone,
+		       expires_at, completed_at, completion_reason, stop_after_notify,
 		       created_at, updated_at
 		FROM watch_rules
 		WHERE user_id = ?
@@ -88,23 +101,32 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 	rules := make([]model.WatchRule, 0)
 	for rows.Next() {
 		var rule model.WatchRule
-		var enabled int
+		var enabled, stopAfterNotify int
+		var expiresAt, completedAt sql.NullInt64
 		var createdAt, updatedAt int64
 		if err := rows.Scan(
 			&rule.ID,
 			&rule.UserID,
 			&rule.DeviceID,
+			&rule.Mode,
 			&enabled,
 			&rule.ActiveWeekdays,
 			&rule.ActiveStartMinute,
 			&rule.ActiveEndMinute,
 			&rule.Timezone,
+			&expiresAt,
+			&completedAt,
+			&rule.CompletionReason,
+			&stopAfterNotify,
 			&createdAt,
 			&updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch rule: %w", err)
 		}
 		rule.Enabled = enabled != 0
+		rule.StopAfterNotify = stopAfterNotify != 0
+		rule.ExpiresAt = nullableUnixTime(expiresAt)
+		rule.CompletedAt = nullableUnixTime(completedAt)
 		rule.CreatedAt = time.Unix(createdAt, 0).UTC()
 		rule.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 		rules = append(rules, rule)
@@ -737,7 +759,39 @@ func validateWatchRule(rule model.WatchRule) error {
 	if rule.CreatedAt.IsZero() || rule.UpdatedAt.IsZero() {
 		return fmt.Errorf("watch rule requires timestamps")
 	}
+	switch rule.Mode {
+	case model.WatchRuleRecurring:
+		if rule.ExpiresAt != nil || rule.CompletedAt != nil || rule.CompletionReason != "" || rule.StopAfterNotify {
+			return fmt.Errorf("recurring watch rule lifecycle is invalid")
+		}
+	case model.WatchRuleTemporary:
+		if rule.ExpiresAt == nil || !rule.ExpiresAt.After(rule.CreatedAt) || !rule.StopAfterNotify {
+			return fmt.Errorf("temporary watch rule expiry is invalid")
+		}
+		if (rule.CompletedAt == nil) != (rule.CompletionReason == "") {
+			return fmt.Errorf("temporary watch rule completion is incomplete")
+		}
+		if rule.CompletedAt != nil {
+			if rule.CompletedAt.Before(rule.CreatedAt) {
+				return fmt.Errorf("temporary watch rule completion time is invalid")
+			}
+			switch rule.CompletionReason {
+			case model.WatchCompletionNotified, model.WatchCompletionExpired, model.WatchCompletionCancelled:
+			default:
+				return fmt.Errorf("temporary watch rule completion reason is invalid")
+			}
+		}
+	default:
+		return fmt.Errorf("watch rule mode is invalid")
+	}
 	return nil
+}
+
+func normalizeWatchRuleLifecycle(rule model.WatchRule) model.WatchRule {
+	if rule.Mode == "" {
+		rule.Mode = model.WatchRuleRecurring
+	}
+	return rule
 }
 
 func validateNotificationPreference(preference model.NotificationPreference) error {

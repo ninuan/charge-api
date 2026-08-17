@@ -26,11 +26,13 @@ const pileRule: WatchRule = {
   id: "rule-pile-1",
   userId: "user-1",
   deviceId: "pile-1",
+  mode: "recurring",
   enabled: true,
   activeWeekdays: 127,
   activeStartMinute: 0,
   activeEndMinute: 0,
   timezone: "Asia/Shanghai",
+  stopAfterNotify: false,
   createdAt: "2026-08-10T00:00:00Z",
   updatedAt: "2026-08-10T00:00:00Z",
 }

@@ -26,6 +26,7 @@ const settings = {
   statsRetentionDays: 90,
   portHistoryRetentionDays: 90,
   backgroundRemindersEnabled: true,
+  recurringRemindersEnabled: true,
   watchRefreshIntervalMinutes: 10,
   watchPileLimitPerUser: 5,
   watchDailyRefreshQuota: 480,

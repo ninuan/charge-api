@@ -157,6 +157,7 @@ export interface RegistrationSettings {
   statsRetentionDays: number
   portHistoryRetentionDays: number
   backgroundRemindersEnabled: boolean
+  recurringRemindersEnabled: boolean
   watchRefreshIntervalMinutes: number
   watchPileLimitPerUser: number
   watchDailyRefreshQuota: number

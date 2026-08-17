@@ -267,6 +267,7 @@ type RegistrationSettings struct {
 	StatsRetentionDays           int    `json:"statsRetentionDays"`
 	PortHistoryRetentionDays     int    `json:"portHistoryRetentionDays"`
 	BackgroundRemindersEnabled   bool   `json:"backgroundRemindersEnabled"`
+	RecurringRemindersEnabled    bool   `json:"recurringRemindersEnabled"`
 	WatchRefreshIntervalMinutes  int    `json:"watchRefreshIntervalMinutes"`
 	WatchPileLimitPerUser        int    `json:"watchPileLimitPerUser"`
 	WatchDailyRefreshQuota       int    `json:"watchDailyRefreshQuota"`
@@ -278,34 +279,142 @@ type RegistrationSettings struct {
 	PowerRestoreJitterMinutes    int    `json:"powerRestoreJitterMinutes"`
 }
 
+type WatchRuleMode string
+
+const (
+	WatchRuleTemporary WatchRuleMode = "temporary"
+	WatchRuleRecurring WatchRuleMode = "recurring"
+)
+
+type WatchCompletionReason string
+
+const (
+	WatchCompletionNotified  WatchCompletionReason = "notified"
+	WatchCompletionExpired   WatchCompletionReason = "expired"
+	WatchCompletionCancelled WatchCompletionReason = "cancelled"
+)
+
+type WatchTemporaryDuration string
+
+const (
+	WatchDurationOneHour       WatchTemporaryDuration = "1h"
+	WatchDurationTwoHours      WatchTemporaryDuration = "2h"
+	WatchDurationFourHours     WatchTemporaryDuration = "4h"
+	WatchDurationUntilPowerOff WatchTemporaryDuration = "until_power_off"
+)
+
 type WatchRule struct {
-	ID                string    `json:"id"`
-	UserID            string    `json:"userId"`
-	DeviceID          string    `json:"deviceId"`
-	Enabled           bool      `json:"enabled"`
-	ActiveWeekdays    int       `json:"activeWeekdays"`
-	ActiveStartMinute int       `json:"activeStartMinute"`
-	ActiveEndMinute   int       `json:"activeEndMinute"`
-	Timezone          string    `json:"timezone"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                       string                `json:"id"`
+	UserID                   string                `json:"userId"`
+	DeviceID                 string                `json:"deviceId"`
+	Mode                     WatchRuleMode         `json:"mode"`
+	Enabled                  bool                  `json:"enabled"`
+	ActiveWeekdays           int                   `json:"activeWeekdays"`
+	ActiveStartMinute        int                   `json:"activeStartMinute"`
+	ActiveEndMinute          int                   `json:"activeEndMinute"`
+	Timezone                 string                `json:"timezone"`
+	ExpiresAt                *time.Time            `json:"expiresAt,omitempty"`
+	CompletedAt              *time.Time            `json:"completedAt,omitempty"`
+	CompletionReason         WatchCompletionReason `json:"completionReason,omitempty"`
+	StopAfterNotify          bool                  `json:"stopAfterNotify"`
+	NextCheckAt              *time.Time            `json:"nextCheckAt,omitempty"`
+	EstimatedRemainingChecks int                   `json:"estimatedRemainingChecks,omitempty"`
+	CreatedAt                time.Time             `json:"createdAt"`
+	UpdatedAt                time.Time             `json:"updatedAt"`
 }
 
 type WatchRuleCreateRequest struct {
-	DeviceID          string  `json:"deviceId"`
-	Enabled           *bool   `json:"enabled,omitempty"`
-	ActiveWeekdays    *int    `json:"activeWeekdays,omitempty"`
-	ActiveStartMinute *int    `json:"activeStartMinute,omitempty"`
-	ActiveEndMinute   *int    `json:"activeEndMinute,omitempty"`
-	Timezone          *string `json:"timezone,omitempty"`
+	DeviceID          string                  `json:"deviceId"`
+	Mode              *WatchRuleMode          `json:"mode,omitempty"`
+	Duration          *WatchTemporaryDuration `json:"duration,omitempty"`
+	Enabled           *bool                   `json:"enabled,omitempty"`
+	ActiveWeekdays    *int                    `json:"activeWeekdays,omitempty"`
+	ActiveStartMinute *int                    `json:"activeStartMinute,omitempty"`
+	ActiveEndMinute   *int                    `json:"activeEndMinute,omitempty"`
+	Timezone          *string                 `json:"timezone,omitempty"`
 }
 
 type WatchRuleUpdateRequest struct {
-	Enabled           *bool   `json:"enabled,omitempty"`
-	ActiveWeekdays    *int    `json:"activeWeekdays,omitempty"`
-	ActiveStartMinute *int    `json:"activeStartMinute,omitempty"`
-	ActiveEndMinute   *int    `json:"activeEndMinute,omitempty"`
-	Timezone          *string `json:"timezone,omitempty"`
+	Enabled           *bool                   `json:"enabled,omitempty"`
+	Duration          *WatchTemporaryDuration `json:"duration,omitempty"`
+	Cancel            *bool                   `json:"cancel,omitempty"`
+	ActiveWeekdays    *int                    `json:"activeWeekdays,omitempty"`
+	ActiveStartMinute *int                    `json:"activeStartMinute,omitempty"`
+	ActiveEndMinute   *int                    `json:"activeEndMinute,omitempty"`
+	Timezone          *string                 `json:"timezone,omitempty"`
+}
+
+type WxPusherEventTypes int
+
+const (
+	WxPusherEventPileAvailable WxPusherEventTypes = 1 << iota
+	WxPusherEventCredentialExpired
+	WxPusherEventPileOffline
+	WxPusherEventPileRecovered
+
+	WxPusherDefaultEventTypes = WxPusherEventPileAvailable |
+		WxPusherEventCredentialExpired |
+		WxPusherEventPileOffline
+	WxPusherAllEventTypes = WxPusherDefaultEventTypes | WxPusherEventPileRecovered
+)
+
+type WxPusherBinding struct {
+	UserID                string             `json:"userId"`
+	UID                   string             `json:"-"`
+	Enabled               bool               `json:"enabled"`
+	EventTypes            WxPusherEventTypes `json:"eventTypes"`
+	BoundAt               time.Time          `json:"boundAt"`
+	UpdatedAt             time.Time          `json:"updatedAt"`
+	LastTestAt            *time.Time         `json:"lastTestAt,omitempty"`
+	LastAcceptedAt        *time.Time         `json:"lastAcceptedAt,omitempty"`
+	LastProviderSuccessAt *time.Time         `json:"lastProviderSuccessAt,omitempty"`
+	LastErrorCode         string             `json:"lastErrorCode,omitempty"`
+	LastErrorAt           *time.Time         `json:"lastErrorAt,omitempty"`
+}
+
+type WxPusherBindSession struct {
+	ID           string     `json:"id"`
+	UserID       string     `json:"userId"`
+	ProviderCode string     `json:"-"`
+	QRURL        string     `json:"qrUrl"`
+	ExpiresAt    time.Time  `json:"expiresAt"`
+	NextPollAt   time.Time  `json:"nextPollAt"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+}
+
+type NotificationDeliveryStatus string
+
+const (
+	NotificationDeliveryPending           NotificationDeliveryStatus = "pending"
+	NotificationDeliverySending           NotificationDeliveryStatus = "sending"
+	NotificationDeliveryAccepted          NotificationDeliveryStatus = "accepted"
+	NotificationDeliveryProviderSucceeded NotificationDeliveryStatus = "provider_succeeded"
+	NotificationDeliveryRetryWait         NotificationDeliveryStatus = "retry_wait"
+	NotificationDeliverySuppressed        NotificationDeliveryStatus = "suppressed"
+	NotificationDeliveryUncertain         NotificationDeliveryStatus = "uncertain"
+	NotificationDeliveryFailed            NotificationDeliveryStatus = "failed"
+	NotificationDeliveryCancelled         NotificationDeliveryStatus = "cancelled"
+)
+
+type NotificationDelivery struct {
+	ID                       string                     `json:"id"`
+	NotificationID           *string                    `json:"notificationId,omitempty"`
+	UserID                   string                     `json:"userId"`
+	Channel                  string                     `json:"channel"`
+	Status                   NotificationDeliveryStatus `json:"status"`
+	IsTest                   bool                       `json:"isTest"`
+	AttemptCount             int                        `json:"attemptCount"`
+	NextAttemptAt            *time.Time                 `json:"nextAttemptAt,omitempty"`
+	ClaimedAt                *time.Time                 `json:"claimedAt,omitempty"`
+	ProviderRecordID         string                     `json:"providerRecordId,omitempty"`
+	ProviderMessageContentID string                     `json:"providerMessageContentId,omitempty"`
+	LastErrorCode            string                     `json:"lastErrorCode,omitempty"`
+	LastErrorMessage         string                     `json:"lastErrorMessage,omitempty"`
+	AcceptedAt               *time.Time                 `json:"acceptedAt,omitempty"`
+	ProviderSucceededAt      *time.Time                 `json:"providerSucceededAt,omitempty"`
+	CreatedAt                time.Time                  `json:"createdAt"`
+	UpdatedAt                time.Time                  `json:"updatedAt"`
 }
 
 type NotificationPreference struct {

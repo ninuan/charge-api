@@ -330,6 +330,7 @@ func TestLegacyFavoritesAndPortRulesNormalizeToOnePileReminder(t *testing.T) {
 	statements := []string{
 		`DELETE FROM metadata WHERE key='watch_rules_pile_level'`,
 		`DROP INDEX IF EXISTS watch_rules_user_pile_unique_idx`,
+		`DROP INDEX IF EXISTS watch_rules_user_active_pile_unique_idx`,
 		`DROP INDEX IF EXISTS watch_rules_enabled_pile_idx`,
 		`CREATE UNIQUE INDEX watch_rules_user_target_unique_idx ON watch_rules(user_id, device_id, COALESCE(port_id, 0))`,
 		`INSERT INTO watch_rules(id,user_id,device_id,port_id,notify_idle,enabled,active_weekdays,active_start_minute,active_end_minute,timezone,created_at,updated_at) VALUES('favorite','legacy-user','pile-1',NULL,0,1,127,0,0,'Asia/Shanghai',1,1)`,

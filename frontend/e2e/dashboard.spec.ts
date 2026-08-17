@@ -729,11 +729,13 @@ test("dashboard creates and manages whole-pile cross-midnight reminders", async 
       id: `rule-${rules.length + 1}`,
       userId: user.id,
       deviceId: payload.deviceId,
+      mode: "recurring",
       enabled: payload.enabled ?? true,
       activeWeekdays: payload.activeWeekdays ?? 127,
       activeStartMinute: payload.activeStartMinute ?? 0,
       activeEndMinute: payload.activeEndMinute ?? 0,
       timezone: payload.timezone ?? "Asia/Shanghai",
+      stopAfterNotify: false,
       createdAt: "2026-08-10T00:00:00Z",
       updatedAt: "2026-08-10T00:00:00Z",
     }

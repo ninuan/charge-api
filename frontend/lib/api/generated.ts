@@ -76,6 +76,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notification-channels/wxpusher": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取当前用户的 WxPusher 通道状态 */
+        get: operations["getWxPusherChannel"];
+        put?: never;
+        post?: never;
+        /**
+         * 解除当前用户的本地 WxPusher 绑定
+         * @description 删除本地 UID 并取消尚未开始的投递任务，不承诺替用户取消关注 WxPusher 应用或退出接收客户端。
+         */
+        delete: operations["deleteWxPusherChannel"];
+        options?: never;
+        head?: never;
+        /** 更新 WxPusher 总开关和事件类型偏好 */
+        patch: operations["updateWxPusherChannel"];
+        trace?: never;
+    };
+    "/api/notification-channels/wxpusher/bind-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 创建十分钟有效的 WxPusher 参数二维码绑定会话 */
+        post: operations["createWxPusherBindSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notification-channels/wxpusher/bind-sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户的随机绑定会话 ID */
+                sessionId: components["parameters"]["WxPusherBindSessionId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 查询当前用户的 WxPusher 绑定进度
+         * @description 前端建议每十秒查询一次；后端强制限制向供应商轮询的最短间隔。
+         */
+        get: operations["getWxPusherBindSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notification-channels/wxpusher/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为当前用户创建一条受频率限制的 WxPusher 测试投递 */
+        post: operations["testWxPusherChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notification-preferences": {
         parameters: {
             query?: never;
@@ -395,6 +474,27 @@ export interface components {
             type: components["schemas"]["NotificationType"];
             userId: string;
         };
+        /** @enum {string} */
+        NotificationDeliveryStatus: "pending" | "sending" | "accepted" | "provider_succeeded" | "retry_wait" | "suppressed" | "uncertain" | "failed" | "cancelled";
+        NotificationDeliverySummary: {
+            /**
+             * Format: date-time
+             * @description WxPusher API 已受理时间。
+             */
+            acceptedAt?: string;
+            errorCode?: components["schemas"]["WxPusherErrorCode"];
+            id: string;
+            isTest: boolean;
+            message: string;
+            /**
+             * Format: date-time
+             * @description WxPusher 状态接口确认处理成功的时间，不代表具体接收客户端已展示或已读。
+             */
+            providerSucceededAt?: string;
+            status: components["schemas"]["NotificationDeliveryStatus"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
         NotificationPage: {
             items: components["schemas"]["Notification"][];
             nextCursor?: string;
@@ -514,6 +614,8 @@ export interface components {
             openRegistration: boolean;
             portHistoryRetentionDays: number;
             powerRestoreJitterMinutes: number;
+            /** @description 是否允许高级固定时段提醒进入后台调度；关闭后保留用户配置，临时提醒不受影响。 */
+            recurringRemindersEnabled: boolean;
             scheduledPowerOffEnabled: boolean;
             scheduledPowerOffEndMinute: number;
             scheduledPowerOffStartMinute: number;
@@ -550,6 +652,8 @@ export interface components {
             /** Format: int64 */
             updated: number;
         };
+        /** @enum {string} */
+        WatchCompletionReason: "notified" | "expired" | "cancelled";
         WatchOverview: {
             accountRefreshEnabled: boolean;
             backgroundRemindersEnabled: boolean;
@@ -573,10 +677,28 @@ export interface components {
             /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays: number;
             /** Format: date-time */
+            completedAt?: string;
+            completionReason?: components["schemas"]["WatchCompletionReason"];
+            /** Format: date-time */
             createdAt: string;
             deviceId: string;
             enabled: boolean;
+            /** @description 在过期或计划断电前预计最多还会执行的整桩后台检查次数。 */
+            estimatedRemainingChecks?: number;
+            /**
+             * Format: date-time
+             * @description 临时提醒的硬截止时间；固定提醒不返回。
+             */
+            expiresAt?: string;
             id: string;
+            mode: components["schemas"]["WatchRuleMode"];
+            /**
+             * Format: date-time
+             * @description 当前活动提醒预计下次后台检查时间。
+             */
+            nextCheckAt?: string;
+            /** @description 临时提醒固定为 true，固定提醒固定为 false。 */
+            stopAfterNotify: boolean;
             timezone: string;
             /** Format: date-time */
             updatedAt: string;
@@ -590,9 +712,24 @@ export interface components {
             /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays?: number;
             deviceId: string;
+            /** @description 仅用于 temporary；省略时使用 2h，且服务端会将截止时间限制在当天计划断电开始前。 */
+            duration?: components["schemas"]["WatchTemporaryDuration"];
             enabled?: boolean;
+            /** @description 省略时由服务端使用 temporary。 */
+            mode?: components["schemas"]["WatchRuleMode"];
             timezone?: string;
         };
+        WatchRuleCreateResult: {
+            backgroundScheduled: boolean;
+            idlePortIds: number[];
+            message: string;
+            rule?: components["schemas"]["WatchRule"];
+        };
+        /**
+         * @description temporary 是默认按需任务；recurring 是保留的高级固定时段规则。
+         * @enum {string}
+         */
+        WatchRuleMode: "temporary" | "recurring";
         WatchRuleUpdateRequest: {
             /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
             activeEndMinute?: number;
@@ -600,9 +737,60 @@ export interface components {
             activeStartMinute?: number;
             /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
             activeWeekdays?: number;
+            /** @description true 表示将活动临时提醒原子标记为 cancelled；固定提醒不接受该字段。 */
+            cancel?: boolean;
+            duration?: components["schemas"]["WatchTemporaryDuration"];
             enabled?: boolean;
             timezone?: string;
         };
+        /** @enum {string} */
+        WatchTemporaryDuration: "1h" | "2h" | "4h" | "until_power_off";
+        WxPusherBindSession: {
+            /** Format: date-time */
+            completedAt?: string;
+            errorCode?: components["schemas"]["WxPusherErrorCode"];
+            /** Format: date-time */
+            expiresAt: string;
+            id: string;
+            message: string;
+            /**
+             * Format: date-time
+             * @description 前端不得在此时间前再次查询绑定进度。
+             */
+            nextPollAt: string;
+            /**
+             * Format: uri
+             * @description 仅 waiting_scan 状态返回的官方 HTTPS 二维码地址。
+             */
+            qrUrl?: string;
+            status: components["schemas"]["WxPusherBindSessionStatus"];
+        };
+        /** @enum {string} */
+        WxPusherBindSessionStatus: "waiting_scan" | "bound" | "expired" | "failed";
+        WxPusherChannelState: {
+            bound: boolean;
+            /** Format: date-time */
+            boundAt?: string;
+            /** @description 服务端是否配置 AppToken；AppToken 本身永不返回。 */
+            configured: boolean;
+            /** @description 明确“WxPusher 已处理”不代表特定微信客户端已展示或已读。 */
+            deliveryDisclaimer: string;
+            enabled: boolean;
+            eventTypes: components["schemas"]["WxPusherEventType"][];
+            lastDelivery?: components["schemas"]["NotificationDeliverySummary"];
+            /** Format: date-time */
+            lastTestAt?: string;
+            /** @description 仅用于帮助用户识别绑定，不返回完整 UID。 */
+            maskedUid?: string;
+        };
+        WxPusherChannelUpdateRequest: {
+            enabled?: boolean;
+            eventTypes?: components["schemas"]["WxPusherEventType"][];
+        };
+        /** @enum {string} */
+        WxPusherErrorCode: "rate_limited" | "invalid_token" | "invalid_uid" | "recipient_rejected" | "provider_unavailable" | "timeout" | "invalid_response" | "ambiguous_result" | "storage_unavailable";
+        /** @enum {string} */
+        WxPusherEventType: "pile_available" | "credential_expired" | "pile_offline" | "pile_recovered";
     };
     responses: {
         /** @description 当前账户不是管理员 */
@@ -883,6 +1071,85 @@ export interface components {
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
+        /** @description 当前用户已有活动会话，或该 UID 已绑定其他 Charge Console 账户 */
+        WxPusherBindingConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 绑定会话不存在、已清理或不属于当前用户 */
+        WxPusherBindSessionNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WXPUSHER_BIND_SESSION_NOT_FOUND",
+                 *       "error": "未找到绑定会话"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description WxPusher 通道开关或事件类型设置无效 */
+        WxPusherInvalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WXPUSHER_PREFERENCE_INVALID",
+                 *       "error": "WxPusher 提醒设置无效"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 当前用户尚未绑定 WxPusher */
+        WxPusherNotBound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WXPUSHER_NOT_BOUND",
+                 *       "error": "请先绑定 WxPusher"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description 创建二维码或发送测试消息过于频繁 */
+        WxPusherRateLimited: {
+            headers: {
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "WXPUSHER_RATE_LIMITED",
+                 *       "error": "操作过于频繁，请稍后再试"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
+        /** @description WxPusher 未配置、存储不可用或供应商暂时异常；站内通知不受影响 */
+        WxPusherUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
     };
     parameters: {
         /** @description 趋势统计范围；省略时使用 24h */
@@ -899,6 +1166,8 @@ export interface components {
         Timezone: string;
         /** @description 当前用户空闲提醒规则 ID */
         WatchRuleId: string;
+        /** @description 当前用户的随机绑定会话 ID */
+        WxPusherBindSessionId: string;
     };
     requestBodies: never;
     headers: {
@@ -926,6 +1195,8 @@ export type HistoryRange = components['schemas']['HistoryRange'];
 export type HistorySampleState = components['schemas']['HistorySampleState'];
 export type HistoryWindow = components['schemas']['HistoryWindow'];
 export type Notification = components['schemas']['Notification'];
+export type NotificationDeliveryStatus = components['schemas']['NotificationDeliveryStatus'];
+export type NotificationDeliverySummary = components['schemas']['NotificationDeliverySummary'];
 export type NotificationPage = components['schemas']['NotificationPage'];
 export type NotificationPreference = components['schemas']['NotificationPreference'];
 export type NotificationPreferenceUpdateRequest = components['schemas']['NotificationPreferenceUpdateRequest'];
@@ -941,10 +1212,20 @@ export type PortStatus = components['schemas']['PortStatus'];
 export type RegistrationSettings = components['schemas']['RegistrationSettings'];
 export type ReminderOperationsStatus = components['schemas']['ReminderOperationsStatus'];
 export type UpdatedCount = components['schemas']['UpdatedCount'];
+export type WatchCompletionReason = components['schemas']['WatchCompletionReason'];
 export type WatchOverview = components['schemas']['WatchOverview'];
 export type WatchRule = components['schemas']['WatchRule'];
 export type WatchRuleCreateRequest = components['schemas']['WatchRuleCreateRequest'];
+export type WatchRuleCreateResult = components['schemas']['WatchRuleCreateResult'];
+export type WatchRuleMode = components['schemas']['WatchRuleMode'];
 export type WatchRuleUpdateRequest = components['schemas']['WatchRuleUpdateRequest'];
+export type WatchTemporaryDuration = components['schemas']['WatchTemporaryDuration'];
+export type WxPusherBindSession = components['schemas']['WxPusherBindSession'];
+export type WxPusherBindSessionStatus = components['schemas']['WxPusherBindSessionStatus'];
+export type WxPusherChannelState = components['schemas']['WxPusherChannelState'];
+export type WxPusherChannelUpdateRequest = components['schemas']['WxPusherChannelUpdateRequest'];
+export type WxPusherErrorCode = components['schemas']['WxPusherErrorCode'];
+export type WxPusherEventType = components['schemas']['WxPusherEventType'];
 export type ResponseAdminRequired = components['responses']['AdminRequired'];
 export type ResponseAdminTrendsUnavailable = components['responses']['AdminTrendsUnavailable'];
 export type ResponseHistoryNotFound = components['responses']['HistoryNotFound'];
@@ -965,6 +1246,12 @@ export type ResponseWatchInvalid = components['responses']['WatchInvalid'];
 export type ResponseWatchRuleNotFound = components['responses']['WatchRuleNotFound'];
 export type ResponseWatchTargetNotFound = components['responses']['WatchTargetNotFound'];
 export type ResponseWatchUnavailable = components['responses']['WatchUnavailable'];
+export type ResponseWxPusherBindingConflict = components['responses']['WxPusherBindingConflict'];
+export type ResponseWxPusherBindSessionNotFound = components['responses']['WxPusherBindSessionNotFound'];
+export type ResponseWxPusherInvalid = components['responses']['WxPusherInvalid'];
+export type ResponseWxPusherNotBound = components['responses']['WxPusherNotBound'];
+export type ResponseWxPusherRateLimited = components['responses']['WxPusherRateLimited'];
+export type ResponseWxPusherUnavailable = components['responses']['WxPusherUnavailable'];
 export type ParameterAdminTrendRange = components['parameters']['AdminTrendRange'];
 export type ParameterDeviceId = components['parameters']['DeviceId'];
 export type ParameterHistoryRange = components['parameters']['HistoryRange'];
@@ -972,6 +1259,7 @@ export type ParameterNotificationId = components['parameters']['NotificationId']
 export type ParameterPortId = components['parameters']['PortId'];
 export type ParameterTimezone = components['parameters']['Timezone'];
 export type ParameterWatchRuleId = components['parameters']['WatchRuleId'];
+export type ParameterWxPusherBindSessionId = components['parameters']['WxPusherBindSessionId'];
 export type HeaderCsvContentDisposition = components['headers']['CSVContentDisposition'];
 export type HeaderPrivateNoStore = components['headers']['PrivateNoStore'];
 export type $defs = Record<string, never>;
@@ -1128,6 +1416,165 @@ export interface operations {
             403: components["responses"]["AdminRequired"];
             405: components["responses"]["MethodNotAllowed"];
             503: components["responses"]["AdminTrendsUnavailable"];
+        };
+    };
+    getWxPusherChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 配置可用性、绑定状态、事件偏好和最近投递结果；不返回完整 UID 或 AppToken */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WxPusherChannelState"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["WxPusherUnavailable"];
+        };
+    };
+    deleteWxPusherChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已解除绑定；重复调用同样成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["WxPusherUnavailable"];
+        };
+    };
+    updateWxPusherChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WxPusherChannelUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的通道状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WxPusherChannelState"];
+                };
+            };
+            400: components["responses"]["WxPusherInvalid"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["WxPusherNotBound"];
+            503: components["responses"]["WxPusherUnavailable"];
+        };
+    };
+    createWxPusherBindSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 等待扫码的绑定会话；Provider code 不对前端公开 */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WxPusherBindSession"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["WxPusherBindingConflict"];
+            429: components["responses"]["WxPusherRateLimited"];
+            503: components["responses"]["WxPusherUnavailable"];
+        };
+    };
+    getWxPusherBindSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户的随机绑定会话 ID */
+                sessionId: components["parameters"]["WxPusherBindSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 等待扫码、已绑定、已过期或失败状态 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WxPusherBindSession"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            404: components["responses"]["WxPusherBindSessionNotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            503: components["responses"]["WxPusherUnavailable"];
+        };
+    };
+    testWxPusherChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 测试投递已进入持久队列 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationDeliverySummary"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["WxPusherNotBound"];
+            429: components["responses"]["WxPusherRateLimited"];
+            503: components["responses"]["WxPusherUnavailable"];
         };
     };
     getNotificationPreference: {
@@ -1429,14 +1876,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已创建的空闲提醒规则 */
+            /** @description 首次整桩检查结果；无空闲口时包含已创建的临时或固定提醒规则 */
             201: {
                 headers: {
                     "Cache-Control": components["headers"]["PrivateNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WatchRule"];
+                    "application/json": components["schemas"]["WatchRuleCreateResult"];
                 };
             };
             400: components["responses"]["WatchInvalid"];

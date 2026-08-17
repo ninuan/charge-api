@@ -28,6 +28,7 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 	legacyReminderSettings := settings.WatchRefreshIntervalMinutes == 0
 	if legacyReminderSettings {
 		settings.BackgroundRemindersEnabled = true
+		settings.RecurringRemindersEnabled = true
 		settings.ScheduledPowerOffEnabled = true
 		settings.ScheduledPowerOffStartMinute = defaultPowerOffStartMinute
 		settings.ScheduledPowerOffEndMinute = defaultPowerOffEndMinute

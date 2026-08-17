@@ -10,8 +10,9 @@ func TestSettingsAuditMessageNamesChangedPolicyGroups(t *testing.T) {
 	previous := model.RegistrationSettings{
 		OpenRegistration: true, DefaultDeviceLimit: 10,
 		StatsRetentionDays: 90, PortHistoryRetentionDays: 90, NotificationRetentionDays: 90,
-		BackgroundRemindersEnabled: true, WatchRefreshIntervalMinutes: 10,
-		WatchPileLimitPerUser: 5, WatchDailyRefreshQuota: 480,
+		BackgroundRemindersEnabled: true, RecurringRemindersEnabled: true,
+		WatchRefreshIntervalMinutes: 10,
+		WatchPileLimitPerUser:       5, WatchDailyRefreshQuota: 480,
 		ScheduledPowerOffEnabled: true, ScheduledPowerOffStartMinute: 23 * 60,
 		ScheduledPowerOffEndMinute: 7 * 60, ScheduledPowerOffTimezone: "Asia/Shanghai",
 		PowerRestoreJitterMinutes: 10,

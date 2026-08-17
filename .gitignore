@@ -47,6 +47,7 @@ docs/*
 docs/openapi/*
 !docs/openapi/charge-console-v1.5.0.yaml
 !docs/openapi/charge-console-v1.5.1.yaml
+!docs/openapi/charge-console-v1.5.2.yaml
 .superpowers/
 .worktrees/
 ROADMAP.md
