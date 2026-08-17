@@ -567,8 +567,8 @@ CHARGE_SIGNED_FLOW_URL=http://127.0.0.1:8080/api/session/yyb-binding CHARGE_SESS
 - 密码使用 Argon2id 哈希保存。
 - 生产环境的登录和注册必须通过 hCaptcha 服务端验证。
 - 同一 IP 5 分钟最多提交 20 次登录或注册请求。
-- 同一账号或 IP 连续失败 5 次后锁定 15 分钟。
-- 验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
+- 同一账号或 IP 连续失败 2 次后要求输入图片验证码，连续失败 5 次后锁定 15 分钟。
+- 图片验证码由服务端生成 PNG、2 分钟内一次有效；验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
 - Session 默认有效期为 7 天，每个用户最多保留 5 个登录会话。
 - Session 持久化到 SQLite，服务重启后登录状态仍然有效。
 - 修改密码、角色、禁用或删除用户时，该用户的全部 Session 会立即失效。
@@ -591,31 +591,20 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
-生产环境需在 hCaptcha 后台创建 Sitekey，并将线上域名加入该 Sitekey 的允许列表。服务器环境文件示例：
+服务器环境文件示例：
 
 ```text
 CHARGE_ADMIN_PASSWORD=your-admin-password
 CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
 YYB_SECRET_KEY=base64-encoded-32-byte-key
 YYB_API_SECRET=base64-encoded-hmac-secret
-HCAPTCHA_REQUIRED=true
-HCAPTCHA_SITE_KEY=your-site-key
-HCAPTCHA_SECRET_KEY=your-secret-key
 # 仅当前后端跨域部署时填写
 CORS_ALLOWED_ORIGINS=https://console.example.com
 ```
 
-`HCAPTCHA_REQUIRED=true` 会让服务在 Sitekey 或 Secret 缺失时拒绝启动，避免生产环境静默关闭人机验证。升级时应先写入上述新变量，再重启新版服务。如果仍检测到 `TURNSTILE_REQUIRED=true` 且 hCaptcha 尚未配置，新版也会拒绝启动并给出迁移提示。旧 `TURNSTILE_*` 变量不再用于人机验证，可暂时保留用于回滚，稳定后删除。
+登录和注册均使用内置图片验证码，不依赖境外验证服务，也不需要额外环境变量。登录页面只在连续失败后显示验证码；注册页面始终显示验证码。
 
-如果 Cloudflare 代理层另外开启了 Under Attack Mode 或 Managed Challenge，它与表单 hCaptcha 是两层独立防护；需在 Cloudflare 控制台单独关闭或调整，否则用户仍可能看到 Cloudflare 挑战页。
-
-本地默认关闭 hCaptcha。如需联调，请使用 hCaptcha 官方测试密钥，并按 hCaptcha 文档为本机配置一个非 `localhost` 的测试域名：
-
-```text
-HCAPTCHA_REQUIRED=true
-HCAPTCHA_SITE_KEY=10000000-ffff-ffff-ffff-000000000001
-HCAPTCHA_SECRET_KEY=0x0000000000000000000000000000000000000000
-```
+如果 Cloudflare 代理层另外开启了 Under Attack Mode 或 Managed Challenge，它属于独立防护；需在 Cloudflare 控制台单独关闭或调整，否则用户仍可能看到 Cloudflare 挑战页。
 
 ## 说明
 

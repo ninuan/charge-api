@@ -49,37 +49,6 @@ func TestYYBClientConfigFromEnv(t *testing.T) {
 	}
 }
 
-func TestHCaptchaVerifierConfigFromEnv(t *testing.T) {
-	lookup := func(values map[string]string) envLookup {
-		return func(name string) string { return values[name] }
-	}
-
-	verifier, err := hcaptchaVerifierFromEnv(lookup(nil))
-	if err != nil || verifier == nil || verifier.Enabled() {
-		t.Fatalf("empty env verifier=%v enabled=%v err=%v", verifier, verifier != nil && verifier.Enabled(), err)
-	}
-
-	for _, values := range []map[string]string{
-		{"HCAPTCHA_SITE_KEY": "site"},
-		{"HCAPTCHA_SECRET_KEY": "secret"},
-		{"HCAPTCHA_REQUIRED": "true"},
-		{"TURNSTILE_REQUIRED": "true"},
-	} {
-		if _, err := hcaptchaVerifierFromEnv(lookup(values)); err == nil {
-			t.Fatalf("config %#v unexpectedly succeeded", values)
-		}
-	}
-
-	verifier, err = hcaptchaVerifierFromEnv(lookup(map[string]string{
-		"HCAPTCHA_REQUIRED":   "true",
-		"HCAPTCHA_SITE_KEY":   " site ",
-		"HCAPTCHA_SECRET_KEY": " secret ",
-	}))
-	if err != nil || !verifier.Enabled() || verifier.SiteKey() != "site" {
-		t.Fatalf("enabled verifier=%v err=%v", verifier, err)
-	}
-}
-
 func TestDevForceAuthExpiredRequiresLocalDevMode(t *testing.T) {
 	lookup := func(values map[string]string) envLookup {
 		return func(name string) string { return values[name] }

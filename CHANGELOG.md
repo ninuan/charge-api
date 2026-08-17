@@ -6,8 +6,8 @@
 
 ### 安全维护
 
-- 登录和注册的外部人机验证由 Cloudflare Turnstile 替换为 hCaptcha，现有账户、会话和 SQLite 数据不受影响。
-- 升级前需在服务器配置 `HCAPTCHA_REQUIRED`、`HCAPTCHA_SITE_KEY` 和 `HCAPTCHA_SECRET_KEY`；旧 `TURNSTILE_*` 配置不再生效。
+- 登录连续失败后启用内置图片验证码，注册继续使用图片验证码，不再依赖境外人机验证服务。
+- 图片验证码改为一次性 PNG，并与登录限流及失败锁定协同工作；现有账户、会话和 SQLite 数据不受影响。
 
 ### 新增
 

@@ -1,10 +1,10 @@
 const publicErrorMessages: Record<string, string> = {
   AUTH_INPUT_INVALID: "用户名或密码格式无效",
   AUTH_INVALID_CREDENTIALS: "用户名或密码错误",
+  LOGIN_CAPTCHA_REQUIRED: "用户名或密码错误，请完成图片验证码后重试。",
+  LOGIN_CAPTCHA_INVALID: "图片验证码错误或已过期，请重新获取。",
   REGISTER_INPUT_INVALID: "用户名需要 3-64 个字符，密码需要 8-128 个字符",
   REGISTER_CAPTCHA_INVALID: "图片验证码错误或已过期，请重新获取。",
-  HCAPTCHA_INVALID: "人机验证失败，请重试。",
-  HCAPTCHA_UNAVAILABLE: "人机验证服务暂时不可用，请联系管理员或稍后重试。",
   RATE_LIMITED: "请求过于频繁，请稍后再试",
   YYB_BINDING_REQUIRED: "请先完成扫码登录绑定，再添加充电桩",
   PILE_IDENTIFIER_REQUIRED: "请输入桩号或设备长ID",
@@ -47,10 +47,23 @@ export async function responseErrorMessage(
   return fallback
 }
 
+async function responseError(response: Response, fallback: string) {
+  const body = (await response.json().catch(() => null)) as {
+    code?: string
+  } | null
+  return {
+    code: body?.code,
+    message:
+      (body?.code && publicErrorMessages[body.code]) ||
+      (response.status === 401 ? "登录已失效，请重新登录" : fallback),
+  }
+}
+
 export class RequestError extends Error {
   constructor(
     message: string,
-    readonly status: number
+    readonly status: number,
+    readonly code?: string
   ) {
     super(message)
     this.name = "RequestError"
@@ -95,10 +108,8 @@ export async function request<T>(
   }
 
   if (!response.ok && response.status !== 204) {
-    throw new RequestError(
-      await responseErrorMessage(response, fallback),
-      response.status
-    )
+    const error = await responseError(response, fallback)
+    throw new RequestError(error.message, response.status, error.code)
   }
 
   if (response.status === 204) return undefined as T

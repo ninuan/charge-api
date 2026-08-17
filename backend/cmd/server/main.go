@@ -45,24 +45,6 @@ func moceleClientFromEnv(lookup envLookup) *mocele.Client {
 	})
 }
 
-func hcaptchaVerifierFromEnv(lookup envLookup) (*auth.HCaptchaVerifier, error) {
-	siteKey := strings.TrimSpace(lookup("HCAPTCHA_SITE_KEY"))
-	secretKey := strings.TrimSpace(lookup("HCAPTCHA_SECRET_KEY"))
-	if (siteKey == "") != (secretKey == "") {
-		return nil, fmt.Errorf("HCAPTCHA_SITE_KEY and HCAPTCHA_SECRET_KEY must be configured together")
-	}
-	verifier := auth.NewHCaptchaVerifier(siteKey, secretKey)
-	required := strings.EqualFold(strings.TrimSpace(lookup("HCAPTCHA_REQUIRED")), "true")
-	legacyRequired := strings.EqualFold(strings.TrimSpace(lookup("TURNSTILE_REQUIRED")), "true")
-	if required && !verifier.Enabled() {
-		return nil, fmt.Errorf("hCaptcha is required but HCAPTCHA_SITE_KEY or HCAPTCHA_SECRET_KEY is missing")
-	}
-	if legacyRequired && !verifier.Enabled() {
-		return nil, fmt.Errorf("legacy Turnstile configuration detected; configure HCAPTCHA_REQUIRED, HCAPTCHA_SITE_KEY, and HCAPTCHA_SECRET_KEY before upgrading")
-	}
-	return verifier, nil
-}
-
 func devForceAuthExpiredEnabled(lookup envLookup) bool {
 	return lookup("CHARGE_LOCAL_DEV") == "1" && strings.EqualFold(strings.TrimSpace(lookup("CHARGE_DEV_FORCE_AUTH_EXPIRED")), "true")
 }
@@ -111,14 +93,6 @@ func main() {
 	if password == "" {
 		password = os.Getenv("CHARGE_ADMIN_PASSWORD")
 	}
-	hcaptcha, err := hcaptchaVerifierFromEnv(os.Getenv)
-	if err != nil {
-		log.Fatalf("configure hCaptcha: %v", err)
-	}
-	if !hcaptcha.Enabled() {
-		log.Printf("warning: hCaptcha is disabled; configure HCAPTCHA_SITE_KEY and HCAPTCHA_SECRET_KEY in production")
-	}
-
 	yybClient, err := yybClientFromEnv(os.Getenv)
 	if err != nil {
 		log.Fatalf("configure yyb client: %v", err)
@@ -161,7 +135,7 @@ func main() {
 
 	sessions := auth.NewPersistentSessionManager(7*24*time.Hour, repository)
 	defer sessions.Close()
-	server := api.NewServer(manager, sessions, hcaptcha, auth.NewAuthGuard())
+	server := api.NewServer(manager, sessions, auth.NewAuthGuard())
 	if yybClient != nil {
 		server.SetYYBIntegration(yybClient, moceleClientFromEnv(os.Getenv))
 	}

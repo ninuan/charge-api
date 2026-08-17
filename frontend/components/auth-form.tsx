@@ -7,12 +7,8 @@ import {
   RefreshCwIcon,
   ShieldCheckIcon,
 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
-import {
-  HCaptchaWidget,
-  type HCaptchaWidgetHandle,
-} from "@/components/hcaptcha-widget"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,15 +19,14 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
-import { requestJSON } from "@/lib/http"
+import { RequestError, requestJSON } from "@/lib/http"
 import { resolveHomeRoute } from "@/lib/routing"
 
 type AuthMode = "login" | "register"
 
 type AuthConfig = {
-  hcaptchaEnabled?: boolean
-  hcaptchaSiteKey?: string
   authConfigVersion?: number
+  loginCaptchaEnabled?: boolean
   registerCaptchaEnabled?: boolean
   registrationOpen?: boolean
   inviteRequired?: boolean
@@ -54,22 +49,26 @@ export function AuthForm({
   const [configError, setConfigError] = useState("")
   const [configLoading, setConfigLoading] = useState(false)
   const [error, setError] = useState("")
-  const [captchaToken, setCaptchaToken] = useState("")
+  const [loginCaptchaRequired, setLoginCaptchaRequired] = useState(false)
   const [captchaId, setCaptchaId] = useState("")
   const [captchaImage, setCaptchaImage] = useState("")
   const [captchaAnswer, setCaptchaAnswer] = useState("")
   const [captchaLoading, setCaptchaLoading] = useState(false)
-  const hcaptchaRef = useRef<HCaptchaWidgetHandle>(null)
 
   const registrationAvailable =
     (config?.registrationOpen ?? true) || (config?.inviteRequired ?? false)
+  const captchaVisible =
+    (mode === "register" && config?.registerCaptchaEnabled) ||
+    (mode === "login" &&
+      loginCaptchaRequired &&
+      (config?.loginCaptchaEnabled ?? true))
 
   const loadCaptcha = useCallback(async () => {
     setCaptchaLoading(true)
     setCaptchaAnswer("")
     try {
       const challenge = await requestJSON<{ id: string; image: string }>(
-        "/api/auth/register-captcha",
+        "/api/auth/captcha",
         { cache: "no-store" },
         "验证码加载失败，请稍后重试。"
       )
@@ -82,11 +81,6 @@ export function AuthForm({
     } finally {
       setCaptchaLoading(false)
     }
-  }, [])
-
-  const resetHCaptcha = useCallback(() => {
-    setCaptchaToken("")
-    hcaptchaRef.current?.reset()
   }, [])
 
   // 配置加载失败时提交按钮会一直禁用，必须给用户一个重试入口，
@@ -137,24 +131,22 @@ export function AuthForm({
       (config.authConfigVersion ?? 0) < 2
     )
       return setError("后端服务仍是旧版本，请重启后端服务后再使用邀请码注册")
-    if (config?.hcaptchaEnabled && !captchaToken)
-      return setError("请先完成人机验证")
-    if (
-      mode === "register" &&
-      config?.registerCaptchaEnabled &&
-      !captchaAnswer.trim()
-    )
+    if (captchaVisible && !captchaAnswer.trim())
       return setError("请输入图片验证码")
 
     setSubmitting(true)
     try {
       const user =
         mode === "login"
-          ? await login(normalizedUsername, password, captchaToken)
+          ? await login(
+              normalizedUsername,
+              password,
+              captchaId,
+              captchaAnswer.trim()
+            )
           : await register(
               normalizedUsername,
               password,
-              captchaToken,
               captchaId,
               captchaAnswer.trim(),
               inviteCode.trim()
@@ -163,6 +155,15 @@ export function AuthForm({
       onSuccess(resolveHomeRoute(user.role))
     } catch (reason) {
       const message = (reason as Error).message
+      const loginNeedsCaptcha =
+        mode === "login" &&
+        reason instanceof RequestError &&
+        (reason.code === "LOGIN_CAPTCHA_REQUIRED" ||
+          reason.code === "LOGIN_CAPTCHA_INVALID")
+      if (loginNeedsCaptcha) {
+        setLoginCaptchaRequired(true)
+        await loadCaptcha()
+      }
       setError(
         mode === "register" &&
           inviteCode.trim() &&
@@ -173,7 +174,6 @@ export function AuthForm({
       if (mode === "register") await loadCaptcha()
     } finally {
       setSubmitting(false)
-      resetHCaptcha()
     }
   }
 
@@ -265,13 +265,15 @@ export function AuthForm({
             <FieldDescription>至少 8 个字符。</FieldDescription>
           )}
         </Field>
-        {mode === "register" && config?.registerCaptchaEnabled && (
+        {captchaVisible && (
           <Field>
-            <FieldLabel htmlFor="register-captcha">图片验证码</FieldLabel>
+            <FieldLabel htmlFor="auth-captcha">图片验证码</FieldLabel>
             <div className="grid grid-cols-[minmax(0,1fr)_9.25rem] gap-3">
               <Input
-                id="register-captcha"
+                id="auth-captcha"
                 autoComplete="off"
+                inputMode="numeric"
+                maxLength={5}
                 value={captchaAnswer}
                 onChange={(event) => setCaptchaAnswer(event.target.value)}
                 placeholder="输入验证码"
@@ -279,7 +281,8 @@ export function AuthForm({
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 overflow-hidden p-0"
+                className="h-11 overflow-hidden p-0"
+                aria-label="刷新图片验证码"
                 disabled={captchaLoading}
                 onClick={() => void loadCaptcha()}
               >
@@ -289,8 +292,8 @@ export function AuthForm({
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={captchaImage}
-                    alt="注册验证码，点击可刷新"
-                    className="h-full w-full object-cover"
+                    alt="图片验证码，点击可刷新"
+                    className="h-full w-full object-contain"
                   />
                 ) : (
                   <RefreshCwIcon
@@ -299,16 +302,8 @@ export function AuthForm({
                 )}
               </Button>
             </div>
+            <FieldDescription>看不清时，点击图片换一张。</FieldDescription>
           </Field>
-        )}
-        {config?.hcaptchaEnabled && config.hcaptchaSiteKey && (
-          <HCaptchaWidget
-            ref={hcaptchaRef}
-            siteKey={config.hcaptchaSiteKey}
-            onVerified={setCaptchaToken}
-            onExpired={() => setCaptchaToken("")}
-            onError={() => setCaptchaToken("")}
-          />
         )}
         {error && (
           <p className="text-sm text-destructive" role="alert">
@@ -323,8 +318,7 @@ export function AuthForm({
             !config ||
             submitting ||
             captchaLoading ||
-            (mode === "register" && !registrationAvailable) ||
-            (config?.hcaptchaEnabled && !captchaToken)
+            (mode === "register" && !registrationAvailable)
           }
         >
           {submitting && (

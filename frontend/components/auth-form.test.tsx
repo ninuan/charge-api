@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -8,7 +8,6 @@ import { AuthForm } from "@/components/auth-form"
 describe("AuthForm", () => {
   afterEach(() => {
     cleanup()
-    delete window.hcaptcha
     vi.unstubAllGlobals()
   })
 
@@ -18,7 +17,7 @@ describe("AuthForm", () => {
       .fn()
       .mockResolvedValueOnce(new Response("upstream boom", { status: 502 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ hcaptchaEnabled: false }), {
+        new Response(JSON.stringify({ loginCaptchaEnabled: true }), {
           status: 200,
         })
       )
@@ -47,7 +46,7 @@ describe("AuthForm", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ hcaptchaEnabled: false }), {
+        new Response(JSON.stringify({ loginCaptchaEnabled: true }), {
           status: 200,
         })
       )
@@ -90,21 +89,39 @@ describe("AuthForm", () => {
         body: JSON.stringify({
           username: "alice",
           password: "secret",
-          captchaToken: "",
+          captchaId: "",
+          captchaAnswer: "",
         }),
       })
     )
   })
 
-  it("requires hCaptcha and submits the verified token", async () => {
+  it("shows the built-in captcha after the server requests adaptive verification", async () => {
     const onSuccess = vi.fn()
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            hcaptchaEnabled: true,
-            hcaptchaSiteKey: "public-site-key",
+            loginCaptchaEnabled: true,
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: "LOGIN_CAPTCHA_REQUIRED",
+            error: "用户名或密码错误，请完成图片验证码后重试。",
+          }),
+          { status: 401 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "captcha-2",
+            image: "data:image/png;base64,test",
           }),
           { status: 200 }
         )
@@ -121,16 +138,6 @@ describe("AuthForm", () => {
         )
       )
     vi.stubGlobal("fetch", fetchMock)
-    let providerOptions: Record<string, unknown> = {}
-    const reset = vi.fn()
-    window.hcaptcha = {
-      render: vi.fn((_element, options) => {
-        providerOptions = options
-        return "auth-widget"
-      }),
-      reset,
-      remove: vi.fn(),
-    }
     const user = userEvent.setup()
 
     render(
@@ -141,27 +148,28 @@ describe("AuthForm", () => {
 
     await user.type(await screen.findByLabelText("用户名"), "alice")
     await user.type(screen.getByLabelText("密码"), "secret")
-    expect(screen.getByRole("button", { name: "登录" })).toBeDisabled()
-    await waitFor(() => expect(window.hcaptcha?.render).toHaveBeenCalled())
-    act(() => {
-      ;(providerOptions.callback as (token: string) => void)("hcaptcha-token")
-    })
+    await user.click(screen.getByRole("button", { name: "登录" }))
 
+    expect(await screen.findByLabelText("图片验证码")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "用户名或密码错误，请完成图片验证码后重试。"
+    )
+    await user.type(screen.getByLabelText("图片验证码"), "24682")
     await user.click(screen.getByRole("button", { name: "登录" }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("/dashboard"))
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      4,
       "/api/auth/login",
       expect.objectContaining({
         body: JSON.stringify({
           username: "alice",
           password: "secret",
-          captchaToken: "hcaptcha-token",
+          captchaId: "captcha-2",
+          captchaAnswer: "24682",
         }),
       })
     )
-    expect(reset).toHaveBeenCalledWith("auth-widget")
   })
 
   it("loads the existing registration image challenge and submits its answer unchanged", async () => {
@@ -171,7 +179,6 @@ describe("AuthForm", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            hcaptchaEnabled: false,
             registerCaptchaEnabled: true,
           }),
           { status: 200 }
@@ -179,7 +186,10 @@ describe("AuthForm", () => {
       )
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ id: "captcha-1", image: "data:image/svg+xml,test" }),
+          JSON.stringify({
+            id: "captcha-1",
+            image: "data:image/png;base64,test",
+          }),
           { status: 200 }
         )
       )
@@ -205,11 +215,17 @@ describe("AuthForm", () => {
 
     await user.type(await screen.findByLabelText("用户名"), "alice")
     await user.type(screen.getByLabelText("密码"), "password123")
+    expect(screen.getByRole("button", { name: "刷新图片验证码" })).toHaveClass(
+      "h-11"
+    )
+    expect(screen.getByAltText("图片验证码，点击可刷新")).toHaveClass(
+      "object-contain"
+    )
     await user.type(screen.getByLabelText("图片验证码"), "1234")
     await user.click(screen.getByRole("button", { name: "注册并进入" }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("/dashboard"))
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/register-captcha", {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/captcha", {
       credentials: "include",
       cache: "no-store",
       signal: expect.any(AbortSignal),
@@ -222,7 +238,6 @@ describe("AuthForm", () => {
         body: JSON.stringify({
           username: "alice",
           password: "password123",
-          captchaToken: "",
           captchaId: "captcha-1",
           captchaAnswer: "1234",
           inviteCode: "",
@@ -237,7 +252,6 @@ describe("AuthForm", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            hcaptchaEnabled: false,
             registerCaptchaEnabled: true,
           }),
           { status: 200 }
@@ -273,7 +287,6 @@ describe("AuthForm", () => {
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            hcaptchaEnabled: false,
             registrationOpen: true,
             inviteRequired: true,
           }),
