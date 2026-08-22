@@ -61,3 +61,8 @@ if [[ "$dry_run_output" != *"pnpm_fetch_timeout=120000"* ]] || [[ "$dry_run_outp
   echo "dry-run should use resilient pnpm fetch settings"
   exit 1
 fi
+
+if [[ "$dry_run_output" != *"health_ready=0"* ]] || [[ "$dry_run_output" != *"journalctl -u charge-api"* ]]; then
+  echo "dry-run should retry health checks and print service diagnostics on failure"
+  exit 1
+fi

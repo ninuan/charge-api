@@ -114,8 +114,8 @@ func TestCacheHeadersSeparateHashedAssetsFromHTMLAndAPI(t *testing.T) {
 	handler := WithCacheHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	cases := map[string]string{
 		"/_next/static/chunks/app.js": "public, max-age=31536000, immutable",
-		"/dashboard/index.html":       "no-cache",
-		"/":                           "no-cache",
+		"/dashboard/index.html":       "public, no-cache, no-transform",
+		"/":                           "public, no-cache, no-transform",
 		"/api/piles":                  "no-store",
 	}
 	for path, want := range cases {
@@ -149,7 +149,10 @@ func TestSecurityHeadersAreSetOnEveryResponse(t *testing.T) {
 		"frame-ancestors 'none'",
 		"object-src 'none'",
 		"base-uri 'none'",
-		"https://challenges.cloudflare.com",
+		"frame-src 'none'",
+		"connect-src 'self'",
+		"https://static.cloudflareinsights.com",
+		"https://cloudflareinsights.com",
 	} {
 		if !strings.Contains(policy, directive) {
 			t.Fatalf("CSP %q is missing %q", policy, directive)

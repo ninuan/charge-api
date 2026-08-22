@@ -28,14 +28,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.allowAuthIdentity(w, ip, req.Username) {
 		return
 	}
-	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "login"); err != nil {
-		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "TURNSTILE_INVALID", "verify login turnstile", "人机验证失败，请重试。", err)
-		return
+	if s.authGuard.RequiresCaptcha(ip, req.Username) {
+		if err := s.captcha.Verify(req.CaptchaID, req.CaptchaAnswer); err != nil {
+			s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "LOGIN_CAPTCHA_INVALID", "verify login captcha", "图片验证码错误或已过期，请重新获取。", err)
+			return
+		}
 	}
 
 	user, err := s.manager.Authenticate(req.Username, req.Password)
 	if err != nil {
-		s.writeAuthFailure(w, ip, req.Username, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "authenticate user", "用户名或密码错误", err)
+		s.writeLoginFailure(w, ip, req.Username, err)
 		return
 	}
 	s.authGuard.RecordSuccess(ip, req.Username)
@@ -71,11 +73,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.captcha.Verify(req.CaptchaID, req.CaptchaAnswer); err != nil {
-		s.writeAuthFailure(w, ip, req.Username, http.StatusBadRequest, "REGISTER_CAPTCHA_INVALID", "verify register captcha", "图片验证码错误或已过期，请重新获取。", err)
-		return
-	}
-	if err := s.turnstile.Verify(r.Context(), req.CaptchaToken, ip, "register"); err != nil {
-		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "TURNSTILE_INVALID", "verify register turnstile", "人机验证失败，请重试。", err)
+		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "REGISTER_CAPTCHA_INVALID", "verify register captcha", "图片验证码错误或已过期，请重新获取。", err)
 		return
 	}
 
@@ -216,16 +214,15 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authConfigVersion":      2,
-		"turnstileEnabled":       s.turnstile.Enabled(),
-		"turnstileSiteKey":       s.turnstile.SiteKey(),
+		"authConfigVersion":      4,
+		"loginCaptchaEnabled":    true,
 		"registerCaptchaEnabled": true,
 		"registrationOpen":       s.manager.Settings().OpenRegistration,
 		"inviteRequired":         s.manager.Settings().InviteRequired,
 	})
 }
 
-func (s *Server) handleRegisterCaptcha(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAuthCaptcha(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
 		return
@@ -236,7 +233,7 @@ func (s *Server) handleRegisterCaptcha(w http.ResponseWriter, r *http.Request) {
 
 	challenge, err := s.captcha.Generate()
 	if err != nil {
-		writePublicOperationError(w, http.StatusInternalServerError, "generate register captcha", "暂时无法生成验证码，请稍后重试。", err)
+		writePublicOperationError(w, http.StatusInternalServerError, "generate auth captcha", "暂时无法生成验证码，请稍后重试。", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

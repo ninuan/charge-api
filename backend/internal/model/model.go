@@ -228,7 +228,6 @@ type CurrentUser struct {
 type LoginRequest struct {
 	Username      string `json:"username"`
 	Password      string `json:"password"`
-	CaptchaToken  string `json:"captchaToken"`
 	CaptchaID     string `json:"captchaId,omitempty"`
 	CaptchaAnswer string `json:"captchaAnswer,omitempty"`
 	InviteCode    string `json:"inviteCode,omitempty"`

@@ -19,20 +19,27 @@ describe("AuthProvider", () => {
   })
 
   it("posts the unchanged login body and stores the returned user", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(user), { status: 200 })
-    )
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(user), { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider })
 
-    await act(() => result.current.login("alice", "secret", "captcha-token"))
+    await act(() =>
+      result.current.login("alice", "secret", "captcha-id", "24682")
+    )
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/auth/login",
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ username: "alice", password: "secret", captchaToken: "captcha-token" }),
+        body: JSON.stringify({
+          username: "alice",
+          password: "secret",
+          captchaId: "captcha-id",
+          captchaAnswer: "24682",
+        }),
       })
     )
     expect(result.current.currentUser).toEqual(user)

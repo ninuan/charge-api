@@ -38,15 +38,19 @@ var qrSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 type Server struct {
 	manager             *appruntime.Manager
 	sessions            *auth.SessionManager
-	turnstile           *auth.TurnstileVerifier
 	authGuard           *auth.AuthGuard
-	captcha             *auth.CaptchaStore
+	captcha             captchaService
 	yybClient           yybSessionClient
 	moceleClient        appruntime.MoceleCookieClient
 	devMu               sync.Mutex
 	devForceAuthExpired bool
 	healthMu            sync.RWMutex
 	healthDegradations  map[string]string
+}
+
+type captchaService interface {
+	Generate() (auth.CaptchaChallenge, error)
+	Verify(id string, answer string) error
 }
 
 type yybSessionClient interface {
@@ -82,13 +86,11 @@ func (s *Server) consumeDevForceAuthExpired() bool {
 func NewServer(
 	manager *appruntime.Manager,
 	sessions *auth.SessionManager,
-	turnstile *auth.TurnstileVerifier,
 	authGuard *auth.AuthGuard,
 ) *Server {
 	return &Server{
 		manager:            manager,
 		sessions:           sessions,
-		turnstile:          turnstile,
 		authGuard:          authGuard,
 		captcha:            auth.NewCaptchaStore(),
 		healthDegradations: make(map[string]string),
@@ -97,7 +99,9 @@ func NewServer(
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/config", s.handleAuthConfig)
-	mux.HandleFunc("/api/auth/register-captcha", s.handleRegisterCaptcha)
+	mux.HandleFunc("/api/auth/captcha", s.handleAuthCaptcha)
+	// 保留一个版本的旧地址，避免用户浏览器里的旧静态资源在部署切换时失效。
+	mux.HandleFunc("/api/auth/register-captcha", s.handleAuthCaptcha)
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/logout", s.handleLogout)
@@ -409,15 +413,33 @@ func (s *Server) allowAuthIdentity(w http.ResponseWriter, ip string, username st
 }
 
 func (s *Server) writeAuthFailure(w http.ResponseWriter, ip string, username string, status int, code, operation, message string, err error) {
+	if !s.recordAuthFailure(w, ip, username, operation, err) {
+		return
+	}
+	writeCodedError(w, status, code, message)
+}
+
+func (s *Server) writeLoginFailure(w http.ResponseWriter, ip string, username string, err error) {
+	if !s.recordAuthFailure(w, ip, username, "authenticate user", err) {
+		return
+	}
+	if s.authGuard.RequiresCaptcha(ip, username) {
+		writeCodedError(w, http.StatusUnauthorized, "LOGIN_CAPTCHA_REQUIRED", "用户名或密码错误，请完成图片验证码后重试。")
+		return
+	}
+	writeCodedError(w, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "用户名或密码错误")
+}
+
+func (s *Server) recordAuthFailure(w http.ResponseWriter, ip string, username string, operation string, err error) bool {
 	if locked, retryAfter := s.authGuard.RecordFailure(ip, username); locked {
 		if userID, ok := s.manager.UserIDByUsername(username); ok {
 			s.manager.RecordOperationDiagnostic(userID, "auth_protection", "auth_rate_limited", "", http.StatusTooManyRequests)
 		}
 		writeRateLimit(w, retryAfter, "失败次数过多，已临时锁定")
-		return
+		return false
 	}
 	log.Printf("%s: %v", operation, err)
-	writeCodedError(w, status, code, message)
+	return true
 }
 
 func writeRateLimit(w http.ResponseWriter, retryAfter time.Duration, message string) {

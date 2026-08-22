@@ -15,6 +15,7 @@ type AuthGuard struct {
 
 	failureWindow time.Duration
 	failureLimit  int
+	captchaAfter  int
 
 	requests    map[string]*guardEntry
 	failures    map[string]*guardEntry
@@ -34,10 +35,28 @@ func NewAuthGuard() *AuthGuard {
 		blockDuration: 15 * time.Minute,
 		failureWindow: 15 * time.Minute,
 		failureLimit:  5,
+		captchaAfter:  2,
 		requests:      make(map[string]*guardEntry),
 		failures:      make(map[string]*guardEntry),
 		lastCleanup:   time.Now(),
 	}
+}
+
+// RequiresCaptcha reports whether recent failures for either the source IP or
+// the submitted username have reached the adaptive challenge threshold.
+func (g *AuthGuard) RequiresCaptcha(ip string, username string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	now := time.Now()
+	g.cleanupLocked(now)
+	for _, key := range failureKeys(ip, username) {
+		entry := g.failures[key]
+		if entry != nil && now.Sub(entry.WindowStart) < g.failureWindow && entry.Count >= g.captchaAfter {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *AuthGuard) AllowRequest(ip string) (bool, time.Duration) {

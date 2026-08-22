@@ -76,7 +76,7 @@ func newHistoryAPIFixture(t *testing.T) historyAPIFixture {
 	}
 	sessions := auth.NewSessionManager(time.Hour)
 	t.Cleanup(sessions.Close)
-	server := NewServer(manager, sessions, auth.NewTurnstileVerifier("", "", ""), auth.NewAuthGuard())
+	server := NewServer(manager, sessions, auth.NewAuthGuard())
 	mux := http.NewServeMux()
 	server.Register(mux)
 	return historyAPIFixture{

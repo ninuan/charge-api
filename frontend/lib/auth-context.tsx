@@ -22,12 +22,12 @@ type AuthContextValue = {
   login: (
     username: string,
     password: string,
-    captchaToken: string
+    captchaId: string,
+    captchaAnswer: string
   ) => Promise<CurrentUser>
   register: (
     username: string,
     password: string,
-    captchaToken: string,
     captchaId: string,
     captchaAnswer: string,
     inviteCode: string
@@ -77,13 +77,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession])
 
   const login = useCallback(
-    async (username: string, password: string, captchaToken: string) => {
+    async (
+      username: string,
+      password: string,
+      captchaId: string,
+      captchaAnswer: string
+    ) => {
       const user = await requestJSON<CurrentUser>(
         "/api/auth/login",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, captchaToken }),
+          body: JSON.stringify({
+            username,
+            password,
+            captchaId,
+            captchaAnswer,
+          }),
         },
         "登录失败，请检查用户名、密码和验证后重试。"
       )
@@ -98,7 +108,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (
       username: string,
       password: string,
-      captchaToken: string,
       captchaId: string,
       captchaAnswer: string,
       inviteCode: string
@@ -111,7 +120,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({
             username,
             password,
-            captchaToken,
             captchaId,
             captchaAnswer,
             inviteCode,

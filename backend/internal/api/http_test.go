@@ -3,13 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -690,7 +688,7 @@ func TestDecodeJSONRejectsOversizedAndUnknownFields(t *testing.T) {
 func TestRegisterRequiresCaptcha(t *testing.T) {
 	server, _, _ := newTestServer(t)
 
-	body := strings.NewReader(`{"username":"alice","password":"password123","captchaToken":""}`)
+	body := strings.NewReader(`{"username":"alice","password":"password123"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -704,6 +702,26 @@ func TestRegisterRequiresCaptcha(t *testing.T) {
 	}
 }
 
+func TestAuthConfigExposesBuiltInCaptcha(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	server.handleAuthConfig(recorder, httptest.NewRequest(http.MethodGet, "/api/auth/config", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("auth config returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var config map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&config); err != nil {
+		t.Fatalf("decode auth config: %v", err)
+	}
+	if config["loginCaptchaEnabled"] != true || config["registerCaptchaEnabled"] != true {
+		t.Fatalf("unexpected captcha config: %#v", config)
+	}
+	if _, exists := config["hcaptchaEnabled"]; exists {
+		t.Fatalf("removed hCaptcha field is still exposed: %#v", config)
+	}
+}
+
 func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 	server, manager, _ := newTestServer(t)
 	invite, err := manager.CreateInvite("TEST-INVITE", nil)
@@ -712,8 +730,9 @@ func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 	}
 
 	captchaRecorder := httptest.NewRecorder()
-	captchaRequest := httptest.NewRequest(http.MethodGet, "/api/auth/register-captcha", nil)
-	server.handleRegisterCaptcha(captchaRecorder, captchaRequest)
+	server.captcha = &fixedCaptcha{answer: "24682"}
+	captchaRequest := httptest.NewRequest(http.MethodGet, "/api/auth/captcha", nil)
+	server.handleAuthCaptcha(captchaRecorder, captchaRequest)
 	if captchaRecorder.Code != http.StatusOK {
 		t.Fatalf("captcha returned %d: %s", captchaRecorder.Code, captchaRecorder.Body.String())
 	}
@@ -724,14 +743,11 @@ func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 	if err := json.NewDecoder(captchaRecorder.Body).Decode(&challenge); err != nil {
 		t.Fatalf("decode captcha: %v", err)
 	}
-	answer := captchaAnswerFromImage(t, challenge.Image)
-
 	payload := map[string]string{
 		"username":      "alice",
 		"password":      "password123",
-		"captchaToken":  "",
 		"captchaId":     challenge.ID,
-		"captchaAnswer": answer,
+		"captchaAnswer": "24682",
 		"inviteCode":    invite.Code,
 	}
 	bodyBytes, err := json.Marshal(payload)
@@ -750,6 +766,7 @@ func TestRegisterAcceptsGeneratedCaptcha(t *testing.T) {
 
 func TestInviteOnlyRegistrationThroughAPI(t *testing.T) {
 	server, manager, _ := newTestServer(t)
+	server.captcha = &fixedCaptcha{answer: "24682"}
 	settings := manager.Settings()
 	settings.OpenRegistration = false
 	settings.InviteRequired = true
@@ -762,7 +779,7 @@ func TestInviteOnlyRegistrationThroughAPI(t *testing.T) {
 	}
 
 	captchaRecorder := httptest.NewRecorder()
-	server.handleRegisterCaptcha(captchaRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/register-captcha", nil))
+	server.handleAuthCaptcha(captchaRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/captcha", nil))
 	var challenge struct {
 		ID    string `json:"id"`
 		Image string `json:"image"`
@@ -773,9 +790,8 @@ func TestInviteOnlyRegistrationThroughAPI(t *testing.T) {
 	payload, err := json.Marshal(map[string]string{
 		"username":      "invite-only-user",
 		"password":      "password123",
-		"captchaToken":  "",
 		"captchaId":     challenge.ID,
-		"captchaAnswer": captchaAnswerFromImage(t, challenge.Image),
+		"captchaAnswer": "24682",
 		"inviteCode":    invite.Code,
 	})
 	if err != nil {
@@ -787,6 +803,47 @@ func TestInviteOnlyRegistrationThroughAPI(t *testing.T) {
 	server.handleRegister(recorder, request)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("invite-only register returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestLoginRequiresCaptchaAfterTwoCredentialFailures(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	server.captcha = &fixedCaptcha{answer: "24682"}
+	login := func(password, captchaID, captchaAnswer string) *httptest.ResponseRecorder {
+		t.Helper()
+		payload, err := json.Marshal(map[string]string{
+			"username": "admin", "password": password,
+			"captchaId": captchaID, "captchaAnswer": captchaAnswer,
+		})
+		if err != nil {
+			t.Fatalf("marshal login: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(payload))
+		request.Header.Set("Content-Type", "application/json")
+		request.RemoteAddr = "203.0.113.20:4567"
+		recorder := httptest.NewRecorder()
+		server.handleLogin(recorder, request)
+		return recorder
+	}
+
+	first := login("wrong-password", "", "")
+	if first.Code != http.StatusUnauthorized || !strings.Contains(first.Body.String(), "AUTH_INVALID_CREDENTIALS") {
+		t.Fatalf("first failure = %d %s", first.Code, first.Body.String())
+	}
+	second := login("wrong-password", "", "")
+	if second.Code != http.StatusUnauthorized || !strings.Contains(second.Body.String(), "LOGIN_CAPTCHA_REQUIRED") {
+		t.Fatalf("second failure = %d %s", second.Code, second.Body.String())
+	}
+	withoutCaptcha := login("admin-password-123", "", "")
+	if withoutCaptcha.Code != http.StatusBadRequest || !strings.Contains(withoutCaptcha.Body.String(), "LOGIN_CAPTCHA_INVALID") {
+		t.Fatalf("login without captcha = %d %s", withoutCaptcha.Code, withoutCaptcha.Body.String())
+	}
+	withCaptcha := login("admin-password-123", "fixed-captcha", "24682")
+	if withCaptcha.Code != http.StatusOK {
+		t.Fatalf("login with captcha = %d %s", withCaptcha.Code, withCaptcha.Body.String())
+	}
+	if server.authGuard.RequiresCaptcha("203.0.113.20", "admin") {
+		t.Fatal("captcha requirement was not cleared after successful login")
 	}
 }
 
@@ -834,7 +891,7 @@ func newTestServer(t *testing.T) (*Server, *appruntime.Manager, *auth.SessionMan
 	}
 	sessions := auth.NewSessionManager(time.Hour)
 	t.Cleanup(sessions.Close)
-	return NewServer(manager, sessions, auth.NewTurnstileVerifier("", "", ""), auth.NewAuthGuard()), manager, sessions
+	return NewServer(manager, sessions, auth.NewAuthGuard()), manager, sessions
 }
 
 func newTestServerWithDevice(t *testing.T, deviceID string) (*Server, *appruntime.Manager, *auth.SessionManager, model.User) {
@@ -870,7 +927,7 @@ func newTestServerWithDevice(t *testing.T, deviceID string) (*Server, *appruntim
 	}
 	sessions := auth.NewSessionManager(time.Hour)
 	t.Cleanup(sessions.Close)
-	return NewServer(manager, sessions, auth.NewTurnstileVerifier("", "", ""), auth.NewAuthGuard()), manager, sessions, user
+	return NewServer(manager, sessions, auth.NewAuthGuard()), manager, sessions, user
 }
 
 func findUser(t *testing.T, manager *appruntime.Manager, username string) model.CurrentUser {
@@ -885,21 +942,21 @@ func findUser(t *testing.T, manager *appruntime.Manager, username string) model.
 	return model.CurrentUser{}
 }
 
-func captchaAnswerFromImage(t *testing.T, image string) string {
-	t.Helper()
-	const prefix = "data:image/svg+xml;base64,"
-	if !strings.HasPrefix(image, prefix) {
-		t.Fatalf("captcha image has unexpected prefix: %q", image)
+type fixedCaptcha struct {
+	answer string
+}
+
+func (c *fixedCaptcha) Generate() (auth.CaptchaChallenge, error) {
+	return auth.CaptchaChallenge{
+		ID: "fixed-captcha", Image: "data:image/png;base64,test", ExpiresAt: time.Now().Add(2 * time.Minute),
+	}, nil
+}
+
+func (c *fixedCaptcha) Verify(id string, answer string) error {
+	if id != "fixed-captcha" || answer != c.answer {
+		return errors.New("invalid captcha")
 	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(image, prefix))
-	if err != nil {
-		t.Fatalf("decode captcha image: %v", err)
-	}
-	matches := regexp.MustCompile(`>([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5})</text>`).FindSubmatch(decoded)
-	if len(matches) != 2 {
-		t.Fatalf("captcha answer not found in svg: %s", decoded)
-	}
-	return string(matches[1])
+	return nil
 }
 
 func TestYYBBindingStatusResponseIsRedacted(t *testing.T) {

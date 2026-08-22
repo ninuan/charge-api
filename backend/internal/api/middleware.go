@@ -17,9 +17,9 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"img-src 'self' data: https:; " +
 	"font-src 'self' data:; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
-	"frame-src https://challenges.cloudflare.com; " +
-	"connect-src 'self'"
+	"script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; " +
+	"frame-src 'none'; " +
+	"connect-src 'self' https://cloudflareinsights.com"
 
 func WithSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +45,9 @@ func WithCacheHeaders(next http.Handler) http.Handler {
 			// 文件名带内容 hash，内容变了必然换名，可以永久缓存。
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		default:
-			w.Header().Set("Cache-Control", "no-cache")
+			// 页面是静态导出内容，可以进入共享缓存，但每次使用前必须重新
+			// 验证；no-transform 同时禁止 Cloudflare 在 HTML 中自动注入 RUM。
+			w.Header().Set("Cache-Control", "public, no-cache, no-transform")
 		}
 		next.ServeHTTP(w, r)
 	})

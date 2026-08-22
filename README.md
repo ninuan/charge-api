@@ -37,7 +37,7 @@
 - 管理闭环：管理员可以从异常进入用户详情，处理账户、凭据和设备问题，并保留操作审计记录。
 - 运营趋势：按 24 小时、7 天或 30 天查看请求量、远端成功率、活跃用户和离线端口，并导出 CSV。
 - 运维状态：展示服务健康、数据库与备份、提醒调度成功率、请求复用、额度保护和数据保留情况。
-- 登录防护：Argon2id 密码哈希、Cloudflare Turnstile、人机验证失败锁定和 IP 限流。
+- 登录防护：Argon2id 密码哈希、hCaptcha、人机验证失败锁定和 IP 限流。
 
 ## 技术栈
 
@@ -121,7 +121,7 @@ make setup
 make dev
 ```
 
-该命令会同时启动 Go 后端和 Next 前端，并自动使用 Cloudflare Turnstile 官方测试密钥：
+该命令会同时启动 Go 后端和 Next 前端。默认不调用外部 hCaptcha，便于在回环地址上开发：
 
 ```text
 前端地址：http://127.0.0.1:3000
@@ -565,10 +565,10 @@ CHARGE_SIGNED_FLOW_URL=http://127.0.0.1:8080/api/session/yyb-binding CHARGE_SESS
 ## 登录安全
 
 - 密码使用 Argon2id 哈希保存。
-- 登录和注册必须通过 Cloudflare Turnstile 服务端验证。
+- 生产环境的登录和注册必须通过 hCaptcha 服务端验证。
 - 同一 IP 5 分钟最多提交 20 次登录或注册请求。
-- 同一账号或 IP 连续失败 5 次后锁定 15 分钟。
-- 验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
+- 同一账号或 IP 连续失败 2 次后要求输入图片验证码，连续失败 5 次后锁定 15 分钟。
+- 图片验证码由服务端生成 PNG、2 分钟内一次有效；验证码失败只锁定 IP，不会被用于恶意锁定其他人的账号。
 - Session 默认有效期为 7 天，每个用户最多保留 5 个登录会话。
 - Session 持久化到 SQLite，服务重启后登录状态仍然有效。
 - 修改密码、角色、禁用或删除用户时，该用户的全部 Session 会立即失效。
@@ -591,27 +591,20 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
-生产环境建议在 Cloudflare Turnstile 创建 Managed Widget，并将域名加入允许列表。服务器环境文件示例：
+服务器环境文件示例：
 
 ```text
 CHARGE_ADMIN_PASSWORD=your-admin-password
 CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
 YYB_SECRET_KEY=base64-encoded-32-byte-key
 YYB_API_SECRET=base64-encoded-hmac-secret
-TURNSTILE_REQUIRED=true
-TURNSTILE_SITE_KEY=your-site-key
-TURNSTILE_SECRET_KEY=your-secret-key
-TURNSTILE_HOSTNAME=charge.example.com
 # 仅当前后端跨域部署时填写
 CORS_ALLOWED_ORIGINS=https://console.example.com
 ```
 
-本地测试可以使用 Cloudflare 官方测试密钥：
+登录和注册均使用内置图片验证码，不依赖境外验证服务，也不需要额外环境变量。登录页面只在连续失败后显示验证码；注册页面始终显示验证码。
 
-```text
-TURNSTILE_SITE_KEY=1x00000000000000000000AA
-TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
-```
+如果 Cloudflare 代理层另外开启了 Under Attack Mode 或 Managed Challenge，它属于独立防护；需在 Cloudflare 控制台单独关闭或调整，否则用户仍可能看到 Cloudflare 挑战页。
 
 ## 说明
 
