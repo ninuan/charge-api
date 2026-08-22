@@ -124,6 +124,7 @@ export function WatchRuleDialog({
       } else {
         await createRule({
           deviceId: form.pileId,
+          mode: "recurring",
           enabled: form.enabled,
           activeWeekdays: form.activeWeekdays,
           activeStartMinute: startMinute,

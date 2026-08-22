@@ -65,7 +65,12 @@ afterEach(() => {
 describe("WatchRuleDialog", () => {
   it("creates a whole-pile reminder with an explicit cross-midnight window", async () => {
     const user = userEvent.setup()
-    watchContextMock.createRule.mockResolvedValue({ id: "rule-1" })
+    watchContextMock.createRule.mockResolvedValue({
+      rule: { id: "rule-1" },
+      idlePortIds: [],
+      backgroundScheduled: true,
+      message: "固定时段提醒已保存。",
+    })
     const onOpenChange = vi.fn()
 
     render(
@@ -91,6 +96,7 @@ describe("WatchRuleDialog", () => {
     await waitFor(() =>
       expect(watchContextMock.createRule).toHaveBeenCalledWith({
         deviceId: "pile-1",
+        mode: "recurring",
         enabled: true,
         activeWeekdays: 127,
         activeStartMinute: 1350,

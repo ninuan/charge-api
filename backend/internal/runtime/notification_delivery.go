@@ -180,6 +180,11 @@ func (m *Manager) processOnePileAvailability(
 		return fmt.Errorf("load pile availability state: %w", err)
 	}
 	if !found || !state.AvailabilityKnown {
+		if hasIdlePort && rule.Mode == model.WatchRuleTemporary {
+			if err := m.recordTemporaryPileAvailabilityLocked(userID, rule, pile, idlePortIDs, events, observedAt); err != nil {
+				return err
+			}
+		}
 		return m.repository.SavePileAvailabilityState(userID, pile.ID, true, hasIdlePort, availabilityEventID, observedAt)
 	}
 	availabilityEventID = max(state.AvailabilityEventID, availabilityEventID)
@@ -215,7 +220,41 @@ func (m *Manager) processOnePileAvailability(
 	if err != nil {
 		return err
 	}
+	if rule.Mode == model.WatchRuleTemporary {
+		if _, err := m.repository.CompleteWatchRule(userID, rule.ID, model.WatchCompletionNotified, observedAt); err != nil {
+			return fmt.Errorf("complete notified temporary watch rule: %w", err)
+		}
+	}
 	return m.repository.SavePileAvailabilityState(userID, pile.ID, true, true, availabilityEventID, observedAt)
+}
+
+func (m *Manager) recordTemporaryPileAvailabilityLocked(
+	userID string,
+	rule model.WatchRule,
+	pile model.Pile,
+	idlePortIDs []int,
+	events []model.PortStatusEvent,
+	observedAt time.Time,
+) error {
+	portID := idlePortIDs[0]
+	var sourceEventID *int64
+	if latest := latestPortStatusEventID(events); latest > 0 {
+		sourceEventID = &latest
+	}
+	_, _, err := m.recordNotificationOnceLocked(model.Notification{
+		UserID: userID, Type: model.NotificationPileAvailable, Severity: "info",
+		Title:    "充电桩有空闲口",
+		Message:  pileAvailabilityMessage(m.notificationPileLabel(userID, pile.ID), idlePortIDs),
+		DeviceID: pile.ID, PortID: &portID, SourceEventID: sourceEventID,
+		DedupeKey: "pile_available_rule:" + rule.ID, CreatedAt: observedAt,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := m.repository.CompleteWatchRule(userID, rule.ID, model.WatchCompletionNotified, observedAt); err != nil {
+		return fmt.Errorf("complete initially available temporary watch rule: %w", err)
+	}
+	return nil
 }
 
 func latestPortStatusEventID(events []model.PortStatusEvent) int64 {

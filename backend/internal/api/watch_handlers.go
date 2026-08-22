@@ -30,13 +30,13 @@ func (s *Server) handleWatchRules(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, watchBodyLimit, &request) {
 			return
 		}
-		rule, err := s.manager.CreateWatchRule(user.ID, request)
+		result, err := s.manager.CreateWatchRuleWithInitialCheck(user.ID, request)
 		if err != nil {
 			s.writeWatchError(w, "create_watch_rule", err)
 			return
 		}
 		s.setHealthDegraded("watch", "")
-		writeJSON(w, http.StatusCreated, rule)
+		writeJSON(w, http.StatusCreated, result)
 	default:
 		methodNotAllowed(w)
 	}
@@ -227,6 +227,17 @@ func (s *Server) writeWatchError(w http.ResponseWriter, operation string, err er
 		writeCodedError(w, http.StatusConflict, "WATCH_RULE_CONFLICT", "该充电桩已设置空闲提醒")
 	case errors.Is(err, appruntime.ErrWatchPileLimit):
 		writeCodedError(w, http.StatusConflict, "WATCH_PILE_LIMIT_REACHED", "已达到当前账户的空闲提醒充电桩上限")
+	case errors.Is(err, appruntime.ErrWatchPowerOff):
+		var outage appruntime.WatchPowerOffError
+		if errors.As(err, &outage) {
+			writeCodedError(w, http.StatusConflict, "WATCH_POWER_OFF_ACTIVE", outage.Error())
+			return
+		}
+		writeCodedError(w, http.StatusConflict, "WATCH_POWER_OFF_ACTIVE", "当前处于计划断电时段，请在恢复供电后再开启提醒")
+	case errors.Is(err, appruntime.ErrWatchCredentialExpired):
+		writeCodedError(w, http.StatusConflict, "WATCH_CREDENTIAL_EXPIRED", "登录凭据已失效，请先重新扫码后再开启提醒")
+	case errors.Is(err, appruntime.ErrWatchRecurringDisabled):
+		writeCodedError(w, http.StatusConflict, "WATCH_RECURRING_DISABLED", "管理员暂未开放固定时段提醒")
 	default:
 		s.setHealthDegraded("watch", "空闲提醒存储异常")
 		logStructuredError(operation, "watch", err)

@@ -9,6 +9,7 @@ import type {
   WatchOverview,
   WatchRule,
   WatchRuleCreateRequest,
+  WatchRuleCreateResult,
   WatchRuleUpdateRequest,
 } from "@/lib/api/generated"
 import { request } from "@/lib/http"
@@ -27,7 +28,7 @@ export const watchApi = {
       "加载免打扰设置失败"
     ),
   createRule: (payload: WatchRuleCreateRequest) =>
-    request<WatchRule>(
+    request<WatchRuleCreateResult>(
       "/api/watch-rules",
       { method: "POST", headers: jsonHeaders, body: JSON.stringify(payload) },
       "创建空闲提醒失败"

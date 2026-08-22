@@ -137,6 +137,75 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 	return rules, nil
 }
 
+// CompleteWatchRule closes one active temporary task without deleting its
+// history. The conditional update makes repeated completion attempts safe.
+func (s *Store) CompleteWatchRule(userID, ruleID string, reason model.WatchCompletionReason, at time.Time) (bool, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(ruleID) == "" || at.IsZero() {
+		return false, fmt.Errorf("complete watch rule requires user, rule, and time")
+	}
+	switch reason {
+	case model.WatchCompletionNotified, model.WatchCompletionExpired, model.WatchCompletionCancelled:
+	default:
+		return false, fmt.Errorf("watch rule completion reason is invalid")
+	}
+	result, err := s.db.Exec(`
+		UPDATE watch_rules
+		SET enabled = 0, completed_at = ?, completion_reason = ?, updated_at = ?
+		WHERE id = ? AND user_id = ? AND mode = 'temporary' AND completed_at IS NULL
+	`, at.UTC().Unix(), reason, at.UTC().Unix(), ruleID, userID)
+	if err != nil {
+		return false, fmt.Errorf("complete watch rule: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read completed watch rule result: %w", err)
+	}
+	return rows == 1, nil
+}
+
+// CompleteExpiredWatchRules persists expiry before scheduler target selection,
+// so process restarts cannot revive a temporary task that has passed its hard
+// deadline.
+func (s *Store) CompleteExpiredWatchRules(at time.Time) (int64, error) {
+	if at.IsZero() {
+		return 0, fmt.Errorf("expire watch rules requires time")
+	}
+	result, err := s.db.Exec(`
+		UPDATE watch_rules
+		SET enabled = 0, completed_at = ?, completion_reason = 'expired', updated_at = ?
+		WHERE mode = 'temporary' AND completed_at IS NULL AND expires_at <= ?
+	`, at.UTC().Unix(), at.UTC().Unix(), at.UTC().Unix())
+	if err != nil {
+		return 0, fmt.Errorf("expire watch rules: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// CompleteNotifiedTemporaryWatchRules repairs the narrow crash window between
+// durable notification creation and rule completion. It intentionally keys off
+// the persisted notification fact rather than an in-memory delivery result.
+func (s *Store) CompleteNotifiedTemporaryWatchRules(at time.Time) (int64, error) {
+	if at.IsZero() {
+		return 0, fmt.Errorf("recover notified watch rules requires time")
+	}
+	result, err := s.db.Exec(`
+		UPDATE watch_rules
+		SET enabled = 0, completed_at = ?, completion_reason = 'notified', updated_at = ?
+		WHERE mode = 'temporary' AND completed_at IS NULL
+		  AND EXISTS (
+			SELECT 1 FROM notifications n
+			WHERE n.user_id = watch_rules.user_id
+			  AND n.device_id = watch_rules.device_id
+			  AND n.type IN ('port_idle', 'pile_available')
+			  AND n.created_at >= watch_rules.created_at
+		  )
+	`, at.UTC().Unix(), at.UTC().Unix())
+	if err != nil {
+		return 0, fmt.Errorf("recover notified watch rules: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (s *Store) DeleteWatchRule(userID, ruleID string) (bool, error) {
 	userID = strings.TrimSpace(userID)
 	ruleID = strings.TrimSpace(ruleID)
@@ -833,7 +902,8 @@ func validateNotification(notification model.Notification) error {
 		return fmt.Errorf("notification port must be positive")
 	}
 	if notification.Type == model.NotificationPileAvailable &&
-		(strings.TrimSpace(notification.DeviceID) == "" || notification.PortID == nil || notification.SourceEventID == nil) {
+		(strings.TrimSpace(notification.DeviceID) == "" || notification.PortID == nil ||
+			(notification.SourceEventID == nil && !strings.HasPrefix(notification.DedupeKey, "pile_available_rule:"))) {
 		return fmt.Errorf("idle notification requires pile, port, and source event")
 	}
 	if notification.CreatedAt.IsZero() {

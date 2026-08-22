@@ -69,6 +69,14 @@ func (m *Manager) RefreshWatchedPile(userID, deviceID string) (WatchedPileRefres
 }
 
 func (m *Manager) refreshWatchedPile(userID, deviceID string, beforeRemoteRequest func() error) (WatchedPileRefreshResult, error) {
+	return m.refreshWatchedPileWithDelivery(userID, deviceID, beforeRemoteRequest, true)
+}
+
+func (m *Manager) refreshWatchedPileWithDelivery(
+	userID, deviceID string,
+	beforeRemoteRequest func() error,
+	deliverNotifications bool,
+) (WatchedPileRefreshResult, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
@@ -108,10 +116,32 @@ func (m *Manager) refreshWatchedPile(userID, deviceID string, beforeRemoteReques
 	if err != nil {
 		return result, fmt.Errorf("record watched pile status transitions: %w", err)
 	}
-	if err := m.processPileAvailability(userID, []model.Pile{result.Pile}, events); err != nil {
-		return result, fmt.Errorf("deliver watched pile notifications: %w", err)
+	if deliverNotifications {
+		if err := m.processPileAvailability(userID, []model.Pile{result.Pile}, events); err != nil {
+			return result, fmt.Errorf("deliver watched pile notifications: %w", err)
+		}
+	} else {
+		if err := m.repository.SavePileAvailabilityState(
+			userID,
+			result.Pile.ID,
+			true,
+			len(pileIdlePortIDs(result.Pile)) > 0,
+			latestPortStatusEventID(events),
+			result.FetchedAt,
+		); err != nil {
+			return result, fmt.Errorf("save initial pile availability: %w", err)
+		}
 	}
 	return result, nil
+}
+
+func (m *Manager) invalidateBackgroundPileCache(userID, deviceID string) {
+	coordinator := &m.backgroundRefresh
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	coordinator.initializeLocked()
+	delete(coordinator.cache, deviceID)
+	delete(coordinator.credentialValidatedAt, backgroundCredentialKey{userID: userID, deviceID: deviceID})
 }
 
 func (m *Manager) hasEnabledPileReminder(userID, deviceID string) (bool, error) {

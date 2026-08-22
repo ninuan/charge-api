@@ -343,6 +343,13 @@ type WatchRuleUpdateRequest struct {
 	Timezone          *string                 `json:"timezone,omitempty"`
 }
 
+type WatchRuleCreateResult struct {
+	Rule                *WatchRule `json:"rule,omitempty"`
+	IdlePortIDs         []int      `json:"idlePortIds"`
+	BackgroundScheduled bool       `json:"backgroundScheduled"`
+	Message             string     `json:"message"`
+}
+
 type WxPusherEventTypes int
 
 const (

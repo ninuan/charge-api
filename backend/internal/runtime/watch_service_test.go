@@ -86,6 +86,64 @@ func TestWatchRulesEnforceWholePileLimit(t *testing.T) {
 	}
 }
 
+func TestTemporaryWatchRuleCanExtendAndCancel(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable power-off: %v", err)
+	}
+	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
+	mode := model.WatchRuleTemporary
+	rule, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{DeviceID: testWatchPileOne, Mode: &mode})
+	if err != nil || rule.ExpiresAt == nil || !rule.ExpiresAt.Equal(now.Add(2*time.Hour)) || !rule.StopAfterNotify {
+		t.Fatalf("temporary defaults = %+v, err %v", rule, err)
+	}
+	now = now.Add(30 * time.Minute)
+	duration := model.WatchDurationFourHours
+	extended, err := manager.UpdateWatchRule(owner.ID, rule.ID, model.WatchRuleUpdateRequest{Duration: &duration})
+	if err != nil || extended.ExpiresAt == nil || !extended.ExpiresAt.Equal(now.Add(4*time.Hour)) {
+		t.Fatalf("extended temporary rule = %+v, err %v", extended, err)
+	}
+	cancel := true
+	cancelled, err := manager.UpdateWatchRule(owner.ID, rule.ID, model.WatchRuleUpdateRequest{Cancel: &cancel})
+	if err != nil || cancelled.Enabled || cancelled.CompletedAt == nil || cancelled.CompletionReason != model.WatchCompletionCancelled {
+		t.Fatalf("cancelled temporary rule = %+v, err %v", cancelled, err)
+	}
+	if _, err := manager.UpdateWatchRule(owner.ID, rule.ID, model.WatchRuleUpdateRequest{Cancel: &cancel}); !errors.Is(err, ErrWatchRuleNotFound) {
+		t.Fatalf("repeat cancellation error = %v", err)
+	}
+}
+
+func TestTemporaryWatchRuleCapsAtPowerOffAndRejectsOutage(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = true
+	settings.ScheduledPowerOffStartMinute = 23 * 60
+	settings.ScheduledPowerOffEndMinute = 7 * 60
+	settings.ScheduledPowerOffTimezone = "Asia/Shanghai"
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("configure power-off: %v", err)
+	}
+	mode := model.WatchRuleTemporary
+	duration := model.WatchDurationFourHours
+	now := time.Date(2026, 8, 10, 14, 0, 0, 0, time.UTC) // 22:00 Shanghai.
+	setReminderTestClock(manager, &now)
+	rule, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: testWatchPileOne, Mode: &mode, Duration: &duration,
+	})
+	if err != nil || rule.ExpiresAt == nil || !rule.ExpiresAt.Equal(time.Date(2026, 8, 10, 15, 0, 0, 0, time.UTC)) {
+		t.Fatalf("power-off capped rule = %+v, err %v", rule, err)
+	}
+	now = time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC) // 00:00 Shanghai.
+	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: testWatchPileTwo, Mode: &mode,
+	}); !errors.Is(err, ErrWatchPowerOff) {
+		t.Fatalf("power-off creation error = %v", err)
+	}
+}
+
 func TestNotificationPreferencesAndInboxAreUserScoped(t *testing.T) {
 	manager, owner, other := newWatchTestManager(t)
 	preference, err := manager.NotificationPreference(owner.ID)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charge-dashboard/internal/charger"
 	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/persistence"
 )
@@ -24,18 +25,41 @@ var (
 	ErrWatchRuleNotFound        = errors.New("watch rule not found")
 	ErrWatchRuleConflict        = errors.New("watch rule conflict")
 	ErrWatchPileLimit           = errors.New("watch pile limit reached")
+	ErrWatchPowerOff            = errors.New("watch task blocked by scheduled power-off")
+	ErrWatchCredentialExpired   = errors.New("watch credential expired")
+	ErrWatchRecurringDisabled   = errors.New("recurring watch rules disabled")
 	ErrNotificationQueryInvalid = errors.New("notification query invalid")
 	ErrNotificationNotFound     = errors.New("notification not found")
 	ErrNotificationInputInvalid = errors.New("notification input invalid")
 )
 
+type WatchPowerOffError struct {
+	RestoreAt time.Time
+}
+
+func (e WatchPowerOffError) Error() string {
+	return fmt.Sprintf("当前处于计划断电时段，预计 %s 恢复供电", e.RestoreAt.In(time.FixedZone("UTC+8", 8*60*60)).Format("01月02日 15:04"))
+}
+
+func (e WatchPowerOffError) Unwrap() error { return ErrWatchPowerOff }
+
 func (m *Manager) WatchRules(userID string) ([]model.WatchRule, error) {
 	if _, err := m.runtimeFor(userID); err != nil {
 		return nil, err
 	}
+	now := m.reminderSchedulerNow().UTC()
+	if _, err := m.repository.CompleteExpiredWatchRules(now); err != nil {
+		return nil, fmt.Errorf("complete expired watch rules: %w", err)
+	}
 	rules, err := m.repository.ListWatchRules(userID)
 	if err != nil {
 		return nil, fmt.Errorf("list watch rules: %w", err)
+	}
+	settings := normalizeRegistrationSettings(m.Settings())
+	for index := range rules {
+		if err := decorateWatchRule(&rules[index], now, settings, m.repository); err != nil {
+			return nil, err
+		}
 	}
 	return rules, nil
 }
@@ -48,7 +72,7 @@ func (m *Manager) WatchOverview(userID string) (model.WatchOverview, error) {
 	if !ok {
 		return model.WatchOverview{}, ErrWatchTargetNotFound
 	}
-	rules, err := m.repository.ListWatchRules(userID)
+	rules, err := m.WatchRules(userID)
 	if err != nil {
 		return model.WatchOverview{}, fmt.Errorf("list watch rules for overview: %w", err)
 	}
@@ -62,7 +86,7 @@ func (m *Manager) WatchOverview(userID string) (model.WatchOverview, error) {
 		return model.WatchOverview{}, fmt.Errorf("load watch quota for overview: %w", err)
 	}
 	return model.WatchOverview{
-		ReminderPileCount: len(rules), ReminderPileLimit: settings.WatchPileLimitPerUser,
+		ReminderPileCount: activeReminderPileCount(rules), ReminderPileLimit: settings.WatchPileLimitPerUser,
 		DailyQuotaUsed: quotaUsed, DailyQuotaLimit: settings.WatchDailyRefreshQuota, QuotaDate: quotaDate,
 		RefreshIntervalMinutes:       settings.WatchRefreshIntervalMinutes,
 		BackgroundRemindersEnabled:   settings.BackgroundRemindersEnabled,
@@ -75,10 +99,114 @@ func (m *Manager) WatchOverview(userID string) (model.WatchOverview, error) {
 }
 
 func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRequest) (model.WatchRule, error) {
+	// Internal callers from the 1.5.1 recurring scheduler keep their explicit
+	// no-refresh creation path. The public API uses CreateWatchRuleWithInitialCheck,
+	// whose omitted mode defaults to a temporary task.
+	if request.Mode == nil {
+		mode := model.WatchRuleRecurring
+		request.Mode = &mode
+	}
+	return m.createWatchRule(userID, request, true)
+}
+
+func (m *Manager) CreateWatchRuleWithInitialCheck(userID string, request model.WatchRuleCreateRequest) (model.WatchRuleCreateResult, error) {
+	if request.Mode == nil {
+		mode := model.WatchRuleTemporary
+		request.Mode = &mode
+	}
+	rule, err := m.createWatchRule(userID, request, false)
+	if err != nil {
+		return model.WatchRuleCreateResult{}, err
+	}
+	result := model.WatchRuleCreateResult{
+		Rule: &rule, IdlePortIDs: []int{}, BackgroundScheduled: true,
+		Message: "空闲提醒已开始，将按设置间隔检查这台充电桩。",
+	}
+	if rule.Mode != model.WatchRuleTemporary {
+		result.Message = "固定时段提醒已保存。"
+		m.wakeReminderScheduler()
+		return result, nil
+	}
+
+	// The opening check is a user-triggered request and must not be satisfied by
+	// a stale scheduler cache. Notification delivery is suppressed until we know
+	// whether a background task is actually needed.
+	m.recordMetric(userID, "watch_initial_check")
+	m.invalidateBackgroundPileCache(userID, rule.DeviceID)
+	refresh, refreshErr := m.refreshWatchedPileWithDelivery(userID, rule.DeviceID, nil, false)
+	if refreshErr != nil || refresh.Skipped {
+		if charger.IsAuthExpired(refreshErr) {
+			_, _ = m.repository.DeleteWatchRule(userID, rule.ID)
+			_ = m.repository.DeleteWatchRefreshState(userID, rule.DeviceID)
+			return model.WatchRuleCreateResult{}, ErrWatchCredentialExpired
+		}
+		attemptedAt := m.reminderSchedulerNow().UTC().Truncate(time.Second)
+		nextAttemptAt := attemptedAt.Add(initialReminderFailureBackoff)
+		if refresh.NextRetryAt != nil && refresh.NextRetryAt.After(nextAttemptAt) {
+			nextAttemptAt = *refresh.NextRetryAt
+		}
+		failures := 0
+		var lastAttemptAt *time.Time
+		if refresh.Attempted {
+			failures = 1
+			lastAttemptAt = &attemptedAt
+		}
+		if err := m.repository.SaveWatchRefreshState(model.WatchRefreshState{
+			UserID: rule.UserID, DeviceID: rule.DeviceID,
+			NextAttemptAt: nextAttemptAt, LastAttemptAt: lastAttemptAt,
+			ConsecutiveFailures: failures, PausedReason: watchPauseBackoff, UpdatedAt: attemptedAt,
+		}); err != nil {
+			return model.WatchRuleCreateResult{}, fmt.Errorf("save initial watch retry: %w", err)
+		}
+		result.Message = "首次检查暂时失败，提醒任务已保留并会自动重试。"
+		m.wakeReminderScheduler()
+		return result, nil
+	}
+	idlePortIDs := pileIdlePortIDs(refresh.Pile)
+	if len(idlePortIDs) == 0 {
+		state, ok, err := m.repository.LoadWatchRefreshState(userID, rule.DeviceID)
+		if err != nil {
+			return model.WatchRuleCreateResult{}, fmt.Errorf("load first background watch state: %w", err)
+		}
+		if ok {
+			settings := normalizeRegistrationSettings(m.Settings())
+			state.NextAttemptAt = refresh.FetchedAt.Add(time.Duration(settings.WatchRefreshIntervalMinutes) * time.Minute)
+			state.UpdatedAt = completedTime(refresh.FetchedAt, m.reminderSchedulerNow())
+			if saveErr := m.repository.SaveWatchRefreshState(state); saveErr != nil {
+				return model.WatchRuleCreateResult{}, fmt.Errorf("schedule first background watch check: %w", saveErr)
+			}
+		}
+		m.wakeReminderScheduler()
+		return result, nil
+	}
+	// An already-idle pile needs no timer and no synthetic notification. Keep the
+	// immediate answer in the response and close the short-lived task history.
+	if deleted, err := m.repository.DeleteWatchRule(userID, rule.ID); err != nil || !deleted {
+		if err == nil {
+			err = ErrWatchRuleNotFound
+		}
+		return model.WatchRuleCreateResult{}, fmt.Errorf("remove immediately satisfied watch rule: %w", err)
+	}
+	_ = m.repository.DeleteWatchRefreshState(userID, rule.DeviceID)
+	result.Rule = nil
+	result.IdlePortIDs = idlePortIDs
+	result.BackgroundScheduled = false
+	result.Message = "这台充电桩现在已有空闲口，无需开启后台提醒。"
+	return result, nil
+}
+
+func completedTime(preferred, fallback time.Time) time.Time {
+	if preferred.IsZero() {
+		preferred = fallback
+	}
+	return preferred.UTC().Truncate(time.Second)
+}
+
+func (m *Manager) createWatchRule(userID string, request model.WatchRuleCreateRequest, wakeScheduler bool) (model.WatchRule, error) {
 	m.watchMu.Lock()
 	defer m.watchMu.Unlock()
 
-	now := time.Now().UTC().Truncate(time.Second)
+	now := m.reminderSchedulerNow().UTC().Truncate(time.Second)
 	rule := model.WatchRule{
 		ID: randomID("wtr"), UserID: strings.TrimSpace(userID),
 		DeviceID: strings.TrimSpace(request.DeviceID),
@@ -86,6 +214,10 @@ func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRe
 		ActiveStartMinute: 0, ActiveEndMinute: 0, Timezone: defaultWatchTimezone,
 		CreatedAt: now, UpdatedAt: now,
 	}
+	if request.Mode == nil {
+		return model.WatchRule{}, ErrWatchRuleInvalid
+	}
+	rule.Mode = *request.Mode
 	if request.Enabled != nil {
 		rule.Enabled = *request.Enabled
 	}
@@ -101,6 +233,34 @@ func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRe
 	if request.Timezone != nil {
 		rule.Timezone = strings.TrimSpace(*request.Timezone)
 	}
+	settings := normalizeRegistrationSettings(m.Settings())
+	switch rule.Mode {
+	case model.WatchRuleTemporary:
+		if request.Enabled != nil && !*request.Enabled || request.ActiveWeekdays != nil ||
+			request.ActiveStartMinute != nil || request.ActiveEndMinute != nil || request.Timezone != nil {
+			return model.WatchRule{}, ErrWatchRuleInvalid
+		}
+		rule.Enabled = true
+		rule.ActiveWeekdays = 127
+		rule.ActiveStartMinute = 0
+		rule.ActiveEndMinute = 0
+		rule.Timezone = settings.ScheduledPowerOffTimezone
+		expiresAt, err := temporaryWatchExpiry(now, request.Duration, settings)
+		if err != nil {
+			return model.WatchRule{}, err
+		}
+		rule.ExpiresAt = &expiresAt
+		rule.StopAfterNotify = true
+	case model.WatchRuleRecurring:
+		if request.Duration != nil {
+			return model.WatchRule{}, ErrWatchRuleInvalid
+		}
+		if !settings.RecurringRemindersEnabled {
+			return model.WatchRule{}, ErrWatchRecurringDisabled
+		}
+	default:
+		return model.WatchRule{}, ErrWatchRuleInvalid
+	}
 	if err := m.validateWatchRuleTarget(rule); err != nil {
 		return model.WatchRule{}, err
 	}
@@ -108,19 +268,20 @@ func (m *Manager) CreateWatchRule(userID string, request model.WatchRuleCreateRe
 	if err != nil {
 		return model.WatchRule{}, fmt.Errorf("list watch rules before create: %w", err)
 	}
-	settings := normalizeRegistrationSettings(m.Settings())
 	for _, existing := range rules {
-		if sameWatchTarget(existing, rule) {
+		if existing.Enabled && existing.CompletedAt == nil && sameWatchTarget(existing, rule) {
 			return model.WatchRule{}, ErrWatchRuleConflict
 		}
 	}
-	if len(rules) >= settings.WatchPileLimitPerUser {
+	if activeReminderPileCount(rules) >= settings.WatchPileLimitPerUser {
 		return model.WatchRule{}, ErrWatchPileLimit
 	}
 	if err := m.repository.SaveWatchRule(rule); err != nil {
 		return model.WatchRule{}, fmt.Errorf("save watch rule: %w", err)
 	}
-	m.wakeReminderScheduler()
+	if wakeScheduler {
+		m.wakeReminderScheduler()
+	}
 	return rule, nil
 }
 
@@ -146,6 +307,55 @@ func (m *Manager) UpdateWatchRule(userID, ruleID string, request model.WatchRule
 		return model.WatchRule{}, ErrWatchRuleNotFound
 	}
 	rule := rules[position]
+	now := m.reminderSchedulerNow().UTC().Truncate(time.Second)
+	if rule.Mode == model.WatchRuleTemporary {
+		if rule.CompletedAt != nil {
+			return model.WatchRule{}, ErrWatchRuleNotFound
+		}
+		if rule.ExpiresAt == nil || !rule.ExpiresAt.After(now) {
+			_, _ = m.repository.CompleteWatchRule(userID, rule.ID, model.WatchCompletionExpired, now)
+			return model.WatchRule{}, ErrWatchRuleNotFound
+		}
+		if request.Enabled != nil || request.ActiveWeekdays != nil || request.ActiveStartMinute != nil ||
+			request.ActiveEndMinute != nil || request.Timezone != nil ||
+			(request.Cancel != nil && !*request.Cancel) ||
+			(request.Cancel != nil && request.Duration != nil) {
+			return model.WatchRule{}, ErrWatchRuleInvalid
+		}
+		if request.Cancel != nil {
+			completed, err := m.repository.CompleteWatchRule(userID, rule.ID, model.WatchCompletionCancelled, now)
+			if err != nil {
+				return model.WatchRule{}, fmt.Errorf("cancel watch rule: %w", err)
+			}
+			if !completed {
+				return model.WatchRule{}, ErrWatchRuleNotFound
+			}
+			rule.Enabled = false
+			rule.CompletedAt = &now
+			rule.CompletionReason = model.WatchCompletionCancelled
+			rule.UpdatedAt = now
+			_ = m.repository.DeleteWatchRefreshState(userID, rule.DeviceID)
+			m.wakeReminderScheduler()
+			return rule, nil
+		}
+		if request.Duration == nil {
+			return model.WatchRule{}, ErrWatchRuleInvalid
+		}
+		expiresAt, err := temporaryWatchExpiry(now, request.Duration, normalizeRegistrationSettings(m.Settings()))
+		if err != nil || !expiresAt.After(*rule.ExpiresAt) {
+			return model.WatchRule{}, ErrWatchRuleInvalid
+		}
+		rule.ExpiresAt = &expiresAt
+		rule.UpdatedAt = now
+		if err := m.repository.SaveWatchRule(rule); err != nil {
+			return model.WatchRule{}, fmt.Errorf("extend watch rule: %w", err)
+		}
+		m.wakeReminderScheduler()
+		return rule, nil
+	}
+	if request.Duration != nil || request.Cancel != nil {
+		return model.WatchRule{}, ErrWatchRuleInvalid
+	}
 	if request.Enabled != nil {
 		rule.Enabled = *request.Enabled
 	}
@@ -161,7 +371,7 @@ func (m *Manager) UpdateWatchRule(userID, ruleID string, request model.WatchRule
 	if request.Timezone != nil {
 		rule.Timezone = strings.TrimSpace(*request.Timezone)
 	}
-	rule.UpdatedAt = time.Now().UTC().Truncate(time.Second)
+	rule.UpdatedAt = now
 	if err := m.validateWatchRuleTarget(rule); err != nil {
 		return model.WatchRule{}, err
 	}
@@ -370,15 +580,104 @@ func defaultNotificationPreference(userID string, now time.Time) model.Notificat
 func activeReminderPileCount(rules []model.WatchRule) int {
 	piles := make(map[string]struct{})
 	for _, rule := range rules {
-		if rule.Enabled {
+		if rule.Enabled && rule.CompletedAt == nil {
 			piles[rule.DeviceID] = struct{}{}
 		}
 	}
 	return len(piles)
 }
 
+func decorateWatchRule(rule *model.WatchRule, now time.Time, settings model.RegistrationSettings, repository *persistence.Store) error {
+	if rule == nil || !rule.Enabled || rule.CompletedAt != nil {
+		return nil
+	}
+	next := now.UTC()
+	state, ok, err := repository.LoadWatchRefreshState(rule.UserID, rule.DeviceID)
+	if err != nil {
+		return fmt.Errorf("load watch rule schedule: %w", err)
+	}
+	if ok && state.NextAttemptAt.After(next) {
+		next = state.NextAttemptAt
+	}
+	rule.NextCheckAt = &next
+	if rule.Mode != model.WatchRuleTemporary || rule.ExpiresAt == nil || !rule.ExpiresAt.After(next) {
+		return nil
+	}
+	interval := time.Duration(settings.WatchRefreshIntervalMinutes) * time.Minute
+	if interval <= 0 {
+		return nil
+	}
+	remaining := rule.ExpiresAt.Sub(next)
+	rule.EstimatedRemainingChecks = int((remaining + interval - 1) / interval)
+	return nil
+}
+
 func sameWatchTarget(left, right model.WatchRule) bool {
 	return left.UserID == right.UserID && left.DeviceID == right.DeviceID
+}
+
+func temporaryWatchExpiry(
+	now time.Time,
+	duration *model.WatchTemporaryDuration,
+	settings model.RegistrationSettings,
+) (time.Time, error) {
+	inPowerOff, restoreAt, err := scheduledPowerOffWindow(now, settings)
+	if err != nil {
+		return time.Time{}, ErrWatchRuleInvalid
+	}
+	if inPowerOff {
+		return time.Time{}, WatchPowerOffError{RestoreAt: restoreAt}
+	}
+	selected := model.WatchDurationTwoHours
+	if duration != nil {
+		selected = *duration
+	}
+	var expiresAt time.Time
+	switch selected {
+	case model.WatchDurationOneHour:
+		expiresAt = now.Add(time.Hour)
+	case model.WatchDurationTwoHours:
+		expiresAt = now.Add(2 * time.Hour)
+	case model.WatchDurationFourHours:
+		expiresAt = now.Add(4 * time.Hour)
+	case model.WatchDurationUntilPowerOff:
+		if !settings.ScheduledPowerOffEnabled {
+			return time.Time{}, ErrWatchRuleInvalid
+		}
+	default:
+		return time.Time{}, ErrWatchRuleInvalid
+	}
+	if settings.ScheduledPowerOffEnabled {
+		cutoff, err := nextScheduledPowerOffStart(now, settings)
+		if err != nil {
+			return time.Time{}, ErrWatchRuleInvalid
+		}
+		if selected == model.WatchDurationUntilPowerOff || cutoff.Before(expiresAt) {
+			expiresAt = cutoff
+		}
+	}
+	if !expiresAt.After(now) {
+		return time.Time{}, ErrWatchRuleInvalid
+	}
+	return expiresAt.UTC().Truncate(time.Second), nil
+}
+
+func nextScheduledPowerOffStart(now time.Time, settings model.RegistrationSettings) (time.Time, error) {
+	location, err := time.LoadLocation(settings.ScheduledPowerOffTimezone)
+	if err != nil {
+		return time.Time{}, err
+	}
+	local := now.In(location)
+	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+	for dayOffset := 0; dayOffset <= 1; dayOffset++ {
+		candidate := midnight.AddDate(0, 0, dayOffset).Add(
+			time.Duration(settings.ScheduledPowerOffStartMinute) * time.Minute,
+		)
+		if candidate.After(local) {
+			return candidate.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("next scheduled power-off start not found")
 }
 
 func validWatchDeviceID(value string) bool {
@@ -412,7 +711,7 @@ func validMinute(value int) bool {
 }
 
 func watchUpdateEmpty(request model.WatchRuleUpdateRequest) bool {
-	return request.Enabled == nil && request.ActiveWeekdays == nil &&
+	return request.Enabled == nil && request.Duration == nil && request.Cancel == nil && request.ActiveWeekdays == nil &&
 		request.ActiveStartMinute == nil && request.ActiveEndMinute == nil && request.Timezone == nil
 }
 

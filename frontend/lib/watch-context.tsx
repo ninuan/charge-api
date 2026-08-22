@@ -16,6 +16,7 @@ import type {
   WatchOverview,
   WatchRule,
   WatchRuleCreateRequest,
+  WatchRuleCreateResult,
   WatchRuleUpdateRequest,
 } from "@/lib/api/generated"
 import { watchApi } from "@/lib/watch-api"
@@ -27,7 +28,9 @@ type WatchContextValue = {
   loading: boolean
   loaded: boolean
   load: () => Promise<void>
-  createRule: (payload: WatchRuleCreateRequest) => Promise<WatchRule>
+  createRule: (
+    payload: WatchRuleCreateRequest
+  ) => Promise<WatchRuleCreateResult>
   updateRule: (
     ruleId: string,
     payload: WatchRuleUpdateRequest
@@ -41,7 +44,11 @@ type WatchContextValue = {
 const WatchContext = createContext<WatchContextValue | null>(null)
 
 function reminderPileCount(rules: WatchRule[]) {
-  return new Set(rules.map((rule) => rule.deviceId)).size
+  return new Set(
+    rules
+      .filter((rule) => rule.enabled && !rule.completedAt)
+      .map((rule) => rule.deviceId)
+  ).size
 }
 
 export function WatchProvider({ children }: { children: ReactNode }) {
@@ -96,12 +103,14 @@ export function WatchProvider({ children }: { children: ReactNode }) {
 
   const createRule = useCallback(
     async (payload: WatchRuleCreateRequest) => {
-      const created = await watchApi.createRule(payload)
-      applyRules([
-        created,
-        ...rulesRef.current.filter((rule) => rule.id !== created.id),
-      ])
-      return created
+      const result = await watchApi.createRule(payload)
+      if (result.rule) {
+        applyRules([
+          result.rule,
+          ...rulesRef.current.filter((rule) => rule.id !== result.rule?.id),
+        ])
+      }
+      return result
     },
     [applyRules]
   )

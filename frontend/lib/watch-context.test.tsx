@@ -78,7 +78,12 @@ describe("WatchProvider", () => {
       deviceId: "pile-2",
       updatedAt: "2026-08-10T00:01:00Z",
     }
-    watchApiMock.createRule.mockResolvedValue(reminder)
+    watchApiMock.createRule.mockResolvedValue({
+      rule: reminder,
+      idlePortIds: [],
+      backgroundScheduled: true,
+      message: "固定时段提醒已保存。",
+    })
 
     const { result } = renderHook(() => useWatch(), {
       wrapper: WatchProvider,

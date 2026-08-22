@@ -21,7 +21,7 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 	}
 	create := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`"}`,
+		`{"deviceId":"`+deviceID+`","mode":"recurring"}`,
 	)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create status = %d: %s", create.Code, create.Body.String())
@@ -29,10 +29,14 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 	if create.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("create cache control = %q", create.Header().Get("Cache-Control"))
 	}
-	var rule model.WatchRule
-	if err := json.NewDecoder(create.Body).Decode(&rule); err != nil {
+	var createResult model.WatchRuleCreateResult
+	if err := json.NewDecoder(create.Body).Decode(&createResult); err != nil {
 		t.Fatalf("decode created watch rule: %v", err)
 	}
+	if createResult.Rule == nil || !createResult.BackgroundScheduled {
+		t.Fatalf("unexpected create result: %+v", createResult)
+	}
+	rule := *createResult.Rule
 	if rule.UserID != fixture.owner.ID || rule.DeviceID != deviceID || !rule.Enabled {
 		t.Fatalf("unexpected created rule: %+v", rule)
 	}
@@ -174,7 +178,7 @@ func TestWatchOverviewReturnsOnlyCurrentUserPolicyAndQuota(t *testing.T) {
 	const deviceID = "2601201412385560088"
 	created := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`"}`,
+		`{"deviceId":"`+deviceID+`","mode":"recurring"}`,
 	)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create reminder = %d: %s", created.Code, created.Body.String())

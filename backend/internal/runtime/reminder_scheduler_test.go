@@ -20,7 +20,7 @@ func TestReminderSchedulerDoesNotRequestWithoutEnabledReminderRules(t *testing.T
 	}))
 	deleteReminderRulesForUser(t, manager, owner.ID)
 	deleteReminderRulesForUser(t, manager, other.ID)
-	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	setReminderTestClock(manager, &now)
 	if err := manager.repository.SaveWatchRefreshState(model.WatchRefreshState{
 		UserID: owner.ID, DeviceID: testBackgroundPileID,
@@ -38,6 +38,169 @@ func TestReminderSchedulerDoesNotRequestWithoutEnabledReminderRules(t *testing.T
 	states, err := manager.repository.ListWatchRefreshStates("")
 	if err != nil || len(states) != 0 {
 		t.Fatalf("orphan scheduler states = %+v, err %v", states, err)
+	}
+}
+
+func TestTemporaryReminderStopsAfterFirstIdleNotification(t *testing.T) {
+	var requests int32
+	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNumber := atomic.AddInt32(&requests, 1)
+		used := `[1,2,3,4,5,6,7,8,9,10]`
+		if requestNumber > 1 {
+			used = `[2,3,4,5,6,7,8,9,10]`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":%s}`, testBackgroundPileID, used)
+	}))
+	deleteReminderRulesForUser(t, manager, owner.ID)
+	deleteReminderRulesForUser(t, manager, other.ID)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable power-off: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	setReminderTestClock(manager, &now)
+	result, err := manager.CreateWatchRuleWithInitialCheck(owner.ID, model.WatchRuleCreateRequest{DeviceID: testBackgroundPileID})
+	if err != nil || result.Rule == nil || !result.BackgroundScheduled || len(result.IdlePortIDs) != 0 {
+		t.Fatalf("create temporary reminder = %+v, err %v", result, err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("opening check requests = %d, want 1", got)
+	}
+
+	now = now.Add(10 * time.Minute)
+	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
+		t.Fatalf("idle scheduler cycle: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 2 {
+		t.Fatalf("idle cycle requests = %d, want 2 total", got)
+	}
+	rules, err := manager.WatchRules(owner.ID)
+	if err != nil || len(rules) != 1 || rules[0].CompletedAt == nil ||
+		rules[0].CompletionReason != model.WatchCompletionNotified || rules[0].Enabled {
+		t.Fatalf("completed temporary rule = %+v, err %v", rules, err)
+	}
+	page, err := manager.Notifications(owner.ID, "", "all", 20)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Type != model.NotificationPileAvailable {
+		t.Fatalf("idle notification page = %+v, err %v", page, err)
+	}
+
+	now = now.Add(30 * time.Minute)
+	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
+		t.Fatalf("post-completion scheduler cycle: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 2 {
+		t.Fatalf("completed reminder continued requesting; total %d", got)
+	}
+}
+
+func TestTemporaryReminderReturnsCurrentIdlePortsWithoutSavingTask(t *testing.T) {
+	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[2,3,4,5,6,7,8,9,10]}`, testBackgroundPileID)
+	}))
+	deleteReminderRulesForUser(t, manager, owner.ID)
+	deleteReminderRulesForUser(t, manager, other.ID)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable power-off: %v", err)
+	}
+	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
+	result, err := manager.CreateWatchRuleWithInitialCheck(owner.ID, model.WatchRuleCreateRequest{DeviceID: testBackgroundPileID})
+	if err != nil || result.Rule != nil || result.BackgroundScheduled || len(result.IdlePortIDs) != 1 || result.IdlePortIDs[0] != 1 {
+		t.Fatalf("immediate idle result = %+v, err %v", result, err)
+	}
+	rules, err := manager.WatchRules(owner.ID)
+	if err != nil || len(rules) != 0 {
+		t.Fatalf("immediate idle left task history = %+v, err %v", rules, err)
+	}
+}
+
+func TestTemporaryReminderOpeningFailureUsesPersistedBackoff(t *testing.T) {
+	var requests int32
+	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		http.Error(w, "temporary upstream failure", http.StatusBadGateway)
+	}))
+	deleteReminderRulesForUser(t, manager, owner.ID)
+	deleteReminderRulesForUser(t, manager, other.ID)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable power-off: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	setReminderTestClock(manager, &now)
+	result, err := manager.CreateWatchRuleWithInitialCheck(owner.ID, model.WatchRuleCreateRequest{DeviceID: testBackgroundPileID})
+	if err != nil || result.Rule == nil || !result.BackgroundScheduled {
+		t.Fatalf("opening failure result = %+v, err %v", result, err)
+	}
+	state, ok, err := manager.repository.LoadWatchRefreshState(owner.ID, testBackgroundPileID)
+	if err != nil || !ok || state.PausedReason != watchPauseBackoff || state.ConsecutiveFailures != 1 ||
+		!state.NextAttemptAt.Equal(now.Add(initialReminderFailureBackoff)) {
+		t.Fatalf("opening failure state = %+v, ok %v, err %v", state, ok, err)
+	}
+	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
+		t.Fatalf("immediate retry cycle: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("opening failure retried immediately; requests %d", got)
+	}
+}
+
+func TestTemporaryReminderTwoHourRequestBudgetAndExpirySurviveRestart(t *testing.T) {
+	var requests int32
+	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[1,2,3,4,5,6,7,8,9,10]}`, testBackgroundPileID)
+	}))
+	deleteReminderRulesForUser(t, manager, owner.ID)
+	deleteReminderRulesForUser(t, manager, other.ID)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable power-off: %v", err)
+	}
+	start := time.Now().UTC().Truncate(time.Second)
+	now := start
+	setReminderTestClock(manager, &now)
+	if _, err := manager.CreateWatchRuleWithInitialCheck(owner.ID, model.WatchRuleCreateRequest{DeviceID: testBackgroundPileID}); err != nil {
+		t.Fatalf("create two-hour reminder: %v", err)
+	}
+	initialChecks, err := manager.repository.MetricKindCount("watch_initial_check", time.Time{})
+	if err != nil || initialChecks != 1 {
+		t.Fatalf("watch_initial_check metric = %d, err %v", initialChecks, err)
+	}
+	for step := 1; step <= 12; step++ {
+		now = start.Add(time.Duration(step*10) * time.Minute)
+		if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
+			t.Fatalf("scheduler step %d: %v", step, err)
+		}
+	}
+	backgroundRequests := atomic.LoadInt32(&requests) - 1
+	if backgroundRequests < 1 || backgroundRequests > 12 {
+		t.Fatalf("two-hour background request count = %d, want at most 12", backgroundRequests)
+	}
+	rules, err := manager.WatchRules(owner.ID)
+	if err != nil || len(rules) != 1 || rules[0].CompletionReason != model.WatchCompletionExpired || rules[0].CompletedAt == nil {
+		t.Fatalf("expired temporary rule = %+v, err %v", rules, err)
+	}
+
+	restarted, err := NewManager(manager.repository, "", manager.requests, "", manager.minInterval)
+	if err != nil {
+		t.Fatalf("restart manager: %v", err)
+	}
+	setReminderTestClock(restarted, &now)
+	before := atomic.LoadInt32(&requests)
+	if err := restarted.runReminderSchedulerOnce(context.Background(), now.Add(time.Hour)); err != nil {
+		t.Fatalf("post-expiry restart cycle: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != before {
+		t.Fatalf("restart revived expired task: requests %d -> %d", before, got)
 	}
 }
 

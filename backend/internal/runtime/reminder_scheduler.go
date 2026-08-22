@@ -161,6 +161,12 @@ func (m *Manager) runReminderSchedulerOnce(ctx context.Context, now time.Time) e
 		return err
 	}
 	now = now.UTC()
+	if _, err := m.repository.CompleteExpiredWatchRules(now); err != nil {
+		return fmt.Errorf("complete expired reminder tasks: %w", err)
+	}
+	if _, err := m.repository.CompleteNotifiedTemporaryWatchRules(now); err != nil {
+		return fmt.Errorf("recover notified reminder tasks: %w", err)
+	}
 	if err := m.maybeRunRetentionMaintenance(now); err != nil {
 		return fmt.Errorf("run retention maintenance: %w", err)
 	}
@@ -256,6 +262,7 @@ func (m *Manager) reminderTargets() ([]reminderTarget, error) {
 	m.mu.RUnlock()
 	sort.Slice(users, func(i, j int) bool { return users[i].id < users[j].id })
 
+	settings := normalizeRegistrationSettings(m.Settings())
 	targets := make([]reminderTarget, 0)
 	for _, user := range users {
 		rules, err := m.repository.ListWatchRules(user.id)
@@ -264,7 +271,9 @@ func (m *Manager) reminderTargets() ([]reminderTarget, error) {
 		}
 		byPile := make(map[string][]model.WatchRule)
 		for _, rule := range rules {
-			if rule.Enabled {
+			if rule.Enabled && rule.CompletedAt == nil &&
+				(rule.Mode != model.WatchRuleRecurring || settings.RecurringRemindersEnabled) &&
+				(rule.Mode != model.WatchRuleTemporary || rule.ExpiresAt != nil && rule.ExpiresAt.After(m.reminderSchedulerNow())) {
 				byPile[rule.DeviceID] = append(byPile[rule.DeviceID], rule)
 			}
 		}
@@ -650,7 +659,8 @@ func (m *Manager) currentReminderPileRules(userID, deviceID string) ([]model.Wat
 	}
 	current := make([]model.WatchRule, 0)
 	for _, rule := range rules {
-		if rule.DeviceID == deviceID && rule.Enabled {
+		if rule.DeviceID == deviceID && rule.Enabled && rule.CompletedAt == nil &&
+			(rule.Mode != model.WatchRuleTemporary || rule.ExpiresAt != nil && rule.ExpiresAt.After(m.reminderSchedulerNow())) {
 			current = append(current, rule)
 		}
 	}
@@ -685,6 +695,15 @@ func reminderRulesActiveAt(rules []model.WatchRule, now time.Time) (bool, time.T
 }
 
 func reminderRuleActiveAt(rule model.WatchRule, now time.Time) (bool, time.Time, error) {
+	if rule.CompletedAt != nil {
+		return false, now.UTC().Add(24 * time.Hour), nil
+	}
+	if rule.Mode == model.WatchRuleTemporary {
+		if rule.ExpiresAt == nil || !rule.ExpiresAt.After(now) {
+			return false, now.UTC().Add(24 * time.Hour), nil
+		}
+		return true, now.UTC(), nil
+	}
 	location, err := time.LoadLocation(rule.Timezone)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("load watch rule timezone: %w", err)
