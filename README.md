@@ -432,9 +432,10 @@ YYB_API_SECRET=base64-encoded-hmac-secret
 YYB_BASE_URL=http://127.0.0.1:8000
 # 可选：启用通知中心里的微信提醒绑定
 WXPUSHER_APP_TOKEN=AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+PUBLIC_BASE_URL=https://charge.example.com
 ```
 
-`WXPUSHER_APP_TOKEN` 未配置时，站内通知和浏览器提醒保持可用，通知中心会显示微信提醒暂未开放。生产环境默认使用 WxPusher 官方 HTTPS 接口；`WXPUSHER_BASE_URL` 仅供本地测试或私有代理覆盖，不建议在线上随意修改。
+`WXPUSHER_APP_TOKEN` 未配置时，站内通知和浏览器提醒保持可用，通知中心会显示微信提醒暂未开放。启用后必须同时设置只包含协议和域名的 `PUBLIC_BASE_URL`，微信消息会用它生成返回通知中心的链接；生产环境必须使用 HTTPS。生产环境默认使用 WxPusher 官方 HTTPS 接口；`WXPUSHER_BASE_URL` 仅供本地测试或私有代理覆盖，不建议在线上随意修改。
 
 yyb_go 环境文件需要包含：
 

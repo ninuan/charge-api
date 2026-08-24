@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -56,6 +58,28 @@ func wxPusherClientFromEnv(lookup envLookup) (*wxpusher.Client, error) {
 		return nil, nil
 	}
 	return wxpusher.NewClient(wxpusher.Config{AppToken: token, BaseURL: baseURL})
+}
+
+func publicBaseURLFromEnv(lookup envLookup, required bool) (string, error) {
+	raw := strings.TrimRight(strings.TrimSpace(lookup("PUBLIC_BASE_URL")), "/")
+	if raw == "" {
+		if required {
+			return "", fmt.Errorf("PUBLIC_BASE_URL is required when WXPUSHER_APP_TOKEN is set")
+		}
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" {
+		return "", fmt.Errorf("PUBLIC_BASE_URL must be an origin without path, query, or credentials")
+	}
+	if parsed.Scheme != "https" {
+		host := parsed.Hostname()
+		ip := net.ParseIP(host)
+		if parsed.Scheme != "http" || (host != "localhost" && (ip == nil || !ip.IsLoopback())) {
+			return "", fmt.Errorf("PUBLIC_BASE_URL must use HTTPS or loopback HTTP")
+		}
+	}
+	return raw, nil
 }
 
 func devForceAuthExpiredEnabled(lookup envLookup) bool {
@@ -120,6 +144,10 @@ func main() {
 	if wxPusherClient != nil {
 		log.Printf("wxpusher integration enabled")
 	}
+	publicBaseURL, err := publicBaseURLFromEnv(os.Getenv, wxPusherClient != nil)
+	if err != nil {
+		log.Fatalf("configure public base url: %v", err)
+	}
 
 	cookieKey, err := persistence.DecodeCookieKey(os.Getenv("CHARGE_COOKIE_KEY"))
 	if err != nil {
@@ -139,6 +167,13 @@ func main() {
 	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
 	if err := manager.StartReminderScheduler(schedulerCtx); err != nil {
 		log.Fatalf("start reminder scheduler: %v", err)
+	}
+	dispatcherStarted := false
+	if wxPusherClient != nil {
+		if err := manager.StartNotificationDispatcher(schedulerCtx, wxPusherClient, publicBaseURL); err != nil {
+			log.Fatalf("start notification dispatcher: %v", err)
+		}
+		dispatcherStarted = true
 	}
 	defer stopScheduler()
 	if manager.MigratedLegacyJSON() {
@@ -199,6 +234,11 @@ func main() {
 		if waitErr := manager.WaitReminderScheduler(waitCtx); waitErr != nil {
 			log.Printf("reminder scheduler shutdown failed: %v", waitErr)
 		}
+		if dispatcherStarted {
+			if waitErr := manager.WaitNotificationDispatcher(waitCtx); waitErr != nil {
+				log.Printf("notification dispatcher shutdown failed: %v", waitErr)
+			}
+		}
 		cancel()
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server stopped: %v", err)
@@ -216,6 +256,11 @@ func main() {
 		}
 		if err := manager.WaitReminderScheduler(shutdownCtx); err != nil {
 			log.Printf("reminder scheduler shutdown failed: %v", err)
+		}
+		if dispatcherStarted {
+			if err := manager.WaitNotificationDispatcher(shutdownCtx); err != nil {
+				log.Printf("notification dispatcher shutdown failed: %v", err)
+			}
 		}
 	}
 }

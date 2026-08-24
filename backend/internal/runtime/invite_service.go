@@ -129,6 +129,11 @@ func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, int64, e
 	if err != nil {
 		return metricRows, historyRows, 0, fmt.Errorf("prune resolved notifications: %w", err)
 	}
+	if _, _, err := m.repository.PruneWxPusherHistory(
+		now.UTC().AddDate(0, 0, -settings.NotificationRetentionDays),
+	); err != nil {
+		return metricRows, historyRows, notificationRows, fmt.Errorf("prune wxpusher history: %w", err)
+	}
 	m.lastRetentionRun = now.UTC()
 	return metricRows, historyRows, notificationRows, nil
 }

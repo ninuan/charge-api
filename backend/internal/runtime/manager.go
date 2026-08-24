@@ -59,26 +59,27 @@ const (
 var recoveryStatusCodePattern = regexp.MustCompile(`(?:status=|returned\s+)([1-5][0-9]{2})`)
 
 type Manager struct {
-	mu                sync.RWMutex
-	saveMu            sync.Mutex
-	watchMu           sync.Mutex
-	notificationMu    sync.Mutex
-	wxPusherMu        sync.Mutex
-	wxPusherAttempts  map[string][]time.Time
-	retentionMu       sync.Mutex
-	lastRetentionRun  time.Time
-	backgroundRefresh backgroundRefreshCoordinator
-	reminderScheduler reminderSchedulerCoordinator
-	notificationHub   notificationEventHub
-	repository        *persistence.Store
-	requests          []parser.CaptureRequest
-	minInterval       time.Duration
-	users             map[string]model.User
-	runtimes          map[string]*UserRuntime
-	initialPass       string
-	migrated          bool
-	settings          model.RegistrationSettings
-	invites           map[string]model.InviteCode
+	mu                     sync.RWMutex
+	saveMu                 sync.Mutex
+	watchMu                sync.Mutex
+	notificationMu         sync.Mutex
+	wxPusherMu             sync.Mutex
+	wxPusherAttempts       map[string][]time.Time
+	retentionMu            sync.Mutex
+	lastRetentionRun       time.Time
+	backgroundRefresh      backgroundRefreshCoordinator
+	reminderScheduler      reminderSchedulerCoordinator
+	notificationDispatcher notificationDispatcherCoordinator
+	notificationHub        notificationEventHub
+	repository             *persistence.Store
+	requests               []parser.CaptureRequest
+	minInterval            time.Duration
+	users                  map[string]model.User
+	runtimes               map[string]*UserRuntime
+	initialPass            string
+	migrated               bool
+	settings               model.RegistrationSettings
+	invites                map[string]model.InviteCode
 }
 
 type UserRuntime struct {

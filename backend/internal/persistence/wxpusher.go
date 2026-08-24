@@ -127,6 +127,42 @@ func (s *Store) LoadWxPusherBinding(userID string) (model.WxPusherBinding, bool,
 	return binding, true, nil
 }
 
+func (s *Store) RecordWxPusherDeliveryAccepted(userID string, at time.Time) error {
+	_, err := s.db.Exec(`
+		UPDATE wxpusher_bindings
+		SET last_accepted_at=?, last_error_code='', last_error_at=NULL, updated_at=?
+		WHERE user_id=?
+	`, at.UTC().Unix(), at.UTC().Unix(), strings.TrimSpace(userID))
+	if err != nil {
+		return fmt.Errorf("record wxpusher accepted delivery: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) RecordWxPusherProviderSuccess(userID string, at time.Time) error {
+	_, err := s.db.Exec(`
+		UPDATE wxpusher_bindings
+		SET last_provider_success_at=?, last_error_code='', last_error_at=NULL, updated_at=?
+		WHERE user_id=?
+	`, at.UTC().Unix(), at.UTC().Unix(), strings.TrimSpace(userID))
+	if err != nil {
+		return fmt.Errorf("record wxpusher provider success: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) RecordWxPusherDeliveryError(userID, code string, at time.Time) error {
+	_, err := s.db.Exec(`
+		UPDATE wxpusher_bindings
+		SET last_error_code=?, last_error_at=?, updated_at=?
+		WHERE user_id=?
+	`, strings.TrimSpace(code), at.UTC().Unix(), at.UTC().Unix(), strings.TrimSpace(userID))
+	if err != nil {
+		return fmt.Errorf("record wxpusher delivery error: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) DeleteWxPusherBinding(userID string) (bool, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -475,6 +511,40 @@ func (s *Store) LoadNotificationDelivery(userID, deliveryID string) (model.Notif
 	return delivery, true, nil
 }
 
+func (s *Store) ListNotificationDeliveries(userID string, limit int) ([]model.NotificationDelivery, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("notification deliveries require a user")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	rows, err := s.db.Query(notificationDeliverySelect+`
+		WHERE user_id = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list notification deliveries: %w", err)
+	}
+	defer rows.Close()
+	deliveries := make([]model.NotificationDelivery, 0)
+	for rows.Next() {
+		delivery, err := scanNotificationDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, delivery)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate notification deliveries: %w", err)
+	}
+	return deliveries, nil
+}
+
 func (s *Store) ClaimNotificationDeliveries(now, staleBefore time.Time, limit int) ([]model.NotificationDelivery, error) {
 	if now.IsZero() || staleBefore.IsZero() || !staleBefore.Before(now) || limit < 1 || limit > 100 {
 		return nil, fmt.Errorf("notification delivery claim parameters are invalid")
@@ -487,15 +557,11 @@ func (s *Store) ClaimNotificationDeliveries(now, staleBefore time.Time, limit in
 	rows, err := tx.Query(`
 		SELECT id
 		FROM notification_deliveries
-		WHERE (
-			status IN ('pending', 'retry_wait')
-			AND COALESCE(next_attempt_at, created_at) <= ?
-		) OR (
-			status = 'sending' AND claimed_at IS NOT NULL AND claimed_at <= ?
-		)
+		WHERE status IN ('pending', 'retry_wait')
+		  AND COALESCE(next_attempt_at, created_at) <= ?
 		ORDER BY COALESCE(next_attempt_at, created_at), created_at, id
 		LIMIT ?
-	`, now.UTC().Unix(), staleBefore.UTC().Unix(), limit)
+	`, now.UTC().Unix(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("select notification deliveries to claim: %w", err)
 	}
@@ -516,11 +582,9 @@ func (s *Store) ClaimNotificationDeliveries(now, staleBefore time.Time, limit in
 		result, err := tx.Exec(`
 			UPDATE notification_deliveries
 			SET status='sending', claimed_at=?, attempt_count=attempt_count+1, updated_at=?
-			WHERE id=? AND (
-				(status IN ('pending', 'retry_wait') AND COALESCE(next_attempt_at, created_at) <= ?)
-				OR (status='sending' AND claimed_at IS NOT NULL AND claimed_at <= ?)
-			)
-		`, now.UTC().Unix(), now.UTC().Unix(), id, now.UTC().Unix(), staleBefore.UTC().Unix())
+			WHERE id=? AND status IN ('pending', 'retry_wait')
+			  AND COALESCE(next_attempt_at, created_at) <= ?
+		`, now.UTC().Unix(), now.UTC().Unix(), id, now.UTC().Unix())
 		if err != nil {
 			return nil, fmt.Errorf("claim notification delivery %s: %w", id, err)
 		}
@@ -541,6 +605,121 @@ func (s *Store) ClaimNotificationDeliveries(now, staleBefore time.Time, limit in
 		return nil, fmt.Errorf("commit notification delivery claim: %w", err)
 	}
 	return claimed, nil
+}
+
+// RecoverStaleSendingDeliveries deliberately does not resend a request whose
+// process died after it was placed on the wire. Without a provider record id
+// the outcome is ambiguous, so automatic recovery must prefer one missed
+// notification over a duplicate push.
+func (s *Store) RecoverStaleSendingDeliveries(staleBefore, now time.Time) (int, error) {
+	if staleBefore.IsZero() || now.IsZero() || !staleBefore.Before(now) {
+		return 0, fmt.Errorf("stale notification delivery recovery parameters are invalid")
+	}
+	result, err := s.db.Exec(`
+		UPDATE notification_deliveries
+		SET status='uncertain', next_attempt_at=NULL, claimed_at=NULL,
+		    last_error_code='send_outcome_unknown', last_error_message='', updated_at=?
+		WHERE status='sending' AND claimed_at IS NOT NULL AND claimed_at <= ?
+	`, now.UTC().Unix(), staleBefore.UTC().Unix())
+	if err != nil {
+		return 0, fmt.Errorf("recover stale notification deliveries: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read stale notification delivery recovery: %w", err)
+	}
+	return int(count), nil
+}
+
+// ClaimAcceptedNotificationDeliveries leases provider status queries while
+// preserving the accepted state. A sendRecordId-bearing task is never moved
+// back into the sending queue.
+func (s *Store) ClaimAcceptedNotificationDeliveries(now, staleBefore time.Time, limit int) ([]model.NotificationDelivery, error) {
+	if now.IsZero() || staleBefore.IsZero() || !staleBefore.Before(now) || limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("accepted notification delivery claim parameters are invalid")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin accepted notification delivery claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(`
+		SELECT id FROM notification_deliveries
+		WHERE status='accepted'
+		  AND provider_record_id <> ''
+		  AND COALESCE(next_attempt_at, created_at) <= ?
+		  AND (claimed_at IS NULL OR claimed_at <= ?)
+		ORDER BY COALESCE(next_attempt_at, created_at), created_at, id
+		LIMIT ?
+	`, now.UTC().Unix(), staleBefore.UTC().Unix(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("select accepted notification deliveries: %w", err)
+	}
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan accepted notification delivery claim: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close accepted notification delivery claim rows: %w", err)
+	}
+	claimed := make([]model.NotificationDelivery, 0, len(ids))
+	for _, id := range ids {
+		result, err := tx.Exec(`
+			UPDATE notification_deliveries SET claimed_at=?, updated_at=?
+			WHERE id=? AND status='accepted' AND provider_record_id <> ''
+			  AND COALESCE(next_attempt_at, created_at) <= ?
+			  AND (claimed_at IS NULL OR claimed_at <= ?)
+		`, now.UTC().Unix(), now.UTC().Unix(), id, now.UTC().Unix(), staleBefore.UTC().Unix())
+		if err != nil {
+			return nil, fmt.Errorf("claim accepted notification delivery %s: %w", id, err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("read accepted notification delivery claim %s: %w", id, err)
+		}
+		if updated != 1 {
+			continue
+		}
+		delivery, err := scanNotificationDelivery(tx.QueryRow(notificationDeliverySelect+` WHERE id = ?`, id))
+		if err != nil {
+			return nil, err
+		}
+		claimed = append(claimed, delivery)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit accepted notification delivery claim: %w", err)
+	}
+	return claimed, nil
+}
+
+func (s *Store) PruneWxPusherHistory(before time.Time) (int64, int64, error) {
+	if before.IsZero() {
+		return 0, 0, fmt.Errorf("wxpusher retention boundary is required")
+	}
+	deliveries, err := s.pruneRowsInBatchesWhere(
+		"notification_deliveries",
+		"updated_at",
+		before.UTC().Unix(),
+		"status IN ('provider_succeeded', 'suppressed', 'uncertain', 'failed', 'cancelled')",
+	)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prune wxpusher deliveries: %w", err)
+	}
+	sessions, err := s.pruneRowsInBatchesWhere(
+		"wxpusher_bind_sessions",
+		"expires_at",
+		before.UTC().Unix(),
+		"expires_at IS NOT NULL",
+	)
+	if err != nil {
+		return deliveries, 0, fmt.Errorf("prune wxpusher bind sessions: %w", err)
+	}
+	return deliveries, sessions, nil
 }
 
 const notificationDeliverySelect = `

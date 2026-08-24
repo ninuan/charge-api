@@ -376,6 +376,115 @@ func (s *Store) InsertNotificationIfAbsent(notification model.Notification) (boo
 	return rows == 1, nil
 }
 
+// InsertNotificationWithWxPusherDeliveryIfAbsent commits the in-app
+// notification and its optional external delivery as one durable fact. A
+// missing, disabled, or unsubscribed binding deliberately leaves no delivery
+// row; quiet hours leave a terminal suppressed row for user-visible history.
+func (s *Store) InsertNotificationWithWxPusherDeliveryIfAbsent(
+	notification model.Notification,
+	deliveryID string,
+	suppress bool,
+) (bool, bool, error) {
+	if err := validateNotification(notification); err != nil {
+		return false, false, err
+	}
+	deliveryID = strings.TrimSpace(deliveryID)
+	if deliveryID == "" {
+		return false, false, fmt.Errorf("wxpusher delivery requires an id")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, false, fmt.Errorf("begin notification outbox: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.Exec(`
+		INSERT INTO notifications(
+			id, user_id, type, severity, title, message, device_id, port_id,
+			source_event_id, dedupe_key, read_at, resolved_at, created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING
+	`,
+		notification.ID,
+		notification.UserID,
+		storedNotificationType(notification.Type),
+		notification.Severity,
+		notification.Title,
+		notification.Message,
+		notification.DeviceID,
+		notification.PortID,
+		notification.SourceEventID,
+		notification.DedupeKey,
+		unixTimeOrNil(notification.ReadAt),
+		unixTimeOrNil(notification.ResolvedAt),
+		notification.CreatedAt.UTC().Unix(),
+	)
+	if err != nil {
+		return false, false, fmt.Errorf("insert notification outbox fact: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, false, fmt.Errorf("read notification outbox result: %w", err)
+	}
+	if rows != 1 {
+		if err := tx.Commit(); err != nil {
+			return false, false, fmt.Errorf("commit duplicate notification outbox: %w", err)
+		}
+		return false, false, nil
+	}
+
+	var enabled int
+	var eventTypes model.WxPusherEventTypes
+	err = tx.QueryRow(`
+		SELECT enabled, event_types FROM wxpusher_bindings WHERE user_id = ?
+	`, notification.UserID).Scan(&enabled, &eventTypes)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, false, fmt.Errorf("load wxpusher outbox policy: %w", err)
+	}
+	shouldQueue := err == nil && enabled != 0 && eventTypes&wxPusherEventMask(notification.Type) != 0
+	if shouldQueue {
+		status := model.NotificationDeliveryPending
+		errorCode := ""
+		if suppress {
+			status = model.NotificationDeliverySuppressed
+			errorCode = "quiet_hours"
+		}
+		now := notification.CreatedAt.UTC().Truncate(time.Second)
+		var nextAttemptAt any = now.Unix()
+		if suppress {
+			nextAttemptAt = nil
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO notification_deliveries(
+				id, notification_id, user_id, channel, status, is_test,
+				attempt_count, next_attempt_at, last_error_code, created_at, updated_at
+			) VALUES(?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+			ON CONFLICT DO NOTHING
+		`, deliveryID, notification.ID, notification.UserID, wxPusherChannel, status,
+			nextAttemptAt, errorCode, now.Unix(), now.Unix()); err != nil {
+			return false, false, fmt.Errorf("insert wxpusher outbox delivery: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, false, fmt.Errorf("commit notification outbox: %w", err)
+	}
+	return true, shouldQueue, nil
+}
+
+func wxPusherEventMask(notificationType model.NotificationType) model.WxPusherEventTypes {
+	switch notificationType {
+	case model.NotificationPileAvailable:
+		return model.WxPusherEventPileAvailable
+	case model.NotificationCredentialExpired:
+		return model.WxPusherEventCredentialExpired
+	case model.NotificationPileOffline:
+		return model.WxPusherEventPileOffline
+	case model.NotificationPileRecovered:
+		return model.WxPusherEventPileRecovered
+	default:
+		return 0
+	}
+}
+
 func (s *Store) ResolveActiveNotification(userID, dedupeKey string, at time.Time) (model.Notification, bool, error) {
 	userID = strings.TrimSpace(userID)
 	dedupeKey = strings.TrimSpace(dedupeKey)

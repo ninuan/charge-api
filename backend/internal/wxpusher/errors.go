@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type ErrorCode string
@@ -27,6 +28,7 @@ type Error struct {
 	Retryable    bool
 	HTTPStatus   int
 	ProviderCode int
+	RetryAfter   time.Duration
 }
 
 // Error deliberately excludes provider messages, request URLs and identifiers.
@@ -49,6 +51,22 @@ func CodeOf(err error) ErrorCode {
 func IsRetryable(err error) bool {
 	var providerErr *Error
 	return errors.As(err, &providerErr) && providerErr.Retryable
+}
+
+func HTTPStatusOf(err error) int {
+	var providerErr *Error
+	if errors.As(err, &providerErr) {
+		return providerErr.HTTPStatus
+	}
+	return 0
+}
+
+func RetryAfterOf(err error) time.Duration {
+	var providerErr *Error
+	if errors.As(err, &providerErr) {
+		return providerErr.RetryAfter
+	}
+	return 0
 }
 
 func newClientError(code ErrorCode, operation string, retryable bool, httpStatus, providerCode int, _ error) *Error {

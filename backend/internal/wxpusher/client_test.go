@@ -136,6 +136,19 @@ func TestClientClassifiesTimeout(t *testing.T) {
 	assertProviderError(t, err, ErrorProviderTimeout, true)
 }
 
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	if got := parseRetryAfter("120", now); got != 2*time.Minute {
+		t.Fatalf("delta retry-after = %s", got)
+	}
+	if got := parseRetryAfter(now.Add(3*time.Minute).Format(http.TimeFormat), now); got != 3*time.Minute {
+		t.Fatalf("date retry-after = %s", got)
+	}
+	if got := parseRetryAfter("invalid", now); got != 0 {
+		t.Fatalf("invalid retry-after = %s", got)
+	}
+}
+
 func TestClientClassifiesBusinessFailuresWithoutLeakingSecrets(t *testing.T) {
 	const token = "AT_do_not_log_this_token"
 	const uid = "UID_do_not_log_this_user"

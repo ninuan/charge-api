@@ -535,10 +535,25 @@ func (m *Manager) RecordNotification(notification model.Notification) (model.Not
 	if notification.CreatedAt.IsZero() {
 		notification.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	}
-	if err := m.repository.SaveNotification(notification); err != nil {
+	suppressed, err := m.wxPusherQuietAt(notification.UserID, notification.CreatedAt)
+	if err != nil {
+		return model.Notification{}, fmt.Errorf("load notification delivery preference: %w", err)
+	}
+	inserted, queued, err := m.repository.InsertNotificationWithWxPusherDeliveryIfAbsent(
+		notification,
+		randomID("ndl"),
+		suppressed,
+	)
+	if err != nil {
 		return model.Notification{}, fmt.Errorf("record notification: %w", err)
 	}
+	if !inserted {
+		return model.Notification{}, fmt.Errorf("record notification: duplicate notification")
+	}
 	m.notificationHub.publish(notification)
+	if queued && !suppressed {
+		m.wakeNotificationDispatcher()
+	}
 	return notification, nil
 }
 

@@ -81,6 +81,7 @@ type MessageStatus struct {
 	ProviderCode int
 	Status       string
 	Succeeded    bool
+	Failed       bool
 }
 
 type envelope struct {
@@ -322,7 +323,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, r
 		return newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, 0, err)
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return newClientError(ErrorRateLimited, operation, true, resp.StatusCode, 0, nil)
+		providerErr := newClientError(ErrorRateLimited, operation, true, resp.StatusCode, 0, nil)
+		providerErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		return providerErr
 	}
 	if resp.StatusCode >= 500 {
 		return newClientError(ErrorProviderUnavailable, operation, true, resp.StatusCode, 0, nil)
@@ -365,6 +368,20 @@ func readLimited(reader io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("response exceeds limit")
 	}
 	return body, nil
+}
+
+func parseRetryAfter(raw string, now time.Time) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := time.ParseDuration(raw + "s"); err == nil && seconds > 0 {
+		return seconds
+	}
+	if at, err := http.ParseTime(raw); err == nil && at.After(now) {
+		return at.Sub(now)
+	}
+	return 0
 }
 
 func validateBaseURL(raw string) (string, error) {
@@ -442,7 +459,12 @@ func parseMessageStatus(raw json.RawMessage, requestedID string) (MessageStatus,
 		if text == "" {
 			return MessageStatus{}, fmt.Errorf("missing status")
 		}
-		return MessageStatus{SendRecordID: requestedID, Status: text}, nil
+		return MessageStatus{
+			SendRecordID: requestedID,
+			Status:       text,
+			Succeeded:    providerStatusSucceeded(text),
+			Failed:       providerStatusFailed(text),
+		}, nil
 	}
 	var data messageStatusData
 	if err := json.Unmarshal(raw, &data); err != nil {
@@ -458,7 +480,7 @@ func parseMessageStatus(raw json.RawMessage, requestedID string) (MessageStatus,
 	if strings.TrimSpace(data.Status) == "" && data.Success == nil && data.Code == 0 {
 		return MessageStatus{}, fmt.Errorf("missing status")
 	}
-	succeeded := data.Code == 1000
+	succeeded := providerStatusSucceeded(data.Status)
 	if data.Success != nil {
 		succeeded = *data.Success
 	}
@@ -467,5 +489,16 @@ func parseMessageStatus(raw json.RawMessage, requestedID string) (MessageStatus,
 		ProviderCode: data.Code,
 		Status:       data.Status,
 		Succeeded:    succeeded,
+		Failed:       !succeeded && providerStatusFailed(data.Status),
 	}, nil
+}
+
+func providerStatusSucceeded(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return containsAny(status, "发送成功", "处理成功", "success", "succeeded")
+}
+
+func providerStatusFailed(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return containsAny(status, "发送失败", "处理失败", "拒绝", "拒收", "failed", "rejected")
 }

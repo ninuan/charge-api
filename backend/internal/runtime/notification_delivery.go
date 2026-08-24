@@ -92,14 +92,48 @@ func (m *Manager) recordNotificationOnceLocked(notification model.Notification) 
 	if notification.CreatedAt.IsZero() {
 		notification.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	}
-	inserted, err := m.repository.InsertNotificationIfAbsent(notification)
+	suppressed, err := m.wxPusherQuietAt(notification.UserID, notification.CreatedAt)
+	if err != nil {
+		return model.Notification{}, false, fmt.Errorf("load notification delivery preference: %w", err)
+	}
+	inserted, queued, err := m.repository.InsertNotificationWithWxPusherDeliveryIfAbsent(
+		notification,
+		randomID("ndl"),
+		suppressed,
+	)
 	if err != nil {
 		return model.Notification{}, false, fmt.Errorf("record notification once: %w", err)
 	}
 	if inserted {
 		m.notificationHub.publish(notification)
 	}
+	if queued && !suppressed {
+		m.wakeNotificationDispatcher()
+	}
 	return notification, inserted, nil
+}
+
+func (m *Manager) wxPusherQuietAt(userID string, at time.Time) (bool, error) {
+	preference, ok, err := m.repository.LoadNotificationPreference(userID)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		preference = defaultNotificationPreference(userID, at)
+	}
+	if !preference.QuietHoursEnabled || preference.QuietStartMinute == preference.QuietEndMinute {
+		return false, nil
+	}
+	location, err := time.LoadLocation(preference.Timezone)
+	if err != nil {
+		return false, err
+	}
+	local := at.In(location)
+	minute := local.Hour()*60 + local.Minute()
+	if preference.QuietStartMinute < preference.QuietEndMinute {
+		return minute >= preference.QuietStartMinute && minute < preference.QuietEndMinute, nil
+	}
+	return minute >= preference.QuietStartMinute || minute < preference.QuietEndMinute, nil
 }
 
 func (m *Manager) resolveNotification(userID, dedupeKey string, at time.Time) (model.Notification, bool, error) {

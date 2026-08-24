@@ -135,14 +135,17 @@ func TestNotificationDeliveryQueueClaimsDueRowsOnceAndCascades(t *testing.T) {
 	accepted.ID = "delivery-accepted"
 	accepted.IsTest = true
 	accepted.Status = model.NotificationDeliveryAccepted
+	accepted.ProviderRecordID = "record-accepted"
+	accepted.AcceptedAt = &due
+	accepted.NextAttemptAt = &due
 	createDelivery(accepted)
 
 	claimed, err := store.ClaimNotificationDeliveries(now, now.Add(-5*time.Minute), 10)
 	if err != nil {
 		t.Fatalf("ClaimNotificationDeliveries: %v", err)
 	}
-	if len(claimed) != 3 {
-		t.Fatalf("claimed %d deliveries, want 3: %+v", len(claimed), claimed)
+	if len(claimed) != 2 {
+		t.Fatalf("claimed %d deliveries, want 2: %+v", len(claimed), claimed)
 	}
 	claimedIDs := make(map[string]model.NotificationDelivery, len(claimed))
 	for _, delivery := range claimed {
@@ -151,8 +154,18 @@ func TestNotificationDeliveryQueueClaimsDueRowsOnceAndCascades(t *testing.T) {
 			t.Fatalf("delivery was not atomically claimed: %+v", delivery)
 		}
 	}
-	if claimedIDs[associated.ID].AttemptCount != 1 || claimedIDs[retry.ID].AttemptCount != 2 || claimedIDs[stale.ID].AttemptCount != 2 {
+	if claimedIDs[associated.ID].AttemptCount != 1 || claimedIDs[retry.ID].AttemptCount != 2 {
 		t.Fatalf("unexpected claim attempts: %+v", claimedIDs)
+	}
+	if recovered, err := store.RecoverStaleSendingDeliveries(now.Add(-5*time.Minute), now); err != nil || recovered != 1 {
+		t.Fatalf("RecoverStaleSendingDeliveries = %d, %v", recovered, err)
+	}
+	if loaded, ok, err := store.LoadNotificationDelivery(users[0].ID, stale.ID); err != nil || !ok || loaded.Status != model.NotificationDeliveryUncertain {
+		t.Fatalf("stale delivery recovery = %+v, ok %v, err %v", loaded, ok, err)
+	}
+	acceptedClaims, err := store.ClaimAcceptedNotificationDeliveries(now, now.Add(-5*time.Minute), 10)
+	if err != nil || len(acceptedClaims) != 1 || acceptedClaims[0].ID != accepted.ID {
+		t.Fatalf("accepted delivery claims = %+v, err %v", acceptedClaims, err)
 	}
 	claimedAgain, err := store.ClaimNotificationDeliveries(now.Add(time.Second), now.Add(-5*time.Minute), 10)
 	if err != nil || len(claimedAgain) != 0 {

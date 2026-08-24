@@ -90,3 +90,28 @@ func TestWxPusherClientConfigFromEnv(t *testing.T) {
 		t.Fatalf("configured client=%v err=%v", client, err)
 	}
 }
+
+func TestPublicBaseURLConfigFromEnv(t *testing.T) {
+	lookup := func(value string) envLookup {
+		return func(name string) string {
+			if name == "PUBLIC_BASE_URL" {
+				return value
+			}
+			return ""
+		}
+	}
+	if value, err := publicBaseURLFromEnv(lookup(""), false); err != nil || value != "" {
+		t.Fatalf("optional empty public URL = %q, %v", value, err)
+	}
+	if _, err := publicBaseURLFromEnv(lookup(""), true); err == nil {
+		t.Fatal("required empty public URL was accepted")
+	}
+	if value, err := publicBaseURLFromEnv(lookup("https://charge.example.com/"), true); err != nil || value != "https://charge.example.com" {
+		t.Fatalf("public URL = %q, %v", value, err)
+	}
+	for _, invalid := range []string{"http://charge.example.com", "https://user@example.com", "https://example.com/path"} {
+		if _, err := publicBaseURLFromEnv(lookup(invalid), true); err == nil {
+			t.Fatalf("invalid public URL %q was accepted", invalid)
+		}
+	}
+}
