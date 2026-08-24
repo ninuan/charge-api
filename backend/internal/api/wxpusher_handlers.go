@@ -71,6 +71,24 @@ func (s *Server) handleWxPusherTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, delivery)
 }
 
+func (s *Server) handleWxPusherTestRecheck(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	delivery, err := s.manager.RecheckWxPusherTestDelivery(r.Context(), user.ID)
+	if err != nil {
+		s.writeWxPusherError(w, "recheck_wxpusher_test", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, delivery)
+}
+
 func (s *Server) handleWxPusherBindSessions(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
@@ -132,6 +150,8 @@ func (s *Server) writeWxPusherError(w http.ResponseWriter, operation string, err
 		writeCodedError(w, http.StatusConflict, "WXPUSHER_CHANNEL_DISABLED", "请先开启微信提醒")
 	case errors.Is(err, appruntime.ErrWxPusherPreferenceInvalid):
 		writeCodedError(w, http.StatusBadRequest, "WXPUSHER_INVALID", "微信提醒设置无效")
+	case errors.Is(err, appruntime.ErrWxPusherTestDeliveryMissing):
+		writeCodedError(w, http.StatusNotFound, "WXPUSHER_TEST_NOT_FOUND", "未找到可查询的测试消息")
 	case errors.Is(err, appruntime.ErrWxPusherRateLimited):
 		retryAfter := time.Minute
 		var limited appruntime.WxPusherRateLimitError

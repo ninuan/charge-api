@@ -472,6 +472,36 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "503":
           $ref: "#/components/responses/WxPusherUnavailable"
+  /api/notification-channels/wxpusher/test/recheck:
+    post:
+      operationId: recheckWxPusherTestDelivery
+      summary: 重新查询当前用户最近一条 WxPusher 测试消息的供应商状态
+      description: 仅查询原投递记录，不创建或重新发送消息。已结束或尚未提交到供应商的状态会原样返回。
+      tags: [WxPusher]
+      responses:
+        "200":
+          description: 重新查询后的测试投递状态
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/PrivateNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDeliverySummary"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/OrdinaryUserRequired"
+        "404":
+          description: 当前用户没有测试投递记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/WxPusherUnavailable"
   /api/admin/trends:
     get:
       operationId: getAdminTrends
@@ -1727,7 +1757,7 @@ components:
     NotificationDeliverySummary:
       type: object
       additionalProperties: false
-      required: [id, status, isTest, updatedAt, message]
+      required: [id, status, isTest, createdAt, updatedAt, message]
       properties:
         id:
           type: string
@@ -1744,9 +1774,14 @@ components:
           type: string
           format: date-time
           description: WxPusher 状态接口确认处理成功的时间，不代表具体接收客户端已展示或已读。
+        createdAt:
+          type: string
+          format: date-time
+          description: 投递任务创建时间。
         updatedAt:
           type: string
           format: date-time
+          description: 最近一次本地状态更新或供应商状态查询时间。
         message:
           type: string
           maxLength: 200

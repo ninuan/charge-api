@@ -97,6 +97,68 @@ func TestWxPusherTestDeliveryDailyLimitSurvivesStoredHistory(t *testing.T) {
 	}
 }
 
+func TestWxPusherTestDeliveryRecheckQueriesExistingRecordWithoutResending(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	createdAt := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	now := createdAt.Add(2 * time.Minute)
+	setReminderTestClock(manager, &now)
+	saveTestWxPusherBinding(t, manager, owner.ID, createdAt, true, model.WxPusherAllEventTypes)
+	client := &fakeNotificationDeliveryClient{statuses: []wxpusher.MessageStatus{{
+		SendRecordID: "record-recheck", Status: "发送成功", Succeeded: true,
+	}}}
+	configureTestNotificationDispatcher(manager, client, &now)
+	acceptedAt := createdAt.Add(5 * time.Second)
+	delivery := model.NotificationDelivery{
+		ID: "ndl_recheck", UserID: owner.ID, Channel: "wxpusher", IsTest: true,
+		Status: model.NotificationDeliveryAccepted, ProviderRecordID: "record-recheck",
+		AcceptedAt: &acceptedAt, CreatedAt: createdAt, UpdatedAt: acceptedAt,
+	}
+	if err := manager.repository.SaveNotificationDelivery(delivery); err != nil {
+		t.Fatalf("save accepted test delivery: %v", err)
+	}
+
+	summary, err := manager.RecheckWxPusherTestDelivery(context.Background(), owner.ID)
+	if err != nil {
+		t.Fatalf("recheck test delivery: %v", err)
+	}
+	if summary.Status != model.NotificationDeliveryProviderSucceeded || summary.ProviderSucceededAt == nil ||
+		!summary.CreatedAt.Equal(createdAt) || !summary.UpdatedAt.Equal(now) {
+		t.Fatalf("rechecked summary=%+v", summary)
+	}
+	if client.queryCalls != 1 || client.sendCalls != 0 {
+		t.Fatalf("provider calls query=%d send=%d", client.queryCalls, client.sendCalls)
+	}
+}
+
+func TestWxPusherTestDeliveryRecheckKeepsUnconfirmedResultWithoutResending(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	createdAt := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	now := createdAt.Add(12 * time.Minute)
+	setReminderTestClock(manager, &now)
+	client := &fakeNotificationDeliveryClient{}
+	configureTestNotificationDispatcher(manager, client, &now)
+	delivery := model.NotificationDelivery{
+		ID: "ndl_uncertain", UserID: owner.ID, Channel: "wxpusher", IsTest: true,
+		Status: model.NotificationDeliveryUncertain, ProviderRecordID: "record-uncertain",
+		LastErrorCode: "provider_status_unknown", CreatedAt: createdAt, UpdatedAt: createdAt.Add(10 * time.Minute),
+	}
+	if err := manager.repository.SaveNotificationDelivery(delivery); err != nil {
+		t.Fatalf("save uncertain test delivery: %v", err)
+	}
+
+	summary, err := manager.RecheckWxPusherTestDelivery(context.Background(), owner.ID)
+	if err != nil {
+		t.Fatalf("recheck uncertain test delivery: %v", err)
+	}
+	if summary.Status != model.NotificationDeliveryUncertain || summary.ErrorCode != "ambiguous_result" ||
+		!summary.UpdatedAt.Equal(now) {
+		t.Fatalf("uncertain summary=%+v", summary)
+	}
+	if client.queryCalls != 1 || client.sendCalls != 0 {
+		t.Fatalf("provider calls query=%d send=%d", client.queryCalls, client.sendCalls)
+	}
+}
+
 type fakeWxPusherBindingClient struct {
 	now         *time.Time
 	uid         string

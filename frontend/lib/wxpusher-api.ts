@@ -66,3 +66,11 @@ export function testWxPusherChannel(options?: RequestOptions) {
     "暂时无法发送测试消息"
   )
 }
+
+export function recheckWxPusherTestDelivery(options?: RequestOptions) {
+  return request<NotificationDeliverySummary>(
+    `${channelPath}/test/recheck`,
+    { method: "POST", ...options },
+    "暂时无法重新查询测试消息状态"
+  )
+}

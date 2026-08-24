@@ -155,6 +155,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notification-channels/wxpusher/test/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重新查询当前用户最近一条 WxPusher 测试消息的供应商状态
+         * @description 仅查询原投递记录，不创建或重新发送消息。已结束或尚未提交到供应商的状态会原样返回。
+         */
+        post: operations["recheckWxPusherTestDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notification-preferences": {
         parameters: {
             query?: never;
@@ -482,6 +502,11 @@ export interface components {
              * @description WxPusher API 已受理时间。
              */
             acceptedAt?: string;
+            /**
+             * Format: date-time
+             * @description 投递任务创建时间。
+             */
+            createdAt: string;
             errorCode?: components["schemas"]["WxPusherErrorCode"];
             id: string;
             isTest: boolean;
@@ -492,7 +517,10 @@ export interface components {
              */
             providerSucceededAt?: string;
             status: components["schemas"]["NotificationDeliveryStatus"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 最近一次本地状态更新或供应商状态查询时间。
+             */
             updatedAt: string;
         };
         NotificationPage: {
@@ -1621,6 +1649,40 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             409: components["responses"]["WxPusherChannelConflict"];
             429: components["responses"]["WxPusherRateLimited"];
+            503: components["responses"]["WxPusherUnavailable"];
+        };
+    };
+    recheckWxPusherTestDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 重新查询后的测试投递状态 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationDeliverySummary"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            /** @description 当前用户没有测试投递记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
             503: components["responses"]["WxPusherUnavailable"];
         };
     };

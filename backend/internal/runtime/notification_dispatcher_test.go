@@ -15,6 +15,7 @@ type fakeNotificationDeliveryClient struct {
 	sendCalls  int
 	queryCalls int
 	sendErr    error
+	queryErr   error
 	statuses   []wxpusher.MessageStatus
 	messages   []wxpusher.Message
 }
@@ -30,6 +31,9 @@ func (f *fakeNotificationDeliveryClient) Send(_ context.Context, message wxpushe
 
 func (f *fakeNotificationDeliveryClient) QueryMessageStatus(_ context.Context, _ string) (wxpusher.MessageStatus, error) {
 	f.queryCalls++
+	if f.queryErr != nil {
+		return wxpusher.MessageStatus{}, f.queryErr
+	}
 	if len(f.statuses) == 0 {
 		return wxpusher.MessageStatus{SendRecordID: "record-1", Status: "处理中"}, nil
 	}
@@ -66,12 +70,17 @@ func TestNotificationDispatcherPersistsAcceptedThenProviderSucceededWithoutResen
 		client.messages[0].URL != "https://charge.example.com/dashboard?notification="+notification.ID {
 		t.Fatalf("unsafe or incomplete provider message: %+v", client.messages)
 	}
+	delivery.LastErrorCode = "wxpusher_invalid_response"
+	if err := manager.repository.SaveNotificationDelivery(delivery); err != nil {
+		t.Fatalf("seed stale provider error: %v", err)
+	}
 
 	now = now.Add(30 * time.Second)
 	if err := manager.runNotificationDispatcherOnce(context.Background(), now); err != nil {
 		t.Fatalf("first status query: %v", err)
 	}
-	if client.queryCalls != 1 || client.sendCalls != 1 || onlyTestDelivery(t, manager, owner.ID).Status != model.NotificationDeliveryAccepted {
+	delivery = onlyTestDelivery(t, manager, owner.ID)
+	if client.queryCalls != 1 || client.sendCalls != 1 || delivery.Status != model.NotificationDeliveryAccepted || delivery.LastErrorCode != "" {
 		t.Fatalf("pending confirmation resent or finalized early: send=%d query=%d delivery=%+v", client.sendCalls, client.queryCalls, onlyTestDelivery(t, manager, owner.ID))
 	}
 	now = time.Date(2026, 8, 24, 1, 2, 0, 0, time.UTC)
@@ -81,6 +90,38 @@ func TestNotificationDispatcherPersistsAcceptedThenProviderSucceededWithoutResen
 	delivery = onlyTestDelivery(t, manager, owner.ID)
 	if delivery.Status != model.NotificationDeliveryProviderSucceeded || delivery.ProviderSucceededAt == nil || client.sendCalls != 1 || client.queryCalls != 2 {
 		t.Fatalf("provider confirmation=%+v send=%d query=%d", delivery, client.sendCalls, client.queryCalls)
+	}
+}
+
+func TestNotificationDispatcherStopsConfirmingAfterProviderStatusTimeout(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	saveTestWxPusherBinding(t, manager, owner.ID, now, true, model.WxPusherAllEventTypes)
+	client := &fakeNotificationDeliveryClient{statuses: []wxpusher.MessageStatus{
+		{SendRecordID: "record-1", ProviderCode: 1, Status: "等待发送"},
+		{SendRecordID: "record-1", ProviderCode: 1, Status: "等待发送"},
+		{SendRecordID: "record-1", ProviderCode: 1, Status: "等待发送"},
+	}}
+	configureTestNotificationDispatcher(manager, client, &now)
+	if _, inserted, err := manager.recordNotificationOnce(model.Notification{
+		UserID: owner.ID, Type: model.NotificationCredentialExpired, Severity: "warning",
+		Title: "登录状态已失效", Message: "请重新登录。", DedupeKey: "provider-status-timeout", CreatedAt: now,
+	}); err != nil || !inserted {
+		t.Fatalf("record notification: inserted=%v err=%v", inserted, err)
+	}
+	if err := manager.runNotificationDispatcherOnce(context.Background(), now); err != nil {
+		t.Fatalf("send delivery: %v", err)
+	}
+	for _, elapsed := range []time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute} {
+		now = time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC).Add(elapsed)
+		if err := manager.runNotificationDispatcherOnce(context.Background(), now); err != nil {
+			t.Fatalf("query at %s: %v", elapsed, err)
+		}
+	}
+	delivery := onlyTestDelivery(t, manager, owner.ID)
+	if delivery.Status != model.NotificationDeliveryUncertain || delivery.LastErrorCode != "provider_status_unknown" ||
+		delivery.NextAttemptAt != nil || client.sendCalls != 1 || client.queryCalls != 3 {
+		t.Fatalf("timed out confirmation=%+v send=%d query=%d", delivery, client.sendCalls, client.queryCalls)
 	}
 }
 

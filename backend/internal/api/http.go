@@ -139,6 +139,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/notification-channels/wxpusher/bind-sessions", s.handleWxPusherBindSessions)
 	mux.HandleFunc("/api/notification-channels/wxpusher/bind-sessions/", s.handleWxPusherBindSession)
 	mux.HandleFunc("/api/notification-channels/wxpusher/test", s.handleWxPusherTest)
+	mux.HandleFunc("/api/notification-channels/wxpusher/test/recheck", s.handleWxPusherTestRecheck)
 	mux.HandleFunc("/api/notifications", s.handleNotifications)
 	mux.HandleFunc("/api/notifications/", s.handleNotificationActions)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)

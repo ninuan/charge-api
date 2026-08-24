@@ -87,6 +87,41 @@ func TestClientProviderOperations(t *testing.T) {
 	}
 }
 
+func TestClientQueryMessageStatusAcceptsNumericProviderState(t *testing.T) {
+	tests := []struct {
+		name          string
+		providerCode  int
+		message       string
+		wantSucceeded bool
+		wantFailed    bool
+	}{
+		{name: "waiting", providerCode: 1, message: "等待发送"},
+		{name: "succeeded", providerCode: 0, message: "发送成功", wantSucceeded: true},
+		{name: "failed", providerCode: 2, message: "发送失败", wantFailed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/send/query/status" || r.URL.Query().Get("sendRecordId") != "2421217977" {
+					t.Fatalf("status request = %s?%s", r.URL.Path, r.URL.RawQuery)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"code":1000,"msg":%q,"data":%d,"success":true}`, tt.message, tt.providerCode)
+			}))
+			defer server.Close()
+
+			status, err := newTestClient(t, server.URL, 0).QueryMessageStatus(context.Background(), "2421217977")
+			if err != nil {
+				t.Fatalf("QueryMessageStatus: %v", err)
+			}
+			if status.SendRecordID != "2421217977" || status.ProviderCode != tt.providerCode || status.Status != tt.message ||
+				status.Succeeded != tt.wantSucceeded || status.Failed != tt.wantFailed {
+				t.Fatalf("numeric message status = %+v", status)
+			}
+		})
+	}
+}
+
 func TestClientQueryScanUIDPending(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, `{"code":1000,"msg":"ok","success":true,"data":null}`)

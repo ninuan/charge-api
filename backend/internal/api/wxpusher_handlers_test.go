@@ -55,6 +55,10 @@ func TestWxPusherBindingAPIIsPrivateConfiguredAndUserScoped(t *testing.T) {
 	if err := json.NewDecoder(stateResponse.Body).Decode(&state); err != nil || state.Configured || state.Bound {
 		t.Fatalf("unconfigured state=%+v err=%v", state, err)
 	}
+	missingTest := wxPusherAPIRequest(t, mux, ownerSession, http.MethodPost, "/api/notification-channels/wxpusher/test/recheck")
+	if missingTest.Code != http.StatusNotFound || !strings.Contains(missingTest.Body.String(), "WXPUSHER_TEST_NOT_FOUND") {
+		t.Fatalf("missing test recheck=%d body=%s", missingTest.Code, missingTest.Body.String())
+	}
 	unconfigured := wxPusherAPIRequest(t, mux, ownerSession, http.MethodPost, "/api/notification-channels/wxpusher/bind-sessions")
 	if unconfigured.Code != http.StatusServiceUnavailable || !strings.Contains(unconfigured.Body.String(), "WXPUSHER_NOT_CONFIGURED") {
 		t.Fatalf("unconfigured create=%d body=%s", unconfigured.Code, unconfigured.Body.String())

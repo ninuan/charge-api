@@ -274,6 +274,7 @@ func (m *Manager) confirmNotificationDelivery(ctx context.Context, delivery mode
 	if status.Failed {
 		return m.finishDelivery(delivery, model.NotificationDeliveryFailed, "provider_delivery_failed", now)
 	}
+	delivery.LastErrorCode, delivery.LastErrorMessage = "", ""
 	return m.rescheduleAcceptedDelivery(delivery, now)
 }
 

@@ -4,9 +4,11 @@
 import {
   CheckCircle2Icon,
   CircleAlertIcon,
+  Clock3Icon,
   LoaderCircleIcon,
   MessageCircleIcon,
   QrCodeIcon,
+  RefreshCwIcon,
   SendIcon,
   UnlinkIcon,
 } from "lucide-react"
@@ -53,6 +55,7 @@ import {
   deleteWxPusherChannel,
   getWxPusherChannel,
   pollWxPusherBindSession,
+  recheckWxPusherTestDelivery,
   testWxPusherChannel,
   updateWxPusherChannel,
 } from "@/lib/wxpusher-api"
@@ -94,6 +97,20 @@ const terminalDeliveryStatuses = new Set([
 
 function deliverySuggestion(delivery?: NotificationDeliverySummary) {
   if (!delivery) return "发送测试消息，确认当前接收渠道可以正常收到提醒。"
+  switch (delivery.status) {
+    case "pending":
+    case "sending":
+    case "retry_wait":
+      return "测试消息已加入队列，系统会尽快提交到 WxPusher。"
+    case "accepted":
+      return "已提交 WxPusher，请检查接收端。WxPusher 尚未更新处理状态时，可以稍后重新查询。"
+    case "provider_succeeded":
+      return delivery.isTest
+        ? "请检查 WxPusher App 和微信是否收到；平台无法确认设备展示或已读。"
+        : "WxPusher 已处理；站内通知仍会持续保留。"
+    case "uncertain":
+      return "WxPusher 尚未更新处理状态，请检查接收端，或重新查询状态。"
+  }
   switch (delivery.errorCode) {
     case "invalid_uid":
     case "recipient_rejected":
@@ -103,13 +120,15 @@ function deliverySuggestion(delivery?: NotificationDeliverySummary) {
     case "provider_unavailable":
     case "timeout":
     case "rate_limited":
-      return "WxPusher 暂时繁忙，系统会按规则重试，也可以稍后再发送测试消息。"
+      return delivery.isTest
+        ? "WxPusher 暂时繁忙，可以稍后重新发送测试消息。"
+        : "WxPusher 暂时繁忙，站内通知不受影响。"
     case "ambiguous_result":
     case "invalid_response":
       return "暂时无法确认处理结果，请先检查接收端，避免重复发送。"
     default:
       return delivery.isTest
-        ? "测试结果只确认 WxPusher 处理状态，不代表某台设备已经展示或已读。"
+        ? "请检查 WxPusher App 和微信是否收到；平台无法确认设备展示或已读。"
         : "站内通知始终保留；微信渠道异常不会影响通知中心。"
   }
 }
@@ -145,21 +164,26 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   const [unbinding, setUnbinding] = useState(false)
   const [pendingSetting, setPendingSetting] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
+  const [rechecking, setRechecking] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const abortRef = useRef<AbortController | null>(null)
   const pollInFlight = useRef(false)
+  const channelLoadInFlight = useRef(false)
   const hasPendingDelivery = [
     channel?.lastDelivery?.status,
     channel?.lastTestDelivery?.status,
   ].some((status) => status && !terminalDeliveryStatuses.has(status))
 
   const loadChannel = useCallback(async () => {
+    if (channelLoadInFlight.current) return
+    channelLoadInFlight.current = true
     setLoading(true)
     try {
       setChannel(await getWxPusherChannel())
     } catch (reason) {
       toast.error((reason as Error).message)
     } finally {
+      channelLoadInFlight.current = false
       setLoading(false)
     }
   }, [])
@@ -173,8 +197,41 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (!active || !hasPendingDelivery) return
-    const timer = window.setTimeout(() => void loadChannel(), 10_000)
-    return () => window.clearTimeout(timer)
+
+    let disposed = false
+    let timer: number | undefined
+    let refreshing = false
+
+    const schedule = () => {
+      if (disposed || document.visibilityState !== "visible") return
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void refresh(), 10_000)
+    }
+    const refresh = async () => {
+      if (disposed || refreshing) return
+      refreshing = true
+      try {
+        await loadChannel()
+      } finally {
+        refreshing = false
+        schedule()
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        timer = undefined
+      }
+      if (document.visibilityState === "visible") void refresh()
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    schedule()
+    return () => {
+      disposed = true
+      if (timer !== undefined) window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
   }, [active, hasPendingDelivery, loadChannel])
 
   const stopPolling = useCallback(() => {
@@ -342,6 +399,27 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
     }
   }
 
+  async function recheckTest(deliveryId: string) {
+    setRechecking(deliveryId)
+    try {
+      const delivery = await recheckWxPusherTestDelivery()
+      setChannel((current) =>
+        current ? { ...current, lastTestDelivery: delivery } : current
+      )
+      if (delivery.status === "provider_succeeded") {
+        toast.success("已获取最新处理状态")
+      } else if (delivery.status === "failed") {
+        toast.error("WxPusher 返回发送失败")
+      } else {
+        toast.info("已重新查询，WxPusher 尚未更新状态")
+      }
+    } catch (reason) {
+      toast.error((reason as Error).message)
+    } finally {
+      setRechecking(null)
+    }
+  }
+
   if (loading && !channel)
     return (
       <Skeleton className="h-32 rounded-xl" aria-label="正在加载微信提醒" />
@@ -491,29 +569,100 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
               </div>
 
               {recentDeliveries.map(({ label, delivery }) => {
-                const failed =
-                  delivery.status === "failed" ||
-                  delivery.status === "uncertain" ||
-                  delivery.status === "cancelled"
-                const pending = !terminalDeliveryStatuses.has(delivery.status)
+                const failed = delivery.status === "failed"
+                const activelySending = [
+                  "pending",
+                  "sending",
+                  "retry_wait",
+                ].includes(delivery.status)
+                const waitingProvider = delivery.status === "accepted"
+                const canRecheck =
+                  delivery.isTest &&
+                  (delivery.status === "accepted" ||
+                    delivery.status === "uncertain")
+                const canResend = delivery.isTest && failed
+                const submittedAt =
+                  delivery.acceptedAt ??
+                  delivery.createdAt ??
+                  delivery.updatedAt
                 return (
                   <Alert
                     key={delivery.id}
                     variant={failed ? "destructive" : "default"}
+                    className={
+                      delivery.status === "uncertain"
+                        ? "border-amber-500/30 bg-amber-500/5"
+                        : undefined
+                    }
                   >
-                    {pending ? (
+                    {activelySending ? (
                       <LoaderCircleIcon className="motion-safe:animate-spin" />
+                    ) : waitingProvider ? (
+                      <Clock3Icon />
                     ) : failed ? (
                       <CircleAlertIcon />
+                    ) : delivery.status === "uncertain" ||
+                      delivery.status === "cancelled" ? (
+                      <CircleAlertIcon className="text-amber-600" />
                     ) : (
                       <CheckCircle2Icon />
                     )}
                     <AlertTitle>
                       {label} · {delivery.message}
                     </AlertTitle>
-                    <AlertDescription>
-                      {formatBoundAt(delivery.updatedAt)} ·{" "}
-                      {deliverySuggestion(delivery)}
+                    <AlertDescription className="grid gap-2 text-balance">
+                      <p>{deliverySuggestion(delivery)}</p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums">
+                        <span>提交 {formatBoundAt(submittedAt)}</span>
+                        <span>
+                          最近检查 {formatBoundAt(delivery.updatedAt)}
+                        </span>
+                      </div>
+                      {canRecheck || canResend ? (
+                        <div className="flex flex-wrap gap-2 pt-0.5">
+                          {canRecheck ? (
+                            <Button
+                              variant="outline"
+                              size="xs"
+                              disabled={rechecking !== null}
+                              onClick={() => void recheckTest(delivery.id)}
+                            >
+                              <RefreshCwIcon
+                                data-icon="inline-start"
+                                className={
+                                  rechecking === delivery.id
+                                    ? "motion-safe:animate-spin"
+                                    : undefined
+                                }
+                              />
+                              {rechecking === delivery.id
+                                ? "正在查询…"
+                                : "重新查询状态"}
+                            </Button>
+                          ) : null}
+                          {canResend ? (
+                            <Button
+                              variant="outline"
+                              size="xs"
+                              disabled={testing}
+                              onClick={() => void sendTest()}
+                            >
+                              <SendIcon data-icon="inline-start" />
+                              {testing ? "正在提交…" : "重新发送"}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {delivery.errorCode ? (
+                        <details className="text-xs">
+                          <summary className="w-fit cursor-pointer rounded-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                            查看详情
+                          </summary>
+                          <p className="mt-1 font-mono break-all">
+                            错误代码：{delivery.errorCode}
+                          </p>
+                        </details>
+                      ) : null}
                     </AlertDescription>
                   </Alert>
                 )

@@ -24,15 +24,16 @@ const (
 )
 
 var (
-	ErrWxPusherAlreadyBound       = errors.New("wxpusher already bound")
-	ErrWxPusherBindSessionActive  = errors.New("wxpusher bind session active")
-	ErrWxPusherBindSessionMissing = errors.New("wxpusher bind session missing")
-	ErrWxPusherUIDConflict        = errors.New("wxpusher uid conflict")
-	ErrWxPusherRateLimited        = errors.New("wxpusher bind rate limited")
-	ErrWxPusherNotConfigured      = errors.New("wxpusher not configured")
-	ErrWxPusherNotBound           = errors.New("wxpusher not bound")
-	ErrWxPusherChannelDisabled    = errors.New("wxpusher channel disabled")
-	ErrWxPusherPreferenceInvalid  = errors.New("wxpusher preference invalid")
+	ErrWxPusherAlreadyBound        = errors.New("wxpusher already bound")
+	ErrWxPusherBindSessionActive   = errors.New("wxpusher bind session active")
+	ErrWxPusherBindSessionMissing  = errors.New("wxpusher bind session missing")
+	ErrWxPusherUIDConflict         = errors.New("wxpusher uid conflict")
+	ErrWxPusherRateLimited         = errors.New("wxpusher bind rate limited")
+	ErrWxPusherNotConfigured       = errors.New("wxpusher not configured")
+	ErrWxPusherNotBound            = errors.New("wxpusher not bound")
+	ErrWxPusherChannelDisabled     = errors.New("wxpusher channel disabled")
+	ErrWxPusherPreferenceInvalid   = errors.New("wxpusher preference invalid")
+	ErrWxPusherTestDeliveryMissing = errors.New("wxpusher test delivery missing")
 )
 
 type WxPusherBindingClient interface {
@@ -185,6 +186,91 @@ func (m *Manager) CreateWxPusherTestDelivery(userID string, configured bool) (mo
 	m.wxPusherMu.Unlock()
 	m.wakeNotificationDispatcher()
 	return wxPusherDeliverySummary(delivery), nil
+}
+
+// RecheckWxPusherTestDelivery queries the provider record belonging to the
+// current user's latest test delivery. It never creates or resends a message.
+func (m *Manager) RecheckWxPusherTestDelivery(ctx context.Context, userID string) (model.NotificationDeliverySummary, error) {
+	if _, ok := m.User(userID); !ok {
+		return model.NotificationDeliverySummary{}, fmt.Errorf("user not found or disabled")
+	}
+	delivery, found, err := m.repository.LoadLatestNotificationDelivery(userID, true)
+	if err != nil {
+		return model.NotificationDeliverySummary{}, err
+	}
+	if !found {
+		return model.NotificationDeliverySummary{}, ErrWxPusherTestDeliveryMissing
+	}
+	if (delivery.Status != model.NotificationDeliveryAccepted && delivery.Status != model.NotificationDeliveryUncertain) ||
+		strings.TrimSpace(delivery.ProviderRecordID) == "" {
+		return wxPusherDeliverySummary(delivery), nil
+	}
+	client, _ := m.notificationDispatcherConfig()
+	if client == nil {
+		return model.NotificationDeliverySummary{}, ErrWxPusherNotConfigured
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	providerStatus, queryErr := client.QueryMessageStatus(requestCtx, delivery.ProviderRecordID)
+	now := m.reminderSchedulerNow().UTC().Truncate(time.Second)
+
+	// The background dispatcher may have completed the same delivery while the
+	// provider request was in flight. Reload before saving so a manual check can
+	// never move a newer state backwards.
+	current, currentFound, err := m.repository.LoadLatestNotificationDelivery(userID, true)
+	if err != nil {
+		return model.NotificationDeliverySummary{}, err
+	}
+	if !currentFound {
+		return model.NotificationDeliverySummary{}, ErrWxPusherTestDeliveryMissing
+	}
+	if current.ID != delivery.ID ||
+		(current.Status != model.NotificationDeliveryAccepted && current.Status != model.NotificationDeliveryUncertain) {
+		return wxPusherDeliverySummary(current), nil
+	}
+
+	if queryErr != nil {
+		code := string(wxpusher.CodeOf(queryErr))
+		if code == "" {
+			code = "wxpusher_unknown"
+		}
+		current.LastErrorCode, current.LastErrorMessage, current.UpdatedAt = code, "", now
+		if err := m.repository.SaveNotificationDelivery(current); err != nil {
+			return model.NotificationDeliverySummary{}, err
+		}
+		return wxPusherDeliverySummary(current), nil
+	}
+	if providerStatus.Succeeded {
+		current.Status = model.NotificationDeliveryProviderSucceeded
+		current.NextAttemptAt, current.ClaimedAt = nil, nil
+		current.LastErrorCode, current.LastErrorMessage = "", ""
+		current.ProviderSucceededAt, current.UpdatedAt = timePointer(now), now
+		if err := m.repository.SaveNotificationDelivery(current); err != nil {
+			return model.NotificationDeliverySummary{}, err
+		}
+		if err := m.repository.RecordWxPusherProviderSuccess(userID, now); err != nil {
+			return model.NotificationDeliverySummary{}, err
+		}
+		return wxPusherDeliverySummary(current), nil
+	}
+	if providerStatus.Failed {
+		if err := m.finishDelivery(current, model.NotificationDeliveryFailed, "provider_delivery_failed", now); err != nil {
+			return model.NotificationDeliverySummary{}, err
+		}
+		current.Status = model.NotificationDeliveryFailed
+		current.LastErrorCode, current.UpdatedAt = "provider_delivery_failed", now
+		return wxPusherDeliverySummary(current), nil
+	}
+
+	if current.Status == model.NotificationDeliveryAccepted {
+		current.LastErrorCode, current.LastErrorMessage = "", ""
+	}
+	current.UpdatedAt = now
+	if err := m.repository.SaveNotificationDelivery(current); err != nil {
+		return model.NotificationDeliverySummary{}, err
+	}
+	return wxPusherDeliverySummary(current), nil
 }
 
 func (m *Manager) CreateWxPusherBindSession(ctx context.Context, userID string, client WxPusherBindingClient) (model.WxPusherBindSessionView, error) {
@@ -437,7 +523,8 @@ func wxPusherDeliverySummary(delivery model.NotificationDelivery) model.Notifica
 	return model.NotificationDeliverySummary{
 		ID: delivery.ID, Status: delivery.Status, IsTest: delivery.IsTest,
 		AcceptedAt: delivery.AcceptedAt, ProviderSucceededAt: delivery.ProviderSucceededAt,
-		UpdatedAt: delivery.UpdatedAt, Message: wxPusherDeliveryMessage(delivery.Status),
+		CreatedAt: delivery.CreatedAt, UpdatedAt: delivery.UpdatedAt,
+		Message:   wxPusherDeliveryMessage(delivery.Status),
 		ErrorCode: wxPusherDeliveryErrorCode(delivery.LastErrorCode),
 	}
 }
@@ -447,13 +534,13 @@ func wxPusherDeliveryMessage(status model.NotificationDeliveryStatus) string {
 	case model.NotificationDeliveryPending, model.NotificationDeliverySending, model.NotificationDeliveryRetryWait:
 		return "等待发送"
 	case model.NotificationDeliveryAccepted:
-		return "服务已受理"
+		return "已提交 WxPusher"
 	case model.NotificationDeliveryProviderSucceeded:
 		return "WxPusher 已处理"
 	case model.NotificationDeliverySuppressed:
 		return "免打扰时段未发送"
 	case model.NotificationDeliveryUncertain:
-		return "暂未确认"
+		return "消息已提交，但无法确认处理结果"
 	case model.NotificationDeliveryFailed:
 		return "发送失败"
 	case model.NotificationDeliveryCancelled:

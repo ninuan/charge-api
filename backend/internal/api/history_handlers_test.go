@@ -74,6 +74,11 @@ func newHistoryAPIFixture(t *testing.T) historyAPIFixture {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable scheduled power-off for API fixture: %v", err)
+	}
 	sessions := auth.NewSessionManager(time.Hour)
 	t.Cleanup(sessions.Close)
 	server := NewServer(manager, sessions, auth.NewAuthGuard())

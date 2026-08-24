@@ -476,6 +476,7 @@ type NotificationDeliverySummary struct {
 	IsTest              bool                       `json:"isTest"`
 	AcceptedAt          *time.Time                 `json:"acceptedAt,omitempty"`
 	ProviderSucceededAt *time.Time                 `json:"providerSucceededAt,omitempty"`
+	CreatedAt           time.Time                  `json:"createdAt"`
 	UpdatedAt           time.Time                  `json:"updatedAt"`
 	Message             string                     `json:"message"`
 	ErrorCode           string                     `json:"errorCode,omitempty"`

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -259,11 +260,11 @@ func (c *Client) QueryMessageStatus(ctx context.Context, sendRecordID string) (M
 		return MessageStatus{}, newClientError(ErrorInvalidRequest, "query_message_status", false, 0, 0, nil)
 	}
 	query := url.Values{"sendRecordId": []string{sendRecordID}}
-	var raw json.RawMessage
-	if err := c.doJSON(ctx, http.MethodGet, "/api/send/query/status?"+query.Encode(), nil, &raw, "query_message_status"); err != nil {
+	env, err := c.doEnvelope(ctx, http.MethodGet, "/api/send/query/status?"+query.Encode(), nil, "query_message_status")
+	if err != nil {
 		return MessageStatus{}, err
 	}
-	status, err := parseMessageStatus(raw, sendRecordID)
+	status, err := parseMessageStatus(env.Data, env.Message, sendRecordID)
 	if err != nil {
 		return MessageStatus{}, newClientError(ErrorInvalidResponse, "query_message_status", false, 0, 0, err)
 	}
@@ -292,56 +293,9 @@ func validateMessage(message Message) error {
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, responseData any, operation string) error {
-	var body io.Reader
-	if requestBody != nil {
-		encoded, err := json.Marshal(requestBody)
-		if err != nil {
-			return newClientError(ErrorInvalidRequest, operation, false, 0, 0, err)
-		}
-		body = bytes.NewReader(encoded)
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, method, c.baseURL+path, body)
+	env, err := c.doEnvelope(ctx, method, path, requestBody, operation)
 	if err != nil {
-		return newClientError(ErrorInvalidRequest, operation, false, 0, 0, err)
-	}
-	if requestBody != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
-			return newClientError(ErrorProviderTimeout, operation, true, 0, 0, err)
-		}
-		return newClientError(ErrorProviderUnavailable, operation, true, 0, 0, err)
-	}
-	defer resp.Body.Close()
-	responseBody, err := readLimited(resp.Body)
-	if err != nil {
-		return newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, 0, err)
-	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		providerErr := newClientError(ErrorRateLimited, operation, true, resp.StatusCode, 0, nil)
-		providerErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
-		return providerErr
-	}
-	if resp.StatusCode >= 500 {
-		return newClientError(ErrorProviderUnavailable, operation, true, resp.StatusCode, 0, nil)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newClientError(ErrorProviderRejected, operation, false, resp.StatusCode, 0, nil)
-	}
-	var env envelope
-	if err := json.Unmarshal(responseBody, &env); err != nil {
-		return newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, 0, err)
-	}
-	if env.Code != 1000 {
-		return classifyBusinessError(operation, env.Code, env.Message)
-	}
-	if env.Success != nil && !*env.Success {
-		return newClientError(ErrorProviderRejected, operation, false, resp.StatusCode, env.Code, nil)
+		return err
 	}
 	if responseData == nil {
 		return nil
@@ -351,12 +305,67 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody, r
 		return nil
 	}
 	if len(env.Data) == 0 || bytes.Equal(env.Data, []byte("null")) {
-		return newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, env.Code, nil)
+		return newClientError(ErrorInvalidResponse, operation, false, http.StatusOK, env.Code, nil)
 	}
 	if err := json.Unmarshal(env.Data, responseData); err != nil {
-		return newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, env.Code, err)
+		return newClientError(ErrorInvalidResponse, operation, false, http.StatusOK, env.Code, err)
 	}
 	return nil
+}
+
+func (c *Client) doEnvelope(ctx context.Context, method, path string, requestBody any, operation string) (envelope, error) {
+	var body io.Reader
+	if requestBody != nil {
+		encoded, err := json.Marshal(requestBody)
+		if err != nil {
+			return envelope{}, newClientError(ErrorInvalidRequest, operation, false, 0, 0, err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, method, c.baseURL+path, body)
+	if err != nil {
+		return envelope{}, newClientError(ErrorInvalidRequest, operation, false, 0, 0, err)
+	}
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
+			return envelope{}, newClientError(ErrorProviderTimeout, operation, true, 0, 0, err)
+		}
+		return envelope{}, newClientError(ErrorProviderUnavailable, operation, true, 0, 0, err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := readLimited(resp.Body)
+	if err != nil {
+		return envelope{}, newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, 0, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		providerErr := newClientError(ErrorRateLimited, operation, true, resp.StatusCode, 0, nil)
+		providerErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		return envelope{}, providerErr
+	}
+	if resp.StatusCode >= 500 {
+		return envelope{}, newClientError(ErrorProviderUnavailable, operation, true, resp.StatusCode, 0, nil)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return envelope{}, newClientError(ErrorProviderRejected, operation, false, resp.StatusCode, 0, nil)
+	}
+	var env envelope
+	if err := json.Unmarshal(responseBody, &env); err != nil {
+		return envelope{}, newClientError(ErrorInvalidResponse, operation, false, resp.StatusCode, 0, err)
+	}
+	if env.Code != 1000 {
+		return envelope{}, classifyBusinessError(operation, env.Code, env.Message)
+	}
+	if env.Success != nil && !*env.Success {
+		return envelope{}, newClientError(ErrorProviderRejected, operation, false, resp.StatusCode, env.Code, nil)
+	}
+	return env, nil
 }
 
 func readLimited(reader io.Reader) ([]byte, error) {
@@ -449,7 +458,7 @@ func providerExpiry(value int64) (time.Time, error) {
 	return time.UnixMilli(value), nil
 }
 
-func parseMessageStatus(raw json.RawMessage, requestedID string) (MessageStatus, error) {
+func parseMessageStatus(raw json.RawMessage, providerMessage, requestedID string) (MessageStatus, error) {
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return MessageStatus{}, fmt.Errorf("missing status data")
 	}
@@ -464,6 +473,31 @@ func parseMessageStatus(raw json.RawMessage, requestedID string) (MessageStatus,
 			Status:       text,
 			Succeeded:    providerStatusSucceeded(text),
 			Failed:       providerStatusFailed(text),
+		}, nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err == nil {
+		providerCode, err := strconv.Atoi(number.String())
+		if err != nil {
+			return MessageStatus{}, err
+		}
+		statusText := strings.TrimSpace(providerMessage)
+		if statusText == "" {
+			return MessageStatus{}, fmt.Errorf("missing status")
+		}
+		succeeded := providerStatusSucceeded(statusText)
+		failed := providerStatusFailed(statusText)
+		if providerCode == 1 {
+			succeeded, failed = false, false
+		}
+		return MessageStatus{
+			SendRecordID: requestedID,
+			ProviderCode: providerCode,
+			Status:       statusText,
+			Succeeded:    succeeded,
+			Failed:       failed,
 		}, nil
 	}
 	var data messageStatusData
