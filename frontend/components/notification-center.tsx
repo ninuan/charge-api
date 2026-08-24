@@ -186,7 +186,7 @@ function BrowserNotificationSetting() {
       </AlertTitle>
       <AlertDescription>
         {preference?.quietHoursEnabled
-          ? `${formatPowerWindow(preference.quietStartMinute, preference.quietEndMinute)} 不弹出浏览器提醒，通知仍会保留。`
+          ? `${formatPowerWindow(preference.quietStartMinute, preference.quietEndMinute)} 浏览器即时提醒暂停，站内通知仍会保留。`
           : "浏览器提醒已开启。网页打开时会及时通知你。"}
       </AlertDescription>
     </Alert>

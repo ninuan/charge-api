@@ -372,7 +372,7 @@ paths:
         "403":
           $ref: "#/components/responses/OrdinaryUserRequired"
         "409":
-          $ref: "#/components/responses/WxPusherNotBound"
+          $ref: "#/components/responses/WxPusherChannelConflict"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
         "503":
@@ -465,7 +465,7 @@ paths:
         "403":
           $ref: "#/components/responses/OrdinaryUserRequired"
         "409":
-          $ref: "#/components/responses/WxPusherNotBound"
+          $ref: "#/components/responses/WxPusherChannelConflict"
         "429":
           $ref: "#/components/responses/WxPusherRateLimited"
         "405":
@@ -949,17 +949,23 @@ components:
           schema:
             $ref: "#/components/schemas/CodedErrorResponse"
           example:
-            code: WXPUSHER_PREFERENCE_INVALID
+            code: WXPUSHER_INVALID
             error: WxPusher 提醒设置无效
-    WxPusherNotBound:
-      description: 当前用户尚未绑定 WxPusher
+    WxPusherChannelConflict:
+      description: 当前用户尚未绑定 WxPusher，或微信提醒总开关处于关闭状态
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/CodedErrorResponse"
-          example:
-            code: WXPUSHER_NOT_BOUND
-            error: 请先绑定 WxPusher
+          examples:
+            notBound:
+              value:
+                code: WXPUSHER_NOT_BOUND
+                error: 请先绑定 WxPusher
+            channelDisabled:
+              value:
+                code: WXPUSHER_CHANNEL_DISABLED
+                error: 请先开启微信提醒
     WxPusherBindingConflict:
       description: 当前用户已有活动会话，或该 UID 已绑定其他 Charge Console 账户
       content:
@@ -1495,6 +1501,10 @@ components:
           format: date-time
         lastDelivery:
           $ref: "#/components/schemas/NotificationDeliverySummary"
+          description: 最近一次正式通知投递结果。
+        lastTestDelivery:
+          $ref: "#/components/schemas/NotificationDeliverySummary"
+          description: 最近一次测试消息投递结果。
         deliveryDisclaimer:
           type: string
           description: 明确“WxPusher 已处理”不代表特定微信客户端已展示或已读。

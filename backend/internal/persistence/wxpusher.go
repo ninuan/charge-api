@@ -16,6 +16,7 @@ const wxPusherChannel = "wxpusher"
 
 var (
 	ErrWxPusherBindingExists      = errors.New("wxpusher binding already exists")
+	ErrWxPusherBindingNotEnabled  = errors.New("wxpusher binding is not enabled")
 	ErrWxPusherUIDInUse           = errors.New("wxpusher uid already in use")
 	ErrWxPusherBindSessionInvalid = errors.New("wxpusher bind session is inactive")
 )
@@ -159,6 +160,50 @@ func (s *Store) RecordWxPusherDeliveryError(userID, code string, at time.Time) e
 	`, strings.TrimSpace(code), at.UTC().Unix(), at.UTC().Unix(), strings.TrimSpace(userID))
 	if err != nil {
 		return fmt.Errorf("record wxpusher delivery error: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CreateWxPusherTestDelivery(delivery model.NotificationDelivery) error {
+	delivery = normalizeNotificationDelivery(delivery)
+	if !delivery.IsTest || delivery.NotificationID != nil || delivery.Status != model.NotificationDeliveryPending {
+		return fmt.Errorf("wxpusher test delivery is invalid")
+	}
+	if err := validateNotificationDelivery(delivery); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin wxpusher test delivery: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`
+		INSERT INTO notification_deliveries(
+			id, notification_id, user_id, channel, status, is_test, attempt_count,
+			next_attempt_at, claimed_at, provider_record_id,
+			provider_message_content_id, last_error_code, last_error_message,
+			accepted_at, provider_succeeded_at, created_at, updated_at
+		) VALUES(?, NULL, ?, ?, ?, 1, 0, ?, NULL, '', '', '', '', NULL, NULL, ?, ?)
+	`, delivery.ID, delivery.UserID, delivery.Channel, delivery.Status,
+		unixTimeOrNil(delivery.NextAttemptAt), delivery.CreatedAt.UTC().Unix(), delivery.UpdatedAt.UTC().Unix()); err != nil {
+		return fmt.Errorf("insert wxpusher test delivery: %w", err)
+	}
+	result, err := tx.Exec(`
+		UPDATE wxpusher_bindings SET last_test_at=?, updated_at=?
+		WHERE user_id=? AND enabled=1
+	`, delivery.CreatedAt.UTC().Unix(), delivery.UpdatedAt.UTC().Unix(), delivery.UserID)
+	if err != nil {
+		return fmt.Errorf("record wxpusher test delivery: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read wxpusher test delivery binding: %w", err)
+	}
+	if rows != 1 {
+		return ErrWxPusherBindingNotEnabled
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit wxpusher test delivery: %w", err)
 	}
 	return nil
 }
@@ -543,6 +588,44 @@ func (s *Store) ListNotificationDeliveries(userID string, limit int) ([]model.No
 		return nil, fmt.Errorf("iterate notification deliveries: %w", err)
 	}
 	return deliveries, nil
+}
+
+func (s *Store) LoadLatestNotificationDelivery(userID string, isTest bool) (model.NotificationDelivery, bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return model.NotificationDelivery{}, false, fmt.Errorf("latest notification delivery requires a user")
+	}
+	testValue := 0
+	if isTest {
+		testValue = 1
+	}
+	delivery, err := scanNotificationDelivery(s.db.QueryRow(notificationDeliverySelect+`
+		WHERE user_id = ? AND is_test = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, userID, testValue))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.NotificationDelivery{}, false, nil
+	}
+	if err != nil {
+		return model.NotificationDelivery{}, false, err
+	}
+	return delivery, true, nil
+}
+
+func (s *Store) CountTestNotificationDeliveriesSince(userID string, since time.Time) (int, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || since.IsZero() {
+		return 0, fmt.Errorf("test notification delivery count requires user and time")
+	}
+	var count int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM notification_deliveries
+		WHERE user_id=? AND channel=? AND is_test=1 AND created_at>=?
+	`, userID, wxPusherChannel, since.UTC().Unix()).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count test notification deliveries: %w", err)
+	}
+	return count, nil
 }
 
 func (s *Store) ClaimNotificationDeliveries(now, staleBefore time.Time, limit int) ([]model.NotificationDelivery, error) {

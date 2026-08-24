@@ -399,14 +399,21 @@ const (
 )
 
 type WxPusherChannelState struct {
-	Configured         bool                `json:"configured"`
-	Bound              bool                `json:"bound"`
-	Enabled            bool                `json:"enabled"`
-	EventTypes         []WxPusherEventType `json:"eventTypes"`
-	DeliveryDisclaimer string              `json:"deliveryDisclaimer"`
-	MaskedUID          string              `json:"maskedUid,omitempty"`
-	BoundAt            *time.Time          `json:"boundAt,omitempty"`
-	LastTestAt         *time.Time          `json:"lastTestAt,omitempty"`
+	Configured         bool                         `json:"configured"`
+	Bound              bool                         `json:"bound"`
+	Enabled            bool                         `json:"enabled"`
+	EventTypes         []WxPusherEventType          `json:"eventTypes"`
+	DeliveryDisclaimer string                       `json:"deliveryDisclaimer"`
+	MaskedUID          string                       `json:"maskedUid,omitempty"`
+	BoundAt            *time.Time                   `json:"boundAt,omitempty"`
+	LastTestAt         *time.Time                   `json:"lastTestAt,omitempty"`
+	LastDelivery       *NotificationDeliverySummary `json:"lastDelivery,omitempty"`
+	LastTestDelivery   *NotificationDeliverySummary `json:"lastTestDelivery,omitempty"`
+}
+
+type WxPusherChannelUpdateRequest struct {
+	Enabled    *bool                `json:"enabled,omitempty"`
+	EventTypes *[]WxPusherEventType `json:"eventTypes,omitempty"`
 }
 
 type WxPusherBindSessionStatus string
@@ -461,6 +468,17 @@ type NotificationDelivery struct {
 	ProviderSucceededAt      *time.Time                 `json:"providerSucceededAt,omitempty"`
 	CreatedAt                time.Time                  `json:"createdAt"`
 	UpdatedAt                time.Time                  `json:"updatedAt"`
+}
+
+type NotificationDeliverySummary struct {
+	ID                  string                     `json:"id"`
+	Status              NotificationDeliveryStatus `json:"status"`
+	IsTest              bool                       `json:"isTest"`
+	AcceptedAt          *time.Time                 `json:"acceptedAt,omitempty"`
+	ProviderSucceededAt *time.Time                 `json:"providerSucceededAt,omitempty"`
+	UpdatedAt           time.Time                  `json:"updatedAt"`
+	Message             string                     `json:"message"`
+	ErrorCode           string                     `json:"errorCode,omitempty"`
 }
 
 type NotificationPreference struct {

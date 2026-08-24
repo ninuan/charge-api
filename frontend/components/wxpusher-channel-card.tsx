@@ -7,6 +7,7 @@ import {
   LoaderCircleIcon,
   MessageCircleIcon,
   QrCodeIcon,
+  SendIcon,
   UnlinkIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -16,6 +17,15 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -24,16 +34,85 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import { Switch } from "@/components/ui/switch"
 import type {
+  NotificationDeliverySummary,
   WxPusherBindSession,
   WxPusherChannelState,
+  WxPusherEventType,
 } from "@/lib/api/generated"
 import {
   createWxPusherBindSession,
   deleteWxPusherChannel,
   getWxPusherChannel,
   pollWxPusherBindSession,
+  testWxPusherChannel,
+  updateWxPusherChannel,
 } from "@/lib/wxpusher-api"
+
+const eventOptions: Array<{
+  value: WxPusherEventType
+  label: string
+  description: string
+}> = [
+  {
+    value: "pile_available",
+    label: "整桩有空闲",
+    description: "提醒任务发现任意充电口空闲时通知。",
+  },
+  {
+    value: "credential_expired",
+    label: "登录状态失效",
+    description: "需要重新扫码登录时通知。",
+  },
+  {
+    value: "pile_offline",
+    label: "充电桩持续离线",
+    description: "避开学校计划断电后，仍持续离线时通知。",
+  },
+  {
+    value: "pile_recovered",
+    label: "充电桩恢复在线",
+    description: "此前持续离线的充电桩恢复后通知。",
+  },
+]
+
+const terminalDeliveryStatuses = new Set([
+  "provider_succeeded",
+  "suppressed",
+  "uncertain",
+  "failed",
+  "cancelled",
+])
+
+function deliverySuggestion(delivery?: NotificationDeliverySummary) {
+  if (!delivery) return "发送测试消息，确认当前接收渠道可以正常收到提醒。"
+  switch (delivery.errorCode) {
+    case "invalid_uid":
+    case "recipient_rejected":
+      return "当前接收账号可能已取消关注，请解除绑定后重新扫码。"
+    case "invalid_token":
+      return "服务配置暂时不可用，请联系管理员检查 WxPusher 配置。"
+    case "provider_unavailable":
+    case "timeout":
+    case "rate_limited":
+      return "WxPusher 暂时繁忙，系统会按规则重试，也可以稍后再发送测试消息。"
+    case "ambiguous_result":
+    case "invalid_response":
+      return "暂时无法确认处理结果，请先检查接收端，避免重复发送。"
+    default:
+      return delivery.isTest
+        ? "测试结果只确认 WxPusher 处理状态，不代表某台设备已经展示或已读。"
+        : "站内通知始终保留；微信渠道异常不会影响通知中心。"
+  }
+}
 
 function secondsUntil(value: string | undefined, now: number) {
   if (!value) return 0
@@ -64,9 +143,15 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   const [bindOpen, setBindOpen] = useState(false)
   const [confirmUnbind, setConfirmUnbind] = useState(false)
   const [unbinding, setUnbinding] = useState(false)
+  const [pendingSetting, setPendingSetting] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const abortRef = useRef<AbortController | null>(null)
   const pollInFlight = useRef(false)
+  const hasPendingDelivery = [
+    channel?.lastDelivery?.status,
+    channel?.lastTestDelivery?.status,
+  ].some((status) => status && !terminalDeliveryStatuses.has(status))
 
   const loadChannel = useCallback(async () => {
     setLoading(true)
@@ -85,6 +170,12 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       return () => window.clearTimeout(task)
     }
   }, [active, channel, loadChannel, loading])
+
+  useEffect(() => {
+    if (!active || !hasPendingDelivery) return
+    const timer = window.setTimeout(() => void loadChannel(), 10_000)
+    return () => window.clearTimeout(timer)
+  }, [active, hasPendingDelivery, loadChannel])
 
   const stopPolling = useCallback(() => {
     abortRef.current?.abort()
@@ -202,6 +293,55 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
     }
   }
 
+  async function setEnabled(enabled: boolean) {
+    setPendingSetting("enabled")
+    try {
+      const updated = await updateWxPusherChannel({ enabled })
+      setChannel(updated)
+      toast.success(enabled ? "微信提醒已开启" : "微信提醒已关闭")
+    } catch (reason) {
+      toast.error((reason as Error).message)
+    } finally {
+      setPendingSetting(null)
+    }
+  }
+
+  async function toggleEvent(eventType: WxPusherEventType, enabled: boolean) {
+    if (!channel) return
+    setPendingSetting(eventType)
+    const selected = new Set(channel.eventTypes)
+    if (enabled) selected.add(eventType)
+    else selected.delete(eventType)
+    try {
+      const updated = await updateWxPusherChannel({
+        eventTypes: eventOptions
+          .map((option) => option.value)
+          .filter((value) => selected.has(value)),
+      })
+      setChannel(updated)
+      toast.success("接收内容已更新")
+    } catch (reason) {
+      toast.error((reason as Error).message)
+    } finally {
+      setPendingSetting(null)
+    }
+  }
+
+  async function sendTest() {
+    setTesting(true)
+    try {
+      const delivery = await testWxPusherChannel()
+      setChannel((current) =>
+        current ? { ...current, lastTestDelivery: delivery } : current
+      )
+      toast.success("测试消息已加入发送队列")
+    } catch (reason) {
+      toast.error((reason as Error).message)
+    } finally {
+      setTesting(false)
+    }
+  }
+
   if (loading && !channel)
     return (
       <Skeleton className="h-32 rounded-xl" aria-label="正在加载微信提醒" />
@@ -233,53 +373,179 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       </Alert>
     )
 
+  const recentDeliveries = [
+    { label: "最近测试", delivery: channel.lastTestDelivery },
+    { label: "最近一次发送", delivery: channel.lastDelivery },
+  ].filter(
+    (item): item is { label: string; delivery: NotificationDeliverySummary } =>
+      Boolean(item.delivery)
+  )
+
   return (
     <>
-      <section className="rounded-xl border bg-card p-4">
-        <div className="flex items-start justify-between gap-4">
+      <Card>
+        <CardHeader>
           <div className="flex min-w-0 gap-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-success/10 text-success">
               <MessageCircleIcon className="size-4" />
             </span>
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold">微信提醒</h3>
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                <span>微信提醒</span>
                 <Badge variant={channel.bound ? "secondary" : "outline"}>
                   {channel.bound ? "已绑定" : "未绑定"}
                 </Badge>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              </CardTitle>
+              <CardDescription className="mt-1 text-xs leading-5">
                 {channel.bound
                   ? `${channel.maskedUid ?? "接收账号"} · ${formatBoundAt(channel.boundAt)} 绑定`
                   : "绑定后，离开网页也能收到空闲和异常提醒。"}
-              </p>
+              </CardDescription>
             </div>
           </div>
-          {channel.bound ? (
+          <CardAction>
+            {channel.bound ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmUnbind(true)}
+              >
+                <UnlinkIcon data-icon="inline-start" />
+                解除绑定
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled={binding}
+                onClick={() => void beginBinding()}
+              >
+                {binding ? (
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    className="motion-safe:animate-spin"
+                  />
+                ) : (
+                  <QrCodeIcon data-icon="inline-start" />
+                )}
+                获取二维码
+              </Button>
+            )}
+          </CardAction>
+        </CardHeader>
+
+        {channel.bound ? (
+          <CardContent>
+            <FieldGroup>
+              <Field
+                orientation="horizontal"
+                className="rounded-lg border p-3"
+                data-disabled={pendingSetting === "enabled"}
+              >
+                <FieldContent>
+                  <FieldLabel htmlFor="wxpusher-enabled">
+                    微信提醒总开关
+                  </FieldLabel>
+                  <FieldDescription>
+                    临时关闭后不再发送微信消息，提醒任务和站内通知仍会继续。
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  id="wxpusher-enabled"
+                  checked={channel.enabled}
+                  disabled={pendingSetting !== null}
+                  onCheckedChange={(enabled) => void setEnabled(enabled)}
+                />
+              </Field>
+
+              <div>
+                <p className="mb-3 text-sm font-medium">接收内容</p>
+                <FieldGroup className="grid gap-3 sm:grid-cols-2">
+                  {eventOptions.map((option) => {
+                    const id = `wxpusher-${option.value}`
+                    return (
+                      <Field
+                        key={option.value}
+                        orientation="horizontal"
+                        className="rounded-lg border p-3"
+                        data-disabled={!channel.enabled}
+                      >
+                        <FieldContent>
+                          <FieldLabel htmlFor={id}>{option.label}</FieldLabel>
+                          <FieldDescription>
+                            {option.description}
+                          </FieldDescription>
+                        </FieldContent>
+                        <Switch
+                          id={id}
+                          size="sm"
+                          checked={channel.eventTypes.includes(option.value)}
+                          disabled={!channel.enabled || pendingSetting !== null}
+                          onCheckedChange={(enabled) =>
+                            void toggleEvent(option.value, enabled)
+                          }
+                        />
+                      </Field>
+                    )
+                  })}
+                </FieldGroup>
+              </div>
+
+              {recentDeliveries.map(({ label, delivery }) => {
+                const failed =
+                  delivery.status === "failed" ||
+                  delivery.status === "uncertain" ||
+                  delivery.status === "cancelled"
+                const pending = !terminalDeliveryStatuses.has(delivery.status)
+                return (
+                  <Alert
+                    key={delivery.id}
+                    variant={failed ? "destructive" : "default"}
+                  >
+                    {pending ? (
+                      <LoaderCircleIcon className="motion-safe:animate-spin" />
+                    ) : failed ? (
+                      <CircleAlertIcon />
+                    ) : (
+                      <CheckCircle2Icon />
+                    )}
+                    <AlertTitle>
+                      {label} · {delivery.message}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {formatBoundAt(delivery.updatedAt)} ·{" "}
+                      {deliverySuggestion(delivery)}
+                    </AlertDescription>
+                  </Alert>
+                )
+              })}
+            </FieldGroup>
+          </CardContent>
+        ) : null}
+
+        {channel.bound ? (
+          <CardFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs leading-5 text-muted-foreground">
+              {channel.deliveryDisclaimer}
+            </p>
             <Button
               variant="outline"
-              size="sm"
-              onClick={() => setConfirmUnbind(true)}
+              className="shrink-0"
+              disabled={!channel.enabled || testing}
+              onClick={() => void sendTest()}
             >
-              <UnlinkIcon />
-              解除绑定
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              disabled={binding}
-              onClick={() => void beginBinding()}
-            >
-              {binding ? (
-                <LoaderCircleIcon className="animate-spin" />
+              {testing ? (
+                <LoaderCircleIcon
+                  data-icon="inline-start"
+                  className="motion-safe:animate-spin"
+                />
               ) : (
-                <QrCodeIcon />
+                <SendIcon data-icon="inline-start" />
               )}
-              获取二维码
+              {testing ? "正在提交…" : "发送测试消息"}
             </Button>
-          )}
-        </div>
-      </section>
+          </CardFooter>
+        ) : null}
+      </Card>
 
       <Dialog open={bindOpen} onOpenChange={changeBindOpen}>
         <DialogContent className="sm:max-w-md">
@@ -367,7 +633,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
               disabled={unbinding}
               onClick={() => void unbind()}
             >
-              {unbinding ? <LoaderCircleIcon className="animate-spin" /> : null}
+              {unbinding ? (
+                <LoaderCircleIcon className="motion-safe:animate-spin" />
+              ) : null}
               解除绑定
             </Button>
           </DialogFooter>

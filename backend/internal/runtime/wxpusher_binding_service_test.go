@@ -6,9 +6,96 @@ import (
 	"testing"
 	"time"
 
+	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/wxpusher"
 )
+
+func TestWxPusherChannelPreferencesAndRecentDelivery(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
+	saveTestWxPusherBinding(t, manager, owner.ID, now, true, model.WxPusherDefaultEventTypes)
+	disabled := false
+	eventTypes := []model.WxPusherEventType{
+		model.WxPusherEventTypePileAvailable,
+		model.WxPusherEventTypePileRecovered,
+	}
+	state, err := manager.UpdateWxPusherChannel(owner.ID, model.WxPusherChannelUpdateRequest{
+		Enabled: &disabled, EventTypes: &eventTypes,
+	}, true)
+	if err != nil || state.Enabled || len(state.EventTypes) != 2 || state.EventTypes[1] != model.WxPusherEventTypePileRecovered {
+		t.Fatalf("updated channel=%+v err=%v", state, err)
+	}
+	duplicate := []model.WxPusherEventType{model.WxPusherEventTypePileAvailable, model.WxPusherEventTypePileAvailable}
+	if _, err := manager.UpdateWxPusherChannel(owner.ID, model.WxPusherChannelUpdateRequest{EventTypes: &duplicate}, true); !errors.Is(err, ErrWxPusherPreferenceInvalid) {
+		t.Fatalf("duplicate preference error = %v", err)
+	}
+	if _, err := manager.UpdateWxPusherChannel(owner.ID, model.WxPusherChannelUpdateRequest{}, true); !errors.Is(err, ErrWxPusherPreferenceInvalid) {
+		t.Fatalf("empty preference error = %v", err)
+	}
+}
+
+func TestWxPusherTestDeliveryIsQueuedRateLimitedAndDelivered(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
+	saveTestWxPusherBinding(t, manager, owner.ID, now, true, model.WxPusherAllEventTypes)
+	client := &fakeNotificationDeliveryClient{}
+	configureTestNotificationDispatcher(manager, client, &now)
+	summary, err := manager.CreateWxPusherTestDelivery(owner.ID, true)
+	if err != nil || !summary.IsTest || summary.Status != model.NotificationDeliveryPending || summary.Message != "等待发送" {
+		t.Fatalf("test delivery summary=%+v err=%v", summary, err)
+	}
+	if _, err := manager.CreateWxPusherTestDelivery(owner.ID, true); !errors.Is(err, ErrWxPusherRateLimited) {
+		t.Fatalf("repeat test delivery error = %v", err)
+	}
+	if err := manager.runNotificationDispatcherOnce(context.Background(), now); err != nil {
+		t.Fatalf("deliver test message: %v", err)
+	}
+	if client.sendCalls != 1 || len(client.messages) != 1 || client.messages[0].Summary != "Charge Console 测试消息" {
+		t.Fatalf("test provider messages=%+v calls=%d", client.messages, client.sendCalls)
+	}
+	state, err := manager.WxPusherChannelState(owner.ID, true)
+	if err != nil || state.LastTestAt == nil || state.LastDelivery != nil || state.LastTestDelivery == nil || !state.LastTestDelivery.IsTest || state.LastTestDelivery.Status != model.NotificationDeliveryAccepted {
+		t.Fatalf("channel after test=%+v err=%v", state, err)
+	}
+	notification := model.Notification{
+		ID: "notice_recent", UserID: owner.ID, Type: model.NotificationCredentialExpired,
+		Severity: "info", Title: "有空闲", Message: "有空闲", CreatedAt: now.Add(time.Minute),
+	}
+	if err := manager.repository.SaveNotification(notification); err != nil {
+		t.Fatalf("save recent notification: %v", err)
+	}
+	notificationID := notification.ID
+	formal := model.NotificationDelivery{
+		ID: "ndl_recent", NotificationID: &notificationID, UserID: owner.ID, Channel: "wxpusher",
+		Status: model.NotificationDeliveryProviderSucceeded, CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+	}
+	if err := manager.repository.SaveNotificationDelivery(formal); err != nil {
+		t.Fatalf("save recent formal delivery: %v", err)
+	}
+	state, err = manager.WxPusherChannelState(owner.ID, true)
+	if err != nil || state.LastDelivery == nil || state.LastDelivery.IsTest || state.LastTestDelivery == nil || !state.LastTestDelivery.IsTest {
+		t.Fatalf("separate recent channel deliveries=%+v err=%v", state, err)
+	}
+}
+
+func TestWxPusherTestDeliveryDailyLimitSurvivesStoredHistory(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
+	saveTestWxPusherBinding(t, manager, owner.ID, now, true, model.WxPusherAllEventTypes)
+	for index := 0; index < wxPusherTestDayMax; index++ {
+		if _, err := manager.CreateWxPusherTestDelivery(owner.ID, true); err != nil {
+			t.Fatalf("create test %d: %v", index, err)
+		}
+		now = now.Add(time.Minute)
+	}
+	if _, err := manager.CreateWxPusherTestDelivery(owner.ID, true); !errors.Is(err, ErrWxPusherRateLimited) {
+		t.Fatalf("daily test limit error = %v", err)
+	}
+}
 
 type fakeWxPusherBindingClient struct {
 	now         *time.Time

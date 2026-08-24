@@ -35,7 +35,10 @@ const publicErrorMessages: Record<string, string> = {
   WXPUSHER_BIND_SESSION_ACTIVE: "已有等待扫码的二维码，请稍后再试",
   WXPUSHER_BIND_SESSION_NOT_FOUND: "绑定二维码已失效，请重新获取",
   WXPUSHER_UID_CONFLICT: "这个微信接收账号已绑定其他账户",
-  WXPUSHER_RATE_LIMITED: "获取二维码过于频繁，请稍后再试",
+  WXPUSHER_NOT_BOUND: "请先绑定微信提醒",
+  WXPUSHER_CHANNEL_DISABLED: "请先开启微信提醒总开关",
+  WXPUSHER_INVALID: "微信提醒设置无效",
+  WXPUSHER_RATE_LIMITED: "操作过于频繁，请稍后再试",
   WXPUSHER_UNAVAILABLE: "微信提醒服务暂时不可用，请稍后重试",
 }
 

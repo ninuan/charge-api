@@ -153,7 +153,7 @@ function QuietHoursForm({
               启用免打扰
             </FieldLabel>
             <FieldDescription>
-              开启后，这段时间内不会弹出浏览器提醒。
+              开启后，这段时间只保留站内通知，不弹出浏览器或微信提醒。
             </FieldDescription>
           </FieldContent>
           <Switch
@@ -700,7 +700,7 @@ export function WatchManagementSheet({
                   <CardHeader>
                     <CardTitle>免打扰时段</CardTitle>
                     <CardDescription>
-                      在这段时间不弹出浏览器提醒，通知仍会保留在通知中心。
+                      在这段时间只保留站内通知，不弹出浏览器或微信提醒。
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

@@ -155,38 +155,49 @@ func (m *Manager) sendNotificationDelivery(ctx context.Context, delivery model.N
 	if delivery.ProviderRecordID != "" {
 		return m.finishDelivery(delivery, model.NotificationDeliveryUncertain, "record_id_reentered_send_queue", now)
 	}
-	if delivery.NotificationID == nil {
-		return m.finishDelivery(delivery, model.NotificationDeliveryFailed, "notification_missing", now)
-	}
-	notification, found, err := m.repository.LoadNotification(delivery.UserID, *delivery.NotificationID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return m.finishDelivery(delivery, model.NotificationDeliveryCancelled, "notification_missing", now)
-	}
 	binding, found, err := m.repository.LoadWxPusherBinding(delivery.UserID)
 	if err != nil {
 		return err
 	}
-	if !found || !binding.Enabled || binding.EventTypes&runtimeWxPusherEventMask(notification.Type) == 0 {
+	if !found || !binding.Enabled {
 		return m.finishDelivery(delivery, model.NotificationDeliveryCancelled, "channel_disabled", now)
 	}
-	quiet, err := m.wxPusherQuietAt(delivery.UserID, now)
-	if err != nil {
-		return err
-	}
-	if quiet {
-		return m.finishDelivery(delivery, model.NotificationDeliverySuppressed, "quiet_hours", now)
-	}
 	client, publicBaseURL := m.notificationDispatcherConfig()
+	message := wxpusher.Message{
+		UID: binding.UID, ContentType: wxpusher.ContentTypeText,
+	}
+	if delivery.IsTest {
+		message.Summary = "Charge Console 测试消息"
+		message.Content = "微信提醒已连接。之后开启的空闲提醒和账户异常会发送到这里。"
+		message.URL = dashboardURL(publicBaseURL)
+	} else {
+		if delivery.NotificationID == nil {
+			return m.finishDelivery(delivery, model.NotificationDeliveryFailed, "notification_missing", now)
+		}
+		notification, found, err := m.repository.LoadNotification(delivery.UserID, *delivery.NotificationID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return m.finishDelivery(delivery, model.NotificationDeliveryCancelled, "notification_missing", now)
+		}
+		if binding.EventTypes&runtimeWxPusherEventMask(notification.Type) == 0 {
+			return m.finishDelivery(delivery, model.NotificationDeliveryCancelled, "event_type_disabled", now)
+		}
+		quiet, err := m.wxPusherQuietAt(delivery.UserID, now)
+		if err != nil {
+			return err
+		}
+		if quiet {
+			return m.finishDelivery(delivery, model.NotificationDeliverySuppressed, "quiet_hours", now)
+		}
+		message.Summary = truncateRunes(notification.Title, wxpusher.MaxSummaryLength)
+		message.Content = notification.Message
+		message.URL = notificationURL(publicBaseURL, notification.ID)
+	}
 	requestCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)
 	defer cancel()
-	result, sendErr := client.Send(requestCtx, wxpusher.Message{
-		UID: binding.UID, Summary: truncateRunes(notification.Title, wxpusher.MaxSummaryLength),
-		Content: notification.Message, ContentType: wxpusher.ContentTypeText,
-		URL: notificationURL(publicBaseURL, notification.ID),
-	})
+	result, sendErr := client.Send(requestCtx, message)
 	if sendErr != nil {
 		return m.handleNotificationSendError(binding, delivery, sendErr, now)
 	}
@@ -337,6 +348,13 @@ func notificationURL(baseURL, notificationID string) string {
 		return ""
 	}
 	return baseURL + "/dashboard?notification=" + url.QueryEscape(notificationID)
+}
+
+func dashboardURL(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	return baseURL + "/dashboard"
 }
 
 func truncateRunes(value string, limit int) string {

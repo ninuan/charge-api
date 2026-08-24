@@ -19,6 +19,7 @@ const (
 	wxPusherPollInterval    = 10 * time.Second
 	wxPusherCreateMinuteMax = 1
 	wxPusherCreateDayMax    = 10
+	wxPusherTestDayMax      = 5
 	wxPusherDeliveryNotice  = "消息由 WxPusher 转发，绑定成功不代表微信一定已展示。"
 )
 
@@ -29,6 +30,9 @@ var (
 	ErrWxPusherUIDConflict        = errors.New("wxpusher uid conflict")
 	ErrWxPusherRateLimited        = errors.New("wxpusher bind rate limited")
 	ErrWxPusherNotConfigured      = errors.New("wxpusher not configured")
+	ErrWxPusherNotBound           = errors.New("wxpusher not bound")
+	ErrWxPusherChannelDisabled    = errors.New("wxpusher channel disabled")
+	ErrWxPusherPreferenceInvalid  = errors.New("wxpusher preference invalid")
 )
 
 type WxPusherBindingClient interface {
@@ -56,6 +60,22 @@ func (m *Manager) WxPusherChannelState(userID string, configured bool) (model.Wx
 		EventTypes:         wxPusherEventTypeList(model.WxPusherDefaultEventTypes),
 		DeliveryDisclaimer: wxPusherDeliveryNotice,
 	}
+	latestDelivery, deliveryFound, err := m.repository.LoadLatestNotificationDelivery(userID, false)
+	if err != nil {
+		return model.WxPusherChannelState{}, err
+	}
+	if deliveryFound {
+		summary := wxPusherDeliverySummary(latestDelivery)
+		state.LastDelivery = &summary
+	}
+	latestTestDelivery, testDeliveryFound, err := m.repository.LoadLatestNotificationDelivery(userID, true)
+	if err != nil {
+		return model.WxPusherChannelState{}, err
+	}
+	if testDeliveryFound {
+		summary := wxPusherDeliverySummary(latestTestDelivery)
+		state.LastTestDelivery = &summary
+	}
 	if !found {
 		return state, nil
 	}
@@ -67,6 +87,104 @@ func (m *Manager) WxPusherChannelState(userID string, configured bool) (model.Wx
 	state.BoundAt = &boundAt
 	state.LastTestAt = binding.LastTestAt
 	return state, nil
+}
+
+func (m *Manager) UpdateWxPusherChannel(
+	userID string,
+	request model.WxPusherChannelUpdateRequest,
+	configured bool,
+) (model.WxPusherChannelState, error) {
+	if !configured {
+		return model.WxPusherChannelState{}, ErrWxPusherNotConfigured
+	}
+	if request.Enabled == nil && request.EventTypes == nil {
+		return model.WxPusherChannelState{}, ErrWxPusherPreferenceInvalid
+	}
+	if _, ok := m.User(userID); !ok {
+		return model.WxPusherChannelState{}, fmt.Errorf("user not found or disabled")
+	}
+	m.wxPusherMu.Lock()
+	defer m.wxPusherMu.Unlock()
+	binding, found, err := m.repository.LoadWxPusherBinding(userID)
+	if err != nil {
+		return model.WxPusherChannelState{}, err
+	}
+	if !found {
+		return model.WxPusherChannelState{}, ErrWxPusherNotBound
+	}
+	if request.Enabled != nil {
+		binding.Enabled = *request.Enabled
+	}
+	if request.EventTypes != nil {
+		mask, err := wxPusherEventTypeMask(*request.EventTypes)
+		if err != nil {
+			return model.WxPusherChannelState{}, ErrWxPusherPreferenceInvalid
+		}
+		binding.EventTypes = mask
+	}
+	binding.UpdatedAt = m.reminderSchedulerNow().UTC().Truncate(time.Second)
+	if err := m.repository.SaveWxPusherBinding(binding); err != nil {
+		return model.WxPusherChannelState{}, err
+	}
+	return m.WxPusherChannelState(userID, configured)
+}
+
+func (m *Manager) CreateWxPusherTestDelivery(userID string, configured bool) (model.NotificationDeliverySummary, error) {
+	if !configured {
+		return model.NotificationDeliverySummary{}, ErrWxPusherNotConfigured
+	}
+	if _, ok := m.User(userID); !ok {
+		return model.NotificationDeliverySummary{}, fmt.Errorf("user not found or disabled")
+	}
+	now := m.reminderSchedulerNow().UTC().Truncate(time.Second)
+	m.wxPusherMu.Lock()
+	binding, found, err := m.repository.LoadWxPusherBinding(userID)
+	if err != nil {
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, err
+	}
+	if !found {
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, ErrWxPusherNotBound
+	}
+	if !binding.Enabled {
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, ErrWxPusherChannelDisabled
+	}
+	if binding.LastTestAt != nil && now.Sub(*binding.LastTestAt) < time.Minute {
+		retryAfter := time.Minute - now.Sub(*binding.LastTestAt)
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, WxPusherRateLimitError{RetryAfter: retryAfter}
+	}
+	count, err := m.repository.CountTestNotificationDeliveriesSince(userID, now.Add(-24*time.Hour))
+	if err != nil {
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, err
+	}
+	if count >= wxPusherTestDayMax {
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, WxPusherRateLimitError{RetryAfter: time.Hour}
+	}
+	deliveryID, err := secureWxPusherDeliveryID()
+	if err != nil {
+		m.wxPusherMu.Unlock()
+		return model.NotificationDeliverySummary{}, fmt.Errorf("generate wxpusher test delivery: %w", err)
+	}
+	delivery := model.NotificationDelivery{
+		ID: deliveryID, UserID: userID, Channel: "wxpusher",
+		Status: model.NotificationDeliveryPending, IsTest: true,
+		NextAttemptAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := m.repository.CreateWxPusherTestDelivery(delivery); err != nil {
+		m.wxPusherMu.Unlock()
+		if errors.Is(err, persistence.ErrWxPusherBindingNotEnabled) {
+			return model.NotificationDeliverySummary{}, ErrWxPusherChannelDisabled
+		}
+		return model.NotificationDeliverySummary{}, err
+	}
+	m.wxPusherMu.Unlock()
+	m.wakeNotificationDispatcher()
+	return wxPusherDeliverySummary(delivery), nil
 }
 
 func (m *Manager) CreateWxPusherBindSession(ctx context.Context, userID string, client WxPusherBindingClient) (model.WxPusherBindSessionView, error) {
@@ -254,6 +372,14 @@ func secureWxPusherSessionID() (string, error) {
 	return "wxp_" + base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
+func secureWxPusherDeliveryID() (string, error) {
+	raw := make([]byte, 18)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return "ndl_" + base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
 func wxPusherSessionView(session model.WxPusherBindSession, status model.WxPusherBindSessionStatus, message, errorCode string) model.WxPusherBindSessionView {
 	view := model.WxPusherBindSessionView{
 		ID: session.ID, Status: status, ExpiresAt: session.ExpiresAt,
@@ -281,6 +407,84 @@ func wxPusherEventTypeList(mask model.WxPusherEventTypes) []model.WxPusherEventT
 		items = append(items, model.WxPusherEventTypePileRecovered)
 	}
 	return items
+}
+
+func wxPusherEventTypeMask(items []model.WxPusherEventType) (model.WxPusherEventTypes, error) {
+	var mask model.WxPusherEventTypes
+	seen := make(map[model.WxPusherEventType]struct{}, len(items))
+	for _, item := range items {
+		if _, exists := seen[item]; exists {
+			return 0, ErrWxPusherPreferenceInvalid
+		}
+		seen[item] = struct{}{}
+		switch item {
+		case model.WxPusherEventTypePileAvailable:
+			mask |= model.WxPusherEventPileAvailable
+		case model.WxPusherEventTypeCredentialExpired:
+			mask |= model.WxPusherEventCredentialExpired
+		case model.WxPusherEventTypePileOffline:
+			mask |= model.WxPusherEventPileOffline
+		case model.WxPusherEventTypePileRecovered:
+			mask |= model.WxPusherEventPileRecovered
+		default:
+			return 0, ErrWxPusherPreferenceInvalid
+		}
+	}
+	return mask, nil
+}
+
+func wxPusherDeliverySummary(delivery model.NotificationDelivery) model.NotificationDeliverySummary {
+	return model.NotificationDeliverySummary{
+		ID: delivery.ID, Status: delivery.Status, IsTest: delivery.IsTest,
+		AcceptedAt: delivery.AcceptedAt, ProviderSucceededAt: delivery.ProviderSucceededAt,
+		UpdatedAt: delivery.UpdatedAt, Message: wxPusherDeliveryMessage(delivery.Status),
+		ErrorCode: wxPusherDeliveryErrorCode(delivery.LastErrorCode),
+	}
+}
+
+func wxPusherDeliveryMessage(status model.NotificationDeliveryStatus) string {
+	switch status {
+	case model.NotificationDeliveryPending, model.NotificationDeliverySending, model.NotificationDeliveryRetryWait:
+		return "等待发送"
+	case model.NotificationDeliveryAccepted:
+		return "服务已受理"
+	case model.NotificationDeliveryProviderSucceeded:
+		return "WxPusher 已处理"
+	case model.NotificationDeliverySuppressed:
+		return "免打扰时段未发送"
+	case model.NotificationDeliveryUncertain:
+		return "暂未确认"
+	case model.NotificationDeliveryFailed:
+		return "发送失败"
+	case model.NotificationDeliveryCancelled:
+		return "已取消"
+	default:
+		return "状态未知"
+	}
+}
+
+func wxPusherDeliveryErrorCode(code string) string {
+	code = strings.TrimSpace(code)
+	switch code {
+	case "wxpusher_rate_limited":
+		return "rate_limited"
+	case "wxpusher_invalid_token":
+		return "invalid_token"
+	case "wxpusher_invalid_uid":
+		return "invalid_uid"
+	case "wxpusher_recipient_rejected":
+		return "recipient_rejected"
+	case "wxpusher_provider_timeout":
+		return "timeout"
+	case "wxpusher_invalid_response":
+		return "invalid_response"
+	case "send_outcome_unknown", "provider_status_unknown", "record_id_reentered_send_queue":
+		return "ambiguous_result"
+	case "wxpusher_provider_unavailable", "provider_delivery_failed":
+		return "provider_unavailable"
+	default:
+		return ""
+	}
 }
 
 func maskWxPusherUID(uid string) string {

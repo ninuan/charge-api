@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
 	"charge-dashboard/internal/wxpusher"
 )
@@ -27,6 +28,18 @@ func (s *Server) handleWxPusherChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		s.setHealthDegraded("wxpusher", "")
 		writeJSON(w, http.StatusOK, state)
+	case http.MethodPatch:
+		var request model.WxPusherChannelUpdateRequest
+		if !decodeJSON(w, r, watchBodyLimit, &request) {
+			return
+		}
+		state, err := s.manager.UpdateWxPusherChannel(user.ID, request, s.wxPusherClient != nil)
+		if err != nil {
+			s.writeWxPusherError(w, "update_wxpusher_channel", err)
+			return
+		}
+		s.setHealthDegraded("wxpusher", "")
+		writeJSON(w, http.StatusOK, state)
 	case http.MethodDelete:
 		if err := s.manager.DeleteWxPusherChannel(user.ID); err != nil {
 			s.writeWxPusherError(w, "delete_wxpusher_channel", err)
@@ -37,6 +50,25 @@ func (s *Server) handleWxPusherChannel(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) handleWxPusherTest(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireDashboardUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	delivery, err := s.manager.CreateWxPusherTestDelivery(user.ID, s.wxPusherClient != nil)
+	if err != nil {
+		s.writeWxPusherError(w, "test_wxpusher_channel", err)
+		return
+	}
+	s.setHealthDegraded("wxpusher", "")
+	writeJSON(w, http.StatusAccepted, delivery)
 }
 
 func (s *Server) handleWxPusherBindSessions(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +126,12 @@ func (s *Server) writeWxPusherError(w http.ResponseWriter, operation string, err
 		writeCodedError(w, http.StatusNotFound, "WXPUSHER_BIND_SESSION_NOT_FOUND", "未找到微信绑定会话")
 	case errors.Is(err, appruntime.ErrWxPusherUIDConflict):
 		writeCodedError(w, http.StatusConflict, "WXPUSHER_UID_CONFLICT", "这个微信接收账号已绑定其他账户")
+	case errors.Is(err, appruntime.ErrWxPusherNotBound):
+		writeCodedError(w, http.StatusConflict, "WXPUSHER_NOT_BOUND", "请先绑定 WxPusher")
+	case errors.Is(err, appruntime.ErrWxPusherChannelDisabled):
+		writeCodedError(w, http.StatusConflict, "WXPUSHER_CHANNEL_DISABLED", "请先开启微信提醒")
+	case errors.Is(err, appruntime.ErrWxPusherPreferenceInvalid):
+		writeCodedError(w, http.StatusBadRequest, "WXPUSHER_INVALID", "微信提醒设置无效")
 	case errors.Is(err, appruntime.ErrWxPusherRateLimited):
 		retryAfter := time.Minute
 		var limited appruntime.WxPusherRateLimitError
@@ -101,7 +139,11 @@ func (s *Server) writeWxPusherError(w http.ResponseWriter, operation string, err
 			retryAfter = limited.RetryAfter
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
-		writeCodedError(w, http.StatusTooManyRequests, "WXPUSHER_RATE_LIMITED", "获取二维码过于频繁，请稍后再试")
+		message := "获取二维码过于频繁，请稍后再试"
+		if operation == "test_wxpusher_channel" {
+			message = "测试消息发送过于频繁，请稍后再试"
+		}
+		writeCodedError(w, http.StatusTooManyRequests, "WXPUSHER_RATE_LIMITED", message)
 	default:
 		providerCode := wxpusher.CodeOf(err)
 		if providerCode != "" {

@@ -777,9 +777,12 @@ export interface components {
             deliveryDisclaimer: string;
             enabled: boolean;
             eventTypes: components["schemas"]["WxPusherEventType"][];
+            /** @description 最近一次正式通知投递结果。 */
             lastDelivery?: components["schemas"]["NotificationDeliverySummary"];
             /** Format: date-time */
             lastTestAt?: string;
+            /** @description 最近一次测试消息投递结果。 */
+            lastTestDelivery?: components["schemas"]["NotificationDeliverySummary"];
             /** @description 仅用于帮助用户识别绑定，不返回完整 UID。 */
             maskedUid?: string;
         };
@@ -1095,6 +1098,15 @@ export interface components {
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
+        /** @description 当前用户尚未绑定 WxPusher，或微信提醒总开关处于关闭状态 */
+        WxPusherChannelConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CodedErrorResponse"];
+            };
+        };
         /** @description WxPusher 通道开关或事件类型设置无效 */
         WxPusherInvalid: {
             headers: {
@@ -1103,23 +1115,8 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "code": "WXPUSHER_PREFERENCE_INVALID",
+                 *       "code": "WXPUSHER_INVALID",
                  *       "error": "WxPusher 提醒设置无效"
-                 *     }
-                 */
-                "application/json": components["schemas"]["CodedErrorResponse"];
-            };
-        };
-        /** @description 当前用户尚未绑定 WxPusher */
-        WxPusherNotBound: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "code": "WXPUSHER_NOT_BOUND",
-                 *       "error": "请先绑定 WxPusher"
                  *     }
                  */
                 "application/json": components["schemas"]["CodedErrorResponse"];
@@ -1248,8 +1245,8 @@ export type ResponseWatchTargetNotFound = components['responses']['WatchTargetNo
 export type ResponseWatchUnavailable = components['responses']['WatchUnavailable'];
 export type ResponseWxPusherBindingConflict = components['responses']['WxPusherBindingConflict'];
 export type ResponseWxPusherBindSessionNotFound = components['responses']['WxPusherBindSessionNotFound'];
+export type ResponseWxPusherChannelConflict = components['responses']['WxPusherChannelConflict'];
 export type ResponseWxPusherInvalid = components['responses']['WxPusherInvalid'];
-export type ResponseWxPusherNotBound = components['responses']['WxPusherNotBound'];
 export type ResponseWxPusherRateLimited = components['responses']['WxPusherRateLimited'];
 export type ResponseWxPusherUnavailable = components['responses']['WxPusherUnavailable'];
 export type ParameterAdminTrendRange = components['parameters']['AdminTrendRange'];
@@ -1491,7 +1488,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["OrdinaryUserRequired"];
             405: components["responses"]["MethodNotAllowed"];
-            409: components["responses"]["WxPusherNotBound"];
+            409: components["responses"]["WxPusherChannelConflict"];
             503: components["responses"]["WxPusherUnavailable"];
         };
     };
@@ -1572,7 +1569,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["OrdinaryUserRequired"];
             405: components["responses"]["MethodNotAllowed"];
-            409: components["responses"]["WxPusherNotBound"];
+            409: components["responses"]["WxPusherChannelConflict"];
             429: components["responses"]["WxPusherRateLimited"];
             503: components["responses"]["WxPusherUnavailable"];
         };

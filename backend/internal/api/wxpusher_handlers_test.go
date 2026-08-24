@@ -61,6 +61,18 @@ func TestWxPusherBindingAPIIsPrivateConfiguredAndUserScoped(t *testing.T) {
 	}
 
 	server.wxPusherClient = fakeAPIWxPusherClient{}
+	invalidUpdate := wxPusherAPIJSONRequest(t, mux, ownerSession, http.MethodPatch, "/api/notification-channels/wxpusher", `{}`)
+	if invalidUpdate.Code != http.StatusBadRequest || !strings.Contains(invalidUpdate.Body.String(), "WXPUSHER_INVALID") {
+		t.Fatalf("invalid update=%d body=%s", invalidUpdate.Code, invalidUpdate.Body.String())
+	}
+	unboundUpdate := wxPusherAPIJSONRequest(t, mux, ownerSession, http.MethodPatch, "/api/notification-channels/wxpusher", `{"enabled":true}`)
+	if unboundUpdate.Code != http.StatusConflict || !strings.Contains(unboundUpdate.Body.String(), "WXPUSHER_NOT_BOUND") {
+		t.Fatalf("unbound update=%d body=%s", unboundUpdate.Code, unboundUpdate.Body.String())
+	}
+	unboundTest := wxPusherAPIRequest(t, mux, ownerSession, http.MethodPost, "/api/notification-channels/wxpusher/test")
+	if unboundTest.Code != http.StatusConflict || !strings.Contains(unboundTest.Body.String(), "WXPUSHER_NOT_BOUND") {
+		t.Fatalf("unbound test=%d body=%s", unboundTest.Code, unboundTest.Body.String())
+	}
 	created := wxPusherAPIRequest(t, mux, ownerSession, http.MethodPost, "/api/notification-channels/wxpusher/bind-sessions")
 	if created.Code != http.StatusCreated || created.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("create=%d cache=%q body=%s", created.Code, created.Header().Get("Cache-Control"), created.Body.String())
@@ -80,6 +92,16 @@ func TestWxPusherBindingAPIIsPrivateConfiguredAndUserScoped(t *testing.T) {
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete=%d body=%s", deleted.Code, deleted.Body.String())
 	}
+}
+
+func wxPusherAPIJSONRequest(t *testing.T, handler http.Handler, session auth.Session, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
 
 func wxPusherAPIRequest(t *testing.T, handler http.Handler, session auth.Session, method, path string) *httptest.ResponseRecorder {
