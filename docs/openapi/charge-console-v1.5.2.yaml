@@ -1105,8 +1105,14 @@ components:
         - state
         - message
         - enabled
+        - recurringEnabled
         - schedulerRunning
         - scheduledPowerOffActive
+        - activeTemporaryRules
+        - activeRecurringRules
+        - completedNotified24Hours
+        - completedExpired24Hours
+        - averageTemporaryMinutes
         - trackedPiles
         - duePiles
         - inFlightPiles
@@ -1127,10 +1133,31 @@ components:
           type: string
         enabled:
           type: boolean
+        recurringEnabled:
+          type: boolean
+          description: 是否允许固定时段提醒进入调度队列。
         schedulerRunning:
           type: boolean
         scheduledPowerOffActive:
           type: boolean
+        activeTemporaryRules:
+          type: integer
+          minimum: 0
+        activeRecurringRules:
+          type: integer
+          minimum: 0
+          description: 已计入当前调度的固定时段规则数；全局关闭时为 0。
+        completedNotified24Hours:
+          type: integer
+          minimum: 0
+        completedExpired24Hours:
+          type: integer
+          minimum: 0
+        averageTemporaryMinutes:
+          type: number
+          format: double
+          minimum: 0
+          description: 过去 24 小时已结束临时提醒的平均运行分钟数。
         trackedPiles:
           type: integer
           minimum: 0
@@ -1173,6 +1200,121 @@ components:
         maxConsecutiveFailures:
           type: integer
           minimum: 0
+    WxPusherOperationsStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - message
+        - configured
+        - dispatcherRunning
+        - activeBindings
+        - pendingDeliveries
+        - sendingDeliveries
+        - acceptedPendingDeliveries
+        - retryingDeliveries
+        - uncertainDeliveries
+        - failedDeliveries
+        - attempts24Hours
+        - accepted24Hours
+        - providerSucceeded24Hours
+        - acceptanceRate24Hours
+        - providerSuccessRate24Hours
+        - systemFailures24Hours
+        - bindingFailures24Hours
+        - affectedBindingUsers
+        - consecutiveSystemFailures
+      properties:
+        state:
+          type: string
+          enum: [healthy, degraded, disabled, stopped]
+        message:
+          type: string
+        configured:
+          type: boolean
+        dispatcherRunning:
+          type: boolean
+        activeBindings:
+          type: integer
+          minimum: 0
+        pendingDeliveries:
+          type: integer
+          minimum: 0
+        sendingDeliveries:
+          type: integer
+          minimum: 0
+        acceptedPendingDeliveries:
+          type: integer
+          minimum: 0
+          description: 已被供应商受理、仍等待状态确认的投递数。
+        retryingDeliveries:
+          type: integer
+          minimum: 0
+        uncertainDeliveries:
+          type: integer
+          minimum: 0
+        failedDeliveries:
+          type: integer
+          minimum: 0
+        oldestPendingAt:
+          type: string
+          format: date-time
+          nullable: true
+        attempts24Hours:
+          type: integer
+          minimum: 0
+        accepted24Hours:
+          type: integer
+          minimum: 0
+        providerSucceeded24Hours:
+          type: integer
+          minimum: 0
+        acceptanceRate24Hours:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        providerSuccessRate24Hours:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        systemFailures24Hours:
+          type: integer
+          minimum: 0
+        bindingFailures24Hours:
+          type: integer
+          minimum: 0
+        affectedBindingUsers:
+          type: integer
+          minimum: 0
+        consecutiveSystemFailures:
+          type: integer
+          minimum: 0
+        lastAcceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastProviderSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastFailureAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastErrorCategory:
+          type: string
+          enum:
+            [
+              configuration,
+              rate_limited,
+              provider_unavailable,
+              delivery_unconfirmed,
+              binding_invalid,
+              internal,
+            ]
+          nullable: true
     OperationsStatus:
       type: object
       additionalProperties: false
@@ -1190,6 +1332,7 @@ components:
         - resolvedNotificationRows
         - notificationRetentionDays
         - reminders
+        - wxPusher
       properties:
         databaseSizeBytes:
           type: integer
@@ -1249,6 +1392,8 @@ components:
           maximum: 365
         reminders:
           $ref: "#/components/schemas/ReminderOperationsStatus"
+        wxPusher:
+          $ref: "#/components/schemas/WxPusherOperationsStatus"
     WatchOverview:
       type: object
       additionalProperties: false

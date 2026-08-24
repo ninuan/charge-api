@@ -308,6 +308,13 @@ func (m *Manager) notificationDispatcherConfig() (NotificationDeliveryClient, st
 	return coordinator.client, coordinator.publicBaseURL
 }
 
+func (m *Manager) notificationDispatcherStatus() (configured, running bool) {
+	coordinator := &m.notificationDispatcher
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	return coordinator.client != nil, coordinator.running
+}
+
 func (m *Manager) notificationDispatcherNow() time.Time {
 	coordinator := &m.notificationDispatcher
 	coordinator.mu.Lock()

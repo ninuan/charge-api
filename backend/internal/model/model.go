@@ -739,14 +739,21 @@ type OperationsStatus struct {
 	ResolvedNotificationRows  int64                    `json:"resolvedNotificationRows"`
 	NotificationRetentionDays int                      `json:"notificationRetentionDays"`
 	Reminders                 ReminderOperationsStatus `json:"reminders"`
+	WxPusher                  WxPusherOperationsStatus `json:"wxPusher"`
 }
 
 type ReminderOperationsStatus struct {
 	State                    string     `json:"state"`
 	Message                  string     `json:"message"`
 	Enabled                  bool       `json:"enabled"`
+	RecurringEnabled         bool       `json:"recurringEnabled"`
 	SchedulerRunning         bool       `json:"schedulerRunning"`
 	ScheduledPowerOffActive  bool       `json:"scheduledPowerOffActive"`
+	ActiveTemporaryRules     int        `json:"activeTemporaryRules"`
+	ActiveRecurringRules     int        `json:"activeRecurringRules"`
+	CompletedNotified24Hours int        `json:"completedNotified24Hours"`
+	CompletedExpired24Hours  int        `json:"completedExpired24Hours"`
+	AverageTemporaryMinutes  float64    `json:"averageTemporaryMinutes"`
 	TrackedPiles             int        `json:"trackedPiles"`
 	DuePiles                 int        `json:"duePiles"`
 	InFlightPiles            int        `json:"inFlightPiles"`
@@ -760,6 +767,42 @@ type ReminderOperationsStatus struct {
 	QuotaSkips24Hours        int        `json:"quotaSkips24Hours"`
 	SchedulerErrors24Hours   int        `json:"schedulerErrors24Hours"`
 	MaxConsecutiveFailures   int        `json:"maxConsecutiveFailures"`
+}
+
+type ReminderRuleOperationsStats struct {
+	ActiveTemporaryRules     int
+	ActiveRecurringRules     int
+	CompletedNotified24Hours int
+	CompletedExpired24Hours  int
+	AverageTemporaryMinutes  float64
+}
+
+type WxPusherOperationsStatus struct {
+	State                      string     `json:"state"`
+	Message                    string     `json:"message"`
+	Configured                 bool       `json:"configured"`
+	DispatcherRunning          bool       `json:"dispatcherRunning"`
+	ActiveBindings             int        `json:"activeBindings"`
+	PendingDeliveries          int        `json:"pendingDeliveries"`
+	SendingDeliveries          int        `json:"sendingDeliveries"`
+	AcceptedPendingDeliveries  int        `json:"acceptedPendingDeliveries"`
+	RetryingDeliveries         int        `json:"retryingDeliveries"`
+	UncertainDeliveries        int        `json:"uncertainDeliveries"`
+	FailedDeliveries           int        `json:"failedDeliveries"`
+	OldestPendingAt            *time.Time `json:"oldestPendingAt,omitempty"`
+	Attempts24Hours            int        `json:"attempts24Hours"`
+	Accepted24Hours            int        `json:"accepted24Hours"`
+	ProviderSucceeded24Hours   int        `json:"providerSucceeded24Hours"`
+	AcceptanceRate24Hours      float64    `json:"acceptanceRate24Hours"`
+	ProviderSuccessRate24Hours float64    `json:"providerSuccessRate24Hours"`
+	SystemFailures24Hours      int        `json:"systemFailures24Hours"`
+	BindingFailures24Hours     int        `json:"bindingFailures24Hours"`
+	AffectedBindingUsers       int        `json:"affectedBindingUsers"`
+	ConsecutiveSystemFailures  int        `json:"consecutiveSystemFailures"`
+	LastAcceptedAt             *time.Time `json:"lastAcceptedAt,omitempty"`
+	LastProviderSuccessAt      *time.Time `json:"lastProviderSuccessAt,omitempty"`
+	LastFailureAt              *time.Time `json:"lastFailureAt,omitempty"`
+	LastErrorCategory          string     `json:"lastErrorCategory,omitempty"`
 }
 
 type TrafficStats struct {

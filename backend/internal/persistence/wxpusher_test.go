@@ -234,3 +234,56 @@ func TestWxPusherModelsRejectOversizedProviderErrors(t *testing.T) {
 		t.Fatal("oversized provider error was accepted")
 	}
 }
+
+func TestWxPusherOperationsStatusSeparatesSystemAndBindingFailures(t *testing.T) {
+	store, users, now := newWxPusherTestStore(t)
+	defer store.Close()
+	if err := store.SaveWxPusherBinding(model.WxPusherBinding{
+		UserID: users[0].ID, UID: "UID_operations", Enabled: true,
+		EventTypes: model.WxPusherDefaultEventTypes, BoundAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveWxPusherBinding: %v", err)
+	}
+	succeededAt := now.Add(-10 * time.Minute)
+	acceptedAt := succeededAt.Add(-time.Minute)
+	for _, delivery := range []model.NotificationDelivery{
+		{
+			ID: "operations-success", UserID: users[0].ID, IsTest: true,
+			Status: model.NotificationDeliveryProviderSucceeded, AttemptCount: 1,
+			AcceptedAt: &acceptedAt, ProviderSucceededAt: &succeededAt,
+			CreatedAt: now.Add(-20 * time.Minute), UpdatedAt: succeededAt,
+		},
+		{
+			ID: "operations-system-failure", UserID: users[0].ID, IsTest: true,
+			Status: model.NotificationDeliveryRetryWait, AttemptCount: 1,
+			LastErrorCode: "wxpusher_provider_timeout",
+			NextAttemptAt: timePointerForWxPusherTest(now.Add(time.Minute)),
+			CreatedAt:     now.Add(-15 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute),
+		},
+		{
+			ID: "operations-binding-failure", UserID: users[1].ID, IsTest: true,
+			Status: model.NotificationDeliveryFailed, AttemptCount: 1,
+			LastErrorCode: "wxpusher_invalid_uid",
+			CreatedAt:     now.Add(-12 * time.Minute), UpdatedAt: now.Add(-4 * time.Minute),
+		},
+	} {
+		if err := store.SaveNotificationDelivery(delivery); err != nil {
+			t.Fatalf("SaveNotificationDelivery %s: %v", delivery.ID, err)
+		}
+	}
+	status, err := store.WxPusherOperationsStatus(now.Add(-24 * time.Hour))
+	if err != nil {
+		t.Fatalf("WxPusherOperationsStatus: %v", err)
+	}
+	if status.ActiveBindings != 1 || status.Attempts24Hours != 3 || status.Accepted24Hours != 1 ||
+		status.ProviderSucceeded24Hours != 1 || status.RetryingDeliveries != 1 ||
+		status.SystemFailures24Hours != 1 || status.BindingFailures24Hours != 1 ||
+		status.AffectedBindingUsers != 1 || status.ConsecutiveSystemFailures != 1 ||
+		status.LastErrorCategory != "binding_invalid" {
+		t.Fatalf("unexpected wxpusher operations status: %+v", status)
+	}
+}
+
+func timePointerForWxPusherTest(value time.Time) *time.Time {
+	return &value
+}

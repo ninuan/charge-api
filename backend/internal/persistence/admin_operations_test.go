@@ -104,7 +104,7 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 		Version: 3,
 		Users: []model.User{{
 			ID: "user-1", Username: "alice", PasswordHash: "hash",
-			Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+			Role: model.RoleUser, Enabled: true, RefreshEnabled: true, CreatedAt: now, UpdatedAt: now,
 		}},
 		UserStates: map[string]UserState{"user-1": {}},
 	}); err != nil {
@@ -129,6 +129,30 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 	if err := store.RecordMetricCount("user-1", "watch_remote_ok", 3, now); err != nil {
 		t.Fatalf("RecordMetricCount watch_remote_ok: %v", err)
 	}
+	for _, rule := range []model.WatchRule{
+		{
+			ID: "temporary-active", UserID: "user-1", DeviceID: "pile-1",
+			Mode: model.WatchRuleTemporary, Enabled: true, ActiveWeekdays: 127,
+			Timezone: "Asia/Shanghai", ExpiresAt: timePointerForOperationsTest(now.Add(time.Hour)),
+			StopAfterNotify: true, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
+		},
+		{
+			ID: "recurring-active", UserID: "user-1", DeviceID: "pile-2",
+			Mode: model.WatchRuleRecurring, Enabled: true, ActiveWeekdays: 127,
+			Timezone: "Asia/Shanghai", CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
+		},
+		{
+			ID: "temporary-notified", UserID: "user-1", DeviceID: "pile-3",
+			Mode: model.WatchRuleTemporary, Enabled: false, ActiveWeekdays: 127,
+			Timezone: "Asia/Shanghai", ExpiresAt: timePointerForOperationsTest(now.Add(time.Hour)),
+			CompletedAt: timePointerForOperationsTest(now), CompletionReason: model.WatchCompletionNotified,
+			StopAfterNotify: true, CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now,
+		},
+	} {
+		if err := store.SaveWatchRule(rule); err != nil {
+			t.Fatalf("SaveWatchRule %s: %v", rule.ID, err)
+		}
+	}
 	page, err := store.ListAudit(1, 20)
 	if err != nil {
 		t.Fatalf("ListAudit: %v", err)
@@ -151,4 +175,13 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 	if err != nil || metrics["watch_remote"] != 4 || metrics["watch_remote_ok"] != 3 {
 		t.Fatalf("ReminderMetricCounts = %+v, err %v", metrics, err)
 	}
+	ruleStats, err := store.ReminderRuleOperationsStats(now.Add(-time.Hour), now)
+	if err != nil || ruleStats.ActiveTemporaryRules != 1 || ruleStats.ActiveRecurringRules != 1 ||
+		ruleStats.CompletedNotified24Hours != 1 || ruleStats.AverageTemporaryMinutes != 30 {
+		t.Fatalf("ReminderRuleOperationsStats = %+v, err %v", ruleStats, err)
+	}
+}
+
+func timePointerForOperationsTest(value time.Time) *time.Time {
+	return &value
 }

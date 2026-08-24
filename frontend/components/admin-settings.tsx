@@ -209,6 +209,30 @@ export function AdminSettings({
                   />
                 </Field>
 
+                <Field
+                  orientation="horizontal"
+                  className="rounded-lg border p-3"
+                >
+                  <FieldContent>
+                    <FieldLabel htmlFor="recurring-reminders">
+                      允许固定时段提醒
+                    </FieldLabel>
+                    <FieldDescription>
+                      关闭后保留固定规则，只运行用户主动开启的临时提醒。
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id="recurring-reminders"
+                    checked={settings.recurringRemindersEnabled}
+                    onCheckedChange={(checked) =>
+                      setSettings({
+                        ...settings,
+                        recurringRemindersEnabled: checked,
+                      })
+                    }
+                  />
+                </Field>
+
                 <FieldGroup className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="watch-refresh-interval">

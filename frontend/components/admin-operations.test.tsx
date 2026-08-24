@@ -40,8 +40,14 @@ describe("AdminOperations", () => {
         state: "healthy",
         message: "后台提醒调度运行正常。",
         enabled: true,
+        recurringEnabled: true,
         schedulerRunning: true,
         scheduledPowerOffActive: false,
+        activeTemporaryRules: 3,
+        activeRecurringRules: 1,
+        completedNotified24Hours: 5,
+        completedExpired24Hours: 2,
+        averageTemporaryMinutes: 78,
         trackedPiles: 4,
         duePiles: 1,
         inFlightPiles: 0,
@@ -55,6 +61,33 @@ describe("AdminOperations", () => {
         quotaSkips24Hours: 0,
         schedulerErrors24Hours: 0,
         maxConsecutiveFailures: 0,
+      },
+      wxPusher: {
+        state: "healthy",
+        message: "通道运行正常；1 位用户的接收绑定需要单独处理。",
+        configured: true,
+        dispatcherRunning: true,
+        activeBindings: 6,
+        pendingDeliveries: 1,
+        sendingDeliveries: 0,
+        acceptedPendingDeliveries: 1,
+        retryingDeliveries: 0,
+        uncertainDeliveries: 1,
+        failedDeliveries: 2,
+        oldestPendingAt: "2026-08-05T09:55:00Z",
+        attempts24Hours: 10,
+        accepted24Hours: 9,
+        providerSucceeded24Hours: 8,
+        acceptanceRate24Hours: 90,
+        providerSuccessRate24Hours: 88.9,
+        systemFailures24Hours: 1,
+        bindingFailures24Hours: 2,
+        affectedBindingUsers: 1,
+        consecutiveSystemFailures: 0,
+        lastAcceptedAt: "2026-08-05T09:50:00Z",
+        lastProviderSuccessAt: "2026-08-05T09:52:00Z",
+        lastFailureAt: "2026-08-05T09:45:00Z",
+        lastErrorCategory: "binding_invalid",
       },
     })
     adminApiMock.audit.mockResolvedValue({
@@ -72,8 +105,12 @@ describe("AdminOperations", () => {
     expect(screen.getAllByText(/保留 90 天/)).toHaveLength(2)
     expect(screen.getByText(/07\/01.*08\/05/)).toBeInTheDocument()
     expect(screen.getByText("提醒调度")).toBeInTheDocument()
-    expect(screen.getByText("空闲提醒充电桩")).toBeInTheDocument()
+    expect(screen.getByText("活动提醒")).toBeInTheDocument()
+    expect(screen.getByText("4 条")).toBeInTheDocument()
     expect(screen.getByText("95.0%")).toBeInTheDocument()
+    expect(screen.getByText("WxPusher 投递")).toBeInTheDocument()
+    expect(screen.getByText("90.0%")).toBeInTheDocument()
+    expect(screen.getByText(/绑定异常 2 次/)).toBeInTheDocument()
     expect(screen.getByText("36 条")).toBeInTheDocument()
   })
 })

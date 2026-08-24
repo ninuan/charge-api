@@ -628,6 +628,143 @@ func (s *Store) CountTestNotificationDeliveriesSince(userID string, since time.T
 	return count, nil
 }
 
+func (s *Store) WxPusherOperationsStatus(since time.Time) (model.WxPusherOperationsStatus, error) {
+	var result model.WxPusherOperationsStatus
+	var oldestPending, lastAccepted, lastProviderSuccess, lastFailure sql.NullInt64
+	err := s.db.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM wxpusher_bindings WHERE enabled=1),
+			COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='retry_wait' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='uncertain' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0),
+			MIN(CASE WHEN status IN ('pending','sending','accepted','retry_wait')
+				THEN created_at END),
+			COALESCE(SUM(CASE WHEN created_at>=? AND attempt_count>0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN created_at>=? AND accepted_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN created_at>=? AND provider_succeeded_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+			MAX(accepted_at), MAX(provider_succeeded_at),
+			MAX(CASE WHEN last_error_code<>'' THEN updated_at END)
+		FROM notification_deliveries
+		WHERE channel=?
+	`, since.UTC().Unix(), since.UTC().Unix(), since.UTC().Unix(), wxPusherChannel).Scan(
+		&result.ActiveBindings,
+		&result.PendingDeliveries,
+		&result.SendingDeliveries,
+		&result.AcceptedPendingDeliveries,
+		&result.RetryingDeliveries,
+		&result.UncertainDeliveries,
+		&result.FailedDeliveries,
+		&oldestPending,
+		&result.Attempts24Hours,
+		&result.Accepted24Hours,
+		&result.ProviderSucceeded24Hours,
+		&lastAccepted,
+		&lastProviderSuccess,
+		&lastFailure,
+	)
+	if err != nil {
+		return result, fmt.Errorf("summarize wxpusher deliveries: %w", err)
+	}
+	result.OldestPendingAt = nullableUnixTime(oldestPending)
+	result.LastAcceptedAt = nullableUnixTime(lastAccepted)
+	result.LastProviderSuccessAt = nullableUnixTime(lastProviderSuccess)
+	result.LastFailureAt = nullableUnixTime(lastFailure)
+
+	errorRows, err := s.db.Query(`
+		SELECT user_id, last_error_code
+		FROM notification_deliveries
+		WHERE channel=? AND updated_at>=? AND last_error_code<>''
+		ORDER BY updated_at DESC, id DESC
+	`, wxPusherChannel, since.UTC().Unix())
+	if err != nil {
+		return result, fmt.Errorf("query wxpusher delivery errors: %w", err)
+	}
+	affectedBindings := make(map[string]struct{})
+	for errorRows.Next() {
+		var userID, code string
+		if err := errorRows.Scan(&userID, &code); err != nil {
+			errorRows.Close()
+			return result, fmt.Errorf("scan wxpusher delivery error: %w", err)
+		}
+		category := wxPusherOperationsErrorCategory(code)
+		if result.LastErrorCategory == "" {
+			result.LastErrorCategory = category
+		}
+		if category == "binding_invalid" {
+			result.BindingFailures24Hours++
+			affectedBindings[userID] = struct{}{}
+		} else {
+			result.SystemFailures24Hours++
+		}
+	}
+	if err := errorRows.Close(); err != nil {
+		return result, fmt.Errorf("close wxpusher delivery error rows: %w", err)
+	}
+	if err := errorRows.Err(); err != nil {
+		return result, fmt.Errorf("iterate wxpusher delivery errors: %w", err)
+	}
+	result.AffectedBindingUsers = len(affectedBindings)
+
+	outcomeRows, err := s.db.Query(`
+		SELECT status, last_error_code
+		FROM notification_deliveries
+		WHERE channel=? AND (attempt_count>0 OR accepted_at IS NOT NULL)
+		ORDER BY updated_at DESC, id DESC
+		LIMIT 100
+	`, wxPusherChannel)
+	if err != nil {
+		return result, fmt.Errorf("query wxpusher recent outcomes: %w", err)
+	}
+	for outcomeRows.Next() {
+		var status model.NotificationDeliveryStatus
+		var code string
+		if err := outcomeRows.Scan(&status, &code); err != nil {
+			outcomeRows.Close()
+			return result, fmt.Errorf("scan wxpusher recent outcome: %w", err)
+		}
+		category := wxPusherOperationsErrorCategory(code)
+		if category == "binding_invalid" || status == model.NotificationDeliverySuppressed || status == model.NotificationDeliveryCancelled {
+			continue
+		}
+		if category != "" {
+			result.ConsecutiveSystemFailures++
+			continue
+		}
+		if status == model.NotificationDeliveryAccepted || status == model.NotificationDeliveryProviderSucceeded {
+			break
+		}
+	}
+	if err := outcomeRows.Close(); err != nil {
+		return result, fmt.Errorf("close wxpusher recent outcome rows: %w", err)
+	}
+	if err := outcomeRows.Err(); err != nil {
+		return result, fmt.Errorf("iterate wxpusher recent outcomes: %w", err)
+	}
+	return result, nil
+}
+
+func wxPusherOperationsErrorCategory(code string) string {
+	switch strings.TrimSpace(code) {
+	case "":
+		return ""
+	case "wxpusher_invalid_uid", "wxpusher_recipient_rejected":
+		return "binding_invalid"
+	case "wxpusher_invalid_token", "wxpusher_unconfigured":
+		return "configuration"
+	case "wxpusher_rate_limited":
+		return "rate_limited"
+	case "wxpusher_provider_timeout", "wxpusher_provider_unavailable":
+		return "provider_unavailable"
+	case "wxpusher_invalid_response", "provider_status_unknown", "send_outcome_unknown", "record_id_reentered_send_queue":
+		return "delivery_unconfirmed"
+	default:
+		return "internal"
+	}
+}
+
 func (s *Store) ClaimNotificationDeliveries(now, staleBefore time.Time, limit int) ([]model.NotificationDelivery, error) {
 	if now.IsZero() || staleBefore.IsZero() || !staleBefore.Before(now) || limit < 1 || limit > 100 {
 		return nil, fmt.Errorf("notification delivery claim parameters are invalid")

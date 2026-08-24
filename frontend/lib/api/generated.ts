@@ -555,6 +555,7 @@ export interface components {
             reminders: components["schemas"]["ReminderOperationsStatus"];
             /** Format: int64 */
             resolvedNotificationRows: number;
+            wxPusher: components["schemas"]["WxPusherOperationsStatus"];
         };
         PortHistoryMetrics: {
             /** Format: int64 */
@@ -626,8 +627,18 @@ export interface components {
             watchRefreshIntervalMinutes: number;
         };
         ReminderOperationsStatus: {
+            /** @description 已计入当前调度的固定时段规则数；全局关闭时为 0。 */
+            activeRecurringRules: number;
+            activeTemporaryRules: number;
+            /**
+             * Format: double
+             * @description 过去 24 小时已结束临时提醒的平均运行分钟数。
+             */
+            averageTemporaryMinutes: number;
             cacheHits24Hours: number;
             coalesced24Hours: number;
+            completedExpired24Hours: number;
+            completedNotified24Hours: number;
             duePiles: number;
             enabled: boolean;
             inFlightPiles: number;
@@ -636,6 +647,8 @@ export interface components {
             /** Format: date-time */
             nextAttemptAt?: string | null;
             quotaSkips24Hours: number;
+            /** @description 是否允许固定时段提醒进入调度队列。 */
+            recurringEnabled: boolean;
             remoteAttempts24Hours: number;
             remoteFailures24Hours: number;
             remoteSuccesses24Hours: number;
@@ -794,6 +807,42 @@ export interface components {
         WxPusherErrorCode: "rate_limited" | "invalid_token" | "invalid_uid" | "recipient_rejected" | "provider_unavailable" | "timeout" | "invalid_response" | "ambiguous_result" | "storage_unavailable";
         /** @enum {string} */
         WxPusherEventType: "pile_available" | "credential_expired" | "pile_offline" | "pile_recovered";
+        WxPusherOperationsStatus: {
+            /** Format: double */
+            acceptanceRate24Hours: number;
+            accepted24Hours: number;
+            /** @description 已被供应商受理、仍等待状态确认的投递数。 */
+            acceptedPendingDeliveries: number;
+            activeBindings: number;
+            affectedBindingUsers: number;
+            attempts24Hours: number;
+            bindingFailures24Hours: number;
+            configured: boolean;
+            consecutiveSystemFailures: number;
+            dispatcherRunning: boolean;
+            failedDeliveries: number;
+            /** Format: date-time */
+            lastAcceptedAt?: string | null;
+            /** @enum {string|null} */
+            lastErrorCategory?: "configuration" | "rate_limited" | "provider_unavailable" | "delivery_unconfirmed" | "binding_invalid" | "internal" | null;
+            /** Format: date-time */
+            lastFailureAt?: string | null;
+            /** Format: date-time */
+            lastProviderSuccessAt?: string | null;
+            message: string;
+            /** Format: date-time */
+            oldestPendingAt?: string | null;
+            pendingDeliveries: number;
+            providerSucceeded24Hours: number;
+            /** Format: double */
+            providerSuccessRate24Hours: number;
+            retryingDeliveries: number;
+            sendingDeliveries: number;
+            /** @enum {string} */
+            state: "healthy" | "degraded" | "disabled" | "stopped";
+            systemFailures24Hours: number;
+            uncertainDeliveries: number;
+        };
     };
     responses: {
         /** @description 当前账户不是管理员 */
@@ -1223,6 +1272,7 @@ export type WxPusherChannelState = components['schemas']['WxPusherChannelState']
 export type WxPusherChannelUpdateRequest = components['schemas']['WxPusherChannelUpdateRequest'];
 export type WxPusherErrorCode = components['schemas']['WxPusherErrorCode'];
 export type WxPusherEventType = components['schemas']['WxPusherEventType'];
+export type WxPusherOperationsStatus = components['schemas']['WxPusherOperationsStatus'];
 export type ResponseAdminRequired = components['responses']['AdminRequired'];
 export type ResponseAdminTrendsUnavailable = components['responses']['AdminTrendsUnavailable'];
 export type ResponseHistoryNotFound = components['responses']['HistoryNotFound'];

@@ -351,3 +351,36 @@ func (s *Store) ReminderMetricCounts(since time.Time) (map[string]int, error) {
 	}
 	return result, nil
 }
+
+func (s *Store) ReminderRuleOperationsStats(since, now time.Time) (model.ReminderRuleOperationsStats, error) {
+	var result model.ReminderRuleOperationsStats
+	var averageMinutes sql.NullFloat64
+	err := s.db.QueryRow(`
+		SELECT
+			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.enabled=1
+				AND w.completed_at IS NULL AND w.expires_at > ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN w.mode='recurring' AND w.enabled=1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.completion_reason='notified'
+				AND w.completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.completion_reason='expired'
+				AND w.completed_at >= ? THEN 1 ELSE 0 END), 0),
+			AVG(CASE WHEN w.mode='temporary' AND w.completed_at >= ?
+				THEN (w.completed_at - w.created_at) / 60.0 END)
+		FROM watch_rules w
+		JOIN users u ON u.id=w.user_id
+		WHERE u.enabled=1 AND u.role='user' AND u.refresh_enabled=1
+	`, now.UTC().Unix(), since.UTC().Unix(), since.UTC().Unix(), since.UTC().Unix()).Scan(
+		&result.ActiveTemporaryRules,
+		&result.ActiveRecurringRules,
+		&result.CompletedNotified24Hours,
+		&result.CompletedExpired24Hours,
+		&averageMinutes,
+	)
+	if err != nil {
+		return result, fmt.Errorf("summarize reminder rules: %w", err)
+	}
+	if averageMinutes.Valid {
+		result.AverageTemporaryMinutes = math.Round(averageMinutes.Float64*10) / 10
+	}
+	return result, nil
+}

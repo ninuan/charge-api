@@ -25,12 +25,18 @@ func (m *Manager) OperationsStatus() (model.OperationsStatus, error) {
 		return model.OperationsStatus{}, err
 	}
 	status.Reminders = reminders
+	wxPusherStatus, err := m.wxPusherOperationsStatus(status.CheckedAt)
+	if err != nil {
+		return model.OperationsStatus{}, err
+	}
+	status.WxPusher = wxPusherStatus
 	return status, nil
 }
 
 func (m *Manager) reminderOperationsStatus(settings model.RegistrationSettings, now time.Time) (model.ReminderOperationsStatus, error) {
 	result := model.ReminderOperationsStatus{
 		Enabled:          settings.BackgroundRemindersEnabled,
+		RecurringEnabled: settings.RecurringRemindersEnabled,
 		SchedulerRunning: m.reminderSchedulerRunning(),
 	}
 	inPowerOff, _, err := scheduledPowerOffWindow(now, settings)
@@ -38,6 +44,17 @@ func (m *Manager) reminderOperationsStatus(settings model.RegistrationSettings, 
 		return result, fmt.Errorf("check reminder power-off window: %w", err)
 	}
 	result.ScheduledPowerOffActive = inPowerOff
+	ruleStats, err := m.repository.ReminderRuleOperationsStats(now.Add(-24*time.Hour), now)
+	if err != nil {
+		return result, err
+	}
+	result.ActiveTemporaryRules = ruleStats.ActiveTemporaryRules
+	if settings.RecurringRemindersEnabled {
+		result.ActiveRecurringRules = ruleStats.ActiveRecurringRules
+	}
+	result.CompletedNotified24Hours = ruleStats.CompletedNotified24Hours
+	result.CompletedExpired24Hours = ruleStats.CompletedExpired24Hours
+	result.AverageTemporaryMinutes = ruleStats.AverageTemporaryMinutes
 	targets, err := m.reminderTargets()
 	if err != nil {
 		return result, fmt.Errorf("list reminder operation targets: %w", err)
@@ -113,6 +130,47 @@ func (m *Manager) reminderOperationsStatus(settings model.RegistrationSettings, 
 	default:
 		result.State = "healthy"
 		result.Message = "后台提醒调度运行正常。"
+	}
+	return result, nil
+}
+
+func (m *Manager) wxPusherOperationsStatus(now time.Time) (model.WxPusherOperationsStatus, error) {
+	result, err := m.repository.WxPusherOperationsStatus(now.Add(-24 * time.Hour))
+	if err != nil {
+		return result, err
+	}
+	result.Configured, result.DispatcherRunning = m.notificationDispatcherStatus()
+	if result.Attempts24Hours > 0 {
+		result.AcceptanceRate24Hours = math.Round(
+			float64(result.Accepted24Hours)/float64(result.Attempts24Hours)*1000,
+		) / 10
+	}
+	if result.Accepted24Hours > 0 {
+		result.ProviderSuccessRate24Hours = math.Round(
+			float64(result.ProviderSucceeded24Hours)/float64(result.Accepted24Hours)*1000,
+		) / 10
+	}
+	queueDelayed := result.OldestPendingAt != nil && now.Sub(*result.OldestPendingAt) > 30*time.Minute
+	switch {
+	case !result.Configured:
+		result.State = "disabled"
+		result.Message = "WxPusher 未配置；站内通知和浏览器提醒不受影响。"
+	case !result.DispatcherRunning:
+		result.State = "stopped"
+		result.Message = "WxPusher 已配置，但投递调度器当前未运行。"
+	case result.ConsecutiveSystemFailures >= 3:
+		result.State = "degraded"
+		result.Message = fmt.Sprintf("WxPusher 连续出现 %d 次系统级失败，请检查应用配置或供应商状态。", result.ConsecutiveSystemFailures)
+	case queueDelayed:
+		result.State = "degraded"
+		result.Message = "最早待处理消息已积压超过 30 分钟，请检查投递调度器。"
+	default:
+		result.State = "healthy"
+		if result.BindingFailures24Hours > 0 {
+			result.Message = fmt.Sprintf("通道运行正常；%d 位用户的接收绑定需要单独处理。", result.AffectedBindingUsers)
+		} else {
+			result.Message = "WxPusher 投递通道运行正常。"
+		}
 	}
 	return result, nil
 }
@@ -219,6 +277,20 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 		exceptions = append(exceptions, model.SystemException{
 			ID: "operations-reminder", Username: "系统", Type: "reminder",
 			Level: "warning", Message: operations.Reminders.Message, Time: now,
+		})
+	}
+	if operationsErr == nil && (operations.WxPusher.State == "stopped" ||
+		operations.WxPusher.ConsecutiveSystemFailures >= 3) {
+		exceptions = append(exceptions, model.SystemException{
+			ID: "operations-wxpusher-system", Username: "系统", Type: "notification_delivery",
+			Level: "warning", Message: operations.WxPusher.Message, Time: now,
+		})
+	}
+	if operationsErr == nil && operations.WxPusher.OldestPendingAt != nil &&
+		now.Sub(*operations.WxPusher.OldestPendingAt) > 30*time.Minute {
+		exceptions = append(exceptions, model.SystemException{
+			ID: "operations-wxpusher-queue", Username: "系统", Type: "notification_queue",
+			Level: "warning", Message: "WxPusher 投递队列已积压超过 30 分钟", Time: *operations.WxPusher.OldestPendingAt,
 		})
 	}
 	sort.SliceStable(exceptions, func(i, j int) bool {

@@ -41,6 +41,9 @@ const typeLabels: Record<string, string> = {
   operation: "用户操作",
   backup: "数据库备份",
   database: "数据库",
+  reminder: "提醒调度",
+  notification_delivery: "消息投递",
+  notification_queue: "投递队列",
 }
 
 const statusLabels: Record<SystemException["status"], string> = {
@@ -56,6 +59,7 @@ const filters = [
   { id: "refresh", label: "刷新失败" },
   { id: "offline", label: "离线端口" },
   { id: "stale", label: "长期未更新" },
+  { id: "notification_delivery", label: "消息投递" },
 ] as const
 
 function matchesFilter(issue: SystemException, filter: string) {
@@ -63,6 +67,12 @@ function matchesFilter(issue: SystemException, filter: string) {
   if (filter === "critical") return issue.level === "critical"
   if (filter === "credential") {
     return issue.type === "credential" || issue.type === "cookie_expired"
+  }
+  if (filter === "notification_delivery") {
+    return (
+      issue.type === "notification_delivery" ||
+      issue.type === "notification_queue"
+    )
   }
   return issue.type === filter
 }
@@ -158,7 +168,7 @@ export function AdminIncidentPanel({
             </Badge>
           </CardTitle>
           <CardDescription className="text-xs">
-            同一用户、设备和异常类型会自动合并；点击异常可直接进入用户详情。
+            重复异常会自动合并；用户异常可点击进入详情处理。
           </CardDescription>
           <CardAction>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">

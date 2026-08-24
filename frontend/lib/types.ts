@@ -297,14 +297,21 @@ export interface OperationsStatus {
   resolvedNotificationRows: number
   notificationRetentionDays: number
   reminders: ReminderOperationsStatus
+  wxPusher: WxPusherOperationsStatus
 }
 
 export interface ReminderOperationsStatus {
   state: "healthy" | "degraded" | "disabled" | "power_off" | "stopped"
   message: string
   enabled: boolean
+  recurringEnabled: boolean
   schedulerRunning: boolean
   scheduledPowerOffActive: boolean
+  activeTemporaryRules: number
+  activeRecurringRules: number
+  completedNotified24Hours: number
+  completedExpired24Hours: number
+  averageTemporaryMinutes: number
   trackedPiles: number
   duePiles: number
   inFlightPiles: number
@@ -318,6 +325,40 @@ export interface ReminderOperationsStatus {
   quotaSkips24Hours: number
   schedulerErrors24Hours: number
   maxConsecutiveFailures: number
+}
+
+export interface WxPusherOperationsStatus {
+  state: "healthy" | "degraded" | "disabled" | "stopped"
+  message: string
+  configured: boolean
+  dispatcherRunning: boolean
+  activeBindings: number
+  pendingDeliveries: number
+  sendingDeliveries: number
+  acceptedPendingDeliveries: number
+  retryingDeliveries: number
+  uncertainDeliveries: number
+  failedDeliveries: number
+  oldestPendingAt?: string
+  attempts24Hours: number
+  accepted24Hours: number
+  providerSucceeded24Hours: number
+  acceptanceRate24Hours: number
+  providerSuccessRate24Hours: number
+  systemFailures24Hours: number
+  bindingFailures24Hours: number
+  affectedBindingUsers: number
+  consecutiveSystemFailures: number
+  lastAcceptedAt?: string
+  lastProviderSuccessAt?: string
+  lastFailureAt?: string
+  lastErrorCategory?:
+    | "configuration"
+    | "rate_limited"
+    | "provider_unavailable"
+    | "delivery_unconfirmed"
+    | "binding_invalid"
+    | "internal"
 }
 
 export interface AdminStats {
