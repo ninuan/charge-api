@@ -341,7 +341,7 @@ export function WatchManagementSheet({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="w-[calc(100vw-0.5rem)] max-w-2xl overflow-y-auto p-0 sm:w-[min(42rem,calc(100vw-2rem))] sm:max-w-2xl! [&_[data-slot=sheet-close]]:z-20"
+          className="data-[side=right]:w-[calc(100vw-0.5rem)] data-[side=right]:max-w-2xl data-[side=right]:overflow-y-auto data-[side=right]:p-0 sm:data-[side=right]:w-[min(42rem,calc(100vw-2rem))] sm:data-[side=right]:max-w-2xl! [&_[data-slot=sheet-close]]:z-20"
         >
           <SheetHeader className="sticky top-0 z-10 border-b bg-popover/95 py-4 pr-14 pl-5 backdrop-blur sm:pr-14 sm:pl-6">
             <SheetTitle>空闲提醒管理</SheetTitle>

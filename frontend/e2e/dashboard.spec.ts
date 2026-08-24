@@ -320,11 +320,12 @@ test("administrator handles a user and verifies the audit trail", async ({
   await expect(page.getByText("系统设置已保存").last()).toBeVisible()
   await page.getByRole("tab", { name: "运维审计" }).click()
   await expect(page.getByText(/后台按整桩低频刷新/)).toBeVisible()
-  await expect(page.getByText("空闲提醒充电桩")).toBeVisible()
+  await expect(page.getByText("活动提醒")).toBeVisible()
+  await expect(page.getByText("实际检查充电桩")).toBeVisible()
   await expect(page.getByText("24 小时请求成功率")).toBeVisible()
   await expect(page.getByText("数据与备份")).toBeVisible()
   await expect(page.getByText("端口历史")).toBeVisible()
-  await expect(page.getByText("站内通知")).toBeVisible()
+  await expect(page.getByText("站内通知", { exact: true })).toBeVisible()
   await expect(page.getByText(/保留 120 天/)).toBeVisible()
   await page.getByRole("button", { name: "重新检查" }).click()
   await expect(page.getByText("运维状态已重新检查")).toBeVisible()
@@ -853,6 +854,7 @@ test("dashboard defaults to temporary reminders and keeps fixed schedules advanc
   await page.waitForTimeout(250)
   const sheetBox = await sheet.boundingBox()
   expect(sheetBox?.x).toBeGreaterThanOrEqual(0)
+  expect(sheetBox?.width).toBeGreaterThanOrEqual(360)
   expect((sheetBox?.x ?? 0) + (sheetBox?.width ?? 0)).toBeLessThanOrEqual(376)
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth)
@@ -861,6 +863,174 @@ test("dashboard defaults to temporary reminders and keeps fixed schedules advanc
     path: "/tmp/charge-1.5.2-watch-mobile.png",
     fullPage: false,
   })
+})
+
+test("notification center completes WxPusher binding settings error recovery and unbinding", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.addInitScript(() => {
+    class LocalEventSource {
+      static OPEN = 1
+      readyState = LocalEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor() {
+        setTimeout(() => this.onopen?.(new Event("open")), 0)
+      }
+
+      addEventListener() {}
+      close() {}
+    }
+    Object.defineProperty(window, "EventSource", {
+      configurable: true,
+      value: LocalEventSource,
+    })
+  })
+
+  let bound = false
+  let enabled = true
+  let eventTypes = ["pile_available", "credential_expired", "pile_offline"]
+  let lastTestDelivery:
+    | {
+        id: string
+        status: string
+        isTest: boolean
+        updatedAt: string
+        message: string
+        errorCode: string
+      }
+    | undefined
+
+  const channelState = () => ({
+    configured: true,
+    bound,
+    enabled: bound && enabled,
+    maskedUid: bound ? "••••1234" : undefined,
+    boundAt: bound ? "2026-08-24T08:00:00Z" : undefined,
+    eventTypes,
+    deliveryDisclaimer: "WxPusher 已处理不代表某台微信客户端已经展示或已读。",
+    lastTestDelivery,
+  })
+
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({ status: 200, json: user })
+  )
+  await page.route("**/api/piles", (route) =>
+    route.fulfill({ status: 200, json: snapshot })
+  )
+  await mockEmptyWatchResources(page)
+  await page.route(
+    "**/api/notification-channels/wxpusher/bind-sessions**",
+    async (route) => {
+      const request = route.request()
+      const pathname = new URL(request.url()).pathname
+      if (request.method() === "POST") {
+        await route.fulfill({
+          status: 201,
+          json: {
+            id: "wxp_e2e_session",
+            status: "waiting_scan",
+            qrUrl: "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+            nextPollAt: new Date(Date.now() + 1500).toISOString(),
+            message: "等待扫码确认。",
+          },
+        })
+        return
+      }
+      if (pathname.endsWith("/wxp_e2e_session")) {
+        bound = true
+        await route.fulfill({
+          status: 200,
+          json: {
+            id: "wxp_e2e_session",
+            status: "bound",
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+            nextPollAt: new Date(Date.now() + 10_000).toISOString(),
+            completedAt: new Date().toISOString(),
+            message: "微信提醒已绑定。",
+          },
+        })
+        return
+      }
+      await route.fulfill({ status: 404, json: { error: "会话不存在" } })
+    }
+  )
+  await page.route(
+    "**/api/notification-channels/wxpusher/test",
+    async (route) => {
+      lastTestDelivery = {
+        id: "ndl_e2e_test",
+        status: "failed",
+        isTest: true,
+        updatedAt: new Date().toISOString(),
+        message: "发送失败",
+        errorCode: "recipient_rejected",
+      }
+      await route.fulfill({ status: 202, json: lastTestDelivery })
+    }
+  )
+  await page.route("**/api/notification-channels/wxpusher", async (route) => {
+    const request = route.request()
+    if (request.method() === "PATCH") {
+      const payload = request.postDataJSON()
+      if (typeof payload.enabled === "boolean") enabled = payload.enabled
+      if (Array.isArray(payload.eventTypes)) eventTypes = payload.eventTypes
+      await route.fulfill({ status: 200, json: channelState() })
+      return
+    }
+    if (request.method() === "DELETE") {
+      bound = false
+      enabled = false
+      await route.fulfill({ status: 204 })
+      return
+    }
+    await route.fulfill({ status: 200, json: channelState() })
+  })
+
+  await page.goto("/dashboard")
+  await page.getByRole("button", { name: "通知" }).click()
+  const center = page.locator("[data-slot=sheet-content]")
+  await expect(center.getByRole("heading", { name: "通知中心" })).toBeVisible()
+  await expect(center.getByText("未绑定", { exact: true })).toBeVisible()
+  await center.getByRole("button", { name: "获取二维码" }).click()
+  await expect(page.getByAltText("WxPusher 微信提醒绑定二维码")).toBeVisible()
+  const bindDialog = page.getByRole("dialog", { name: "绑定微信提醒" })
+  await expect(
+    bindDialog.getByText("微信提醒已绑定", { exact: true })
+  ).toBeVisible()
+  await bindDialog
+    .getByRole("button", { name: "关闭", exact: true })
+    .first()
+    .click()
+
+  await expect(center.getByText("已绑定", { exact: true })).toBeVisible()
+  await center.getByRole("switch", { name: "充电桩恢复在线" }).click()
+  await expect(
+    center.getByRole("switch", { name: "充电桩恢复在线" })
+  ).toBeChecked()
+
+  await page.setViewportSize({ width: 375, height: 812 })
+  await expect(
+    center.getByRole("switch", { name: "微信提醒总开关" })
+  ).toBeVisible()
+  const centerBox = await center.boundingBox()
+  expect(centerBox?.width).toBeGreaterThanOrEqual(360)
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(375)
+  await center.getByRole("button", { name: "发送测试消息" }).click()
+  await expect(center.getByText(/最近测试 · 发送失败/)).toBeVisible()
+  await expect(center.getByText(/当前接收账号可能已取消关注/)).toBeVisible()
+
+  await center.getByRole("button", { name: "解除绑定" }).click()
+  const unbindDialog = page.getByRole("dialog", {
+    name: "解除微信提醒绑定？",
+  })
+  await unbindDialog.getByRole("button", { name: "解除绑定" }).click()
+  await expect(center.getByText("未绑定", { exact: true })).toBeVisible()
 })
 
 test("dashboard history sheet supports port navigation and mobile layout", async ({
