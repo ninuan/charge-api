@@ -63,3 +63,30 @@ func TestDevForceAuthExpiredRequiresLocalDevMode(t *testing.T) {
 		t.Fatal("force auth expiry should be enabled for local development")
 	}
 }
+
+func TestWxPusherClientConfigFromEnv(t *testing.T) {
+	if client, err := wxPusherClientFromEnv(func(string) string { return "" }); err != nil || client != nil {
+		t.Fatalf("empty env client=%v err=%v, want nil nil", client, err)
+	}
+	if _, err := wxPusherClientFromEnv(func(name string) string {
+		if name == "WXPUSHER_BASE_URL" {
+			return "http://127.0.0.1:8089"
+		}
+		return ""
+	}); err == nil {
+		t.Fatal("expected missing app token error")
+	}
+	client, err := wxPusherClientFromEnv(func(name string) string {
+		switch name {
+		case "WXPUSHER_APP_TOKEN":
+			return "AT_test"
+		case "WXPUSHER_BASE_URL":
+			return "http://127.0.0.1:8089"
+		default:
+			return ""
+		}
+	})
+	if err != nil || client == nil {
+		t.Fatalf("configured client=%v err=%v", client, err)
+	}
+}

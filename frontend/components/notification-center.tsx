@@ -44,6 +44,7 @@ import { useNotifications } from "@/lib/notification-context"
 import type { Pile } from "@/lib/types"
 import { useWatch } from "@/lib/watch-context"
 import { formatPowerWindow } from "@/lib/watch-format"
+import { WxPusherChannelCard } from "@/components/wxpusher-channel-card"
 
 const typeMeta = {
   pile_available: {
@@ -372,6 +373,8 @@ export function NotificationCenter({
 
           <div className="flex flex-col gap-4 p-4 sm:p-6">
             <BrowserNotificationSetting />
+
+            <WxPusherChannelCard active={open} />
 
             <div className="grid gap-2">
               <Tabs

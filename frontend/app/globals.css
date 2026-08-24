@@ -204,6 +204,28 @@
   }
 }
 
+@keyframes wxpusher-bind-success {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--success) 30%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 8px color-mix(in oklab, var(--success) 10%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+.wxpusher-bind-success {
+  animation: wxpusher-bind-success 520ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wxpusher-bind-success {
+    animation: none;
+  }
+}
+
 @keyframes notification-badge-change {
   0% {
     transform: scale(0.82);

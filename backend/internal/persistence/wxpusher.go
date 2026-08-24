@@ -14,6 +14,12 @@ import (
 
 const wxPusherChannel = "wxpusher"
 
+var (
+	ErrWxPusherBindingExists      = errors.New("wxpusher binding already exists")
+	ErrWxPusherUIDInUse           = errors.New("wxpusher uid already in use")
+	ErrWxPusherBindSessionInvalid = errors.New("wxpusher bind session is inactive")
+)
+
 func (s *Store) SaveWxPusherBinding(binding model.WxPusherBinding) error {
 	if err := validateWxPusherBinding(binding); err != nil {
 		return err
@@ -223,6 +229,174 @@ func (s *Store) LoadWxPusherBindSession(userID, sessionID string) (model.WxPushe
 	session.CreatedAt = time.Unix(createdAt, 0).UTC()
 	session.CompletedAt = nullableUnixTime(completedAt)
 	return session, true, nil
+}
+
+func (s *Store) LoadActiveWxPusherBindSession(userID string) (model.WxPusherBindSession, bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return model.WxPusherBindSession{}, false, fmt.Errorf("wxpusher bind session requires a user")
+	}
+	var sessionID string
+	err := s.db.QueryRow(`
+		SELECT id FROM wxpusher_bind_sessions
+		WHERE user_id = ? AND completed_at IS NULL
+		ORDER BY created_at DESC LIMIT 1
+	`, userID).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.WxPusherBindSession{}, false, nil
+	}
+	if err != nil {
+		return model.WxPusherBindSession{}, false, fmt.Errorf("load active wxpusher bind session: %w", err)
+	}
+	return s.LoadWxPusherBindSession(userID, sessionID)
+}
+
+func (s *Store) CountWxPusherBindSessionsSince(userID string, since time.Time) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM wxpusher_bind_sessions WHERE user_id = ? AND created_at >= ?
+	`, strings.TrimSpace(userID), since.UTC().Unix()).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count wxpusher bind sessions: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) CompleteExpiredWxPusherBindSessions(userID string, now time.Time) error {
+	_, err := s.db.Exec(`
+		UPDATE wxpusher_bind_sessions SET completed_at = ?
+		WHERE user_id = ? AND completed_at IS NULL AND expires_at <= ?
+	`, now.UTC().Unix(), strings.TrimSpace(userID), now.UTC().Unix())
+	if err != nil {
+		return fmt.Errorf("complete expired wxpusher bind sessions: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CompleteWxPusherBindSession(userID, sessionID string, completedAt time.Time) error {
+	result, err := s.db.Exec(`
+		UPDATE wxpusher_bind_sessions SET completed_at = ?
+		WHERE user_id = ? AND id = ? AND completed_at IS NULL
+	`, completedAt.UTC().Unix(), strings.TrimSpace(userID), strings.TrimSpace(sessionID))
+	if err != nil {
+		return fmt.Errorf("complete wxpusher bind session: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read wxpusher bind session completion: %w", err)
+	}
+	if rows != 1 {
+		return ErrWxPusherBindSessionInvalid
+	}
+	return nil
+}
+
+// BindWxPusherUID atomically claims a provider UID and completes its scan
+// session. This prevents two users polling the same scanned QR result from
+// both observing success.
+func (s *Store) BindWxPusherUID(userID, sessionID, uid string, now time.Time) error {
+	userID, sessionID, uid = strings.TrimSpace(userID), strings.TrimSpace(sessionID), strings.TrimSpace(uid)
+	if userID == "" || sessionID == "" || uid == "" {
+		return ErrWxPusherBindSessionInvalid
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin wxpusher binding: %w", err)
+	}
+	defer tx.Rollback()
+	var expiresAt int64
+	if err := tx.QueryRow(`
+		SELECT expires_at FROM wxpusher_bind_sessions
+		WHERE user_id = ? AND id = ? AND completed_at IS NULL
+	`, userID, sessionID).Scan(&expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWxPusherBindSessionInvalid
+		}
+		return fmt.Errorf("load wxpusher binding session: %w", err)
+	}
+	if expiresAt <= now.UTC().Unix() {
+		return ErrWxPusherBindSessionInvalid
+	}
+	var existing int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM wxpusher_bindings WHERE user_id = ?`, userID).Scan(&existing); err != nil {
+		return fmt.Errorf("check wxpusher binding: %w", err)
+	}
+	if existing != 0 {
+		return ErrWxPusherBindingExists
+	}
+	fingerprint := sha256.Sum256([]byte(uid))
+	var owner string
+	err = tx.QueryRow(`SELECT user_id FROM wxpusher_bindings WHERE uid_fingerprint = ?`, fingerprint[:]).Scan(&owner)
+	if err == nil && owner != userID {
+		return ErrWxPusherUIDInUse
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check wxpusher uid owner: %w", err)
+	}
+	nonce, ciphertext, err := s.cipher.encryptWithAAD(wxPusherBindingAAD(userID), []byte(uid))
+	if err != nil {
+		return fmt.Errorf("encrypt wxpusher binding: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO wxpusher_bindings(
+			user_id, uid_fingerprint, uid_nonce, uid_ciphertext, enabled,
+			event_types, bound_at, updated_at
+		) VALUES(?, ?, ?, ?, 1, ?, ?, ?)
+	`, userID, fingerprint[:], nonce, ciphertext, model.WxPusherDefaultEventTypes, now.UTC().Unix(), now.UTC().Unix()); err != nil {
+		return fmt.Errorf("insert wxpusher binding: %w", err)
+	}
+	result, err := tx.Exec(`
+		UPDATE wxpusher_bind_sessions SET completed_at = ?
+		WHERE user_id = ? AND id = ? AND completed_at IS NULL
+	`, now.UTC().Unix(), userID, sessionID)
+	if err != nil {
+		return fmt.Errorf("complete wxpusher binding session: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return ErrWxPusherBindSessionInvalid
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit wxpusher binding: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteWxPusherChannel(userID string, now time.Time) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, fmt.Errorf("delete wxpusher channel requires a user")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin delete wxpusher channel: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`DELETE FROM wxpusher_bindings WHERE user_id = ?`, userID)
+	if err != nil {
+		return false, fmt.Errorf("delete wxpusher binding: %w", err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE wxpusher_bind_sessions SET completed_at = ?
+		WHERE user_id = ? AND completed_at IS NULL
+	`, now.UTC().Unix(), userID); err != nil {
+		return false, fmt.Errorf("complete wxpusher sessions: %w", err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE notification_deliveries
+		SET status = 'cancelled', next_attempt_at = NULL, claimed_at = NULL, updated_at = ?
+		WHERE user_id = ? AND channel = ? AND status IN ('pending', 'retry_wait')
+	`, now.UTC().Unix(), userID, wxPusherChannel); err != nil {
+		return false, fmt.Errorf("cancel wxpusher deliveries: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read wxpusher delete result: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit delete wxpusher channel: %w", err)
+	}
+	return rows > 0, nil
 }
 
 func (s *Store) SaveNotificationDelivery(delivery model.NotificationDelivery) error {

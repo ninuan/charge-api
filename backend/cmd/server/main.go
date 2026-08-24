@@ -20,6 +20,7 @@ import (
 	"charge-dashboard/internal/persistence"
 	appruntime "charge-dashboard/internal/runtime"
 	"charge-dashboard/internal/version"
+	"charge-dashboard/internal/wxpusher"
 	"charge-dashboard/internal/yyb"
 )
 
@@ -43,6 +44,18 @@ func moceleClientFromEnv(lookup envLookup) *mocele.Client {
 		Org:       strings.TrimSpace(lookup("MOCELE_ORG")),
 		OpenIndex: strings.TrimSpace(lookup("MOCELE_OPENINDEX")),
 	})
+}
+
+func wxPusherClientFromEnv(lookup envLookup) (*wxpusher.Client, error) {
+	token := strings.TrimSpace(lookup("WXPUSHER_APP_TOKEN"))
+	baseURL := strings.TrimSpace(lookup("WXPUSHER_BASE_URL"))
+	if token == "" {
+		if baseURL != "" {
+			return nil, fmt.Errorf("WXPUSHER_APP_TOKEN is required when WXPUSHER_BASE_URL is set")
+		}
+		return nil, nil
+	}
+	return wxpusher.NewClient(wxpusher.Config{AppToken: token, BaseURL: baseURL})
 }
 
 func devForceAuthExpiredEnabled(lookup envLookup) bool {
@@ -100,6 +113,13 @@ func main() {
 	if yybClient != nil {
 		log.Printf("yyb sidecar integration enabled")
 	}
+	wxPusherClient, err := wxPusherClientFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatalf("configure wxpusher client: %v", err)
+	}
+	if wxPusherClient != nil {
+		log.Printf("wxpusher integration enabled")
+	}
 
 	cookieKey, err := persistence.DecodeCookieKey(os.Getenv("CHARGE_COOKIE_KEY"))
 	if err != nil {
@@ -138,6 +158,9 @@ func main() {
 	server := api.NewServer(manager, sessions, auth.NewAuthGuard())
 	if yybClient != nil {
 		server.SetYYBIntegration(yybClient, moceleClientFromEnv(os.Getenv))
+	}
+	if wxPusherClient != nil {
+		server.SetWxPusherIntegration(wxPusherClient)
 	}
 	if devForceAuthExpiredEnabled(os.Getenv) {
 		server.EnableDevForceAuthExpired()

@@ -30,6 +30,13 @@ const publicErrorMessages: Record<string, string> = {
   WATCH_UNAVAILABLE: "空闲提醒功能暂时不可用，请稍后重试",
   NOTIFICATION_PREFERENCE_INVALID: "免打扰设置无效",
   NOTIFICATION_UNAVAILABLE: "通知设置暂时不可用，请稍后重试",
+  WXPUSHER_NOT_CONFIGURED: "管理员暂未启用微信提醒",
+  WXPUSHER_ALREADY_BOUND: "请先解除当前微信绑定",
+  WXPUSHER_BIND_SESSION_ACTIVE: "已有等待扫码的二维码，请稍后再试",
+  WXPUSHER_BIND_SESSION_NOT_FOUND: "绑定二维码已失效，请重新获取",
+  WXPUSHER_UID_CONFLICT: "这个微信接收账号已绑定其他账户",
+  WXPUSHER_RATE_LIMITED: "获取二维码过于频繁，请稍后再试",
+  WXPUSHER_UNAVAILABLE: "微信提醒服务暂时不可用，请稍后重试",
 }
 
 export async function responseErrorMessage(

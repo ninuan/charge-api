@@ -19,6 +19,7 @@ import (
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
 	"charge-dashboard/internal/version"
+	"charge-dashboard/internal/wxpusher"
 	"charge-dashboard/internal/yyb"
 )
 
@@ -42,6 +43,7 @@ type Server struct {
 	captcha             captchaService
 	yybClient           yybSessionClient
 	moceleClient        appruntime.MoceleCookieClient
+	wxPusherClient      appruntime.WxPusherBindingClient
 	devMu               sync.Mutex
 	devForceAuthExpired bool
 	healthMu            sync.RWMutex
@@ -64,6 +66,10 @@ type yybSessionClient interface {
 func (s *Server) SetYYBIntegration(yybClient yybSessionClient, moceleClient appruntime.MoceleCookieClient) {
 	s.yybClient = yybClient
 	s.moceleClient = moceleClient
+}
+
+func (s *Server) SetWxPusherIntegration(client *wxpusher.Client) {
+	s.wxPusherClient = client
 }
 
 // EnableDevForceAuthExpired enables a one-time local development refresh simulation.
@@ -129,6 +135,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/watch-rules/", s.handleWatchRuleActions)
 	mux.HandleFunc("/api/watch-overview", s.handleWatchOverview)
 	mux.HandleFunc("/api/notification-preferences", s.handleNotificationPreference)
+	mux.HandleFunc("/api/notification-channels/wxpusher", s.handleWxPusherChannel)
+	mux.HandleFunc("/api/notification-channels/wxpusher/bind-sessions", s.handleWxPusherBindSessions)
+	mux.HandleFunc("/api/notification-channels/wxpusher/bind-sessions/", s.handleWxPusherBindSession)
 	mux.HandleFunc("/api/notifications", s.handleNotifications)
 	mux.HandleFunc("/api/notifications/", s.handleNotificationActions)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)

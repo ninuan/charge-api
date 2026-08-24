@@ -389,6 +389,46 @@ type WxPusherBindSession struct {
 	CompletedAt  *time.Time `json:"completedAt,omitempty"`
 }
 
+type WxPusherEventType string
+
+const (
+	WxPusherEventTypePileAvailable     WxPusherEventType = "pile_available"
+	WxPusherEventTypeCredentialExpired WxPusherEventType = "credential_expired"
+	WxPusherEventTypePileOffline       WxPusherEventType = "pile_offline"
+	WxPusherEventTypePileRecovered     WxPusherEventType = "pile_recovered"
+)
+
+type WxPusherChannelState struct {
+	Configured         bool                `json:"configured"`
+	Bound              bool                `json:"bound"`
+	Enabled            bool                `json:"enabled"`
+	EventTypes         []WxPusherEventType `json:"eventTypes"`
+	DeliveryDisclaimer string              `json:"deliveryDisclaimer"`
+	MaskedUID          string              `json:"maskedUid,omitempty"`
+	BoundAt            *time.Time          `json:"boundAt,omitempty"`
+	LastTestAt         *time.Time          `json:"lastTestAt,omitempty"`
+}
+
+type WxPusherBindSessionStatus string
+
+const (
+	WxPusherBindWaiting WxPusherBindSessionStatus = "waiting_scan"
+	WxPusherBindBound   WxPusherBindSessionStatus = "bound"
+	WxPusherBindExpired WxPusherBindSessionStatus = "expired"
+	WxPusherBindFailed  WxPusherBindSessionStatus = "failed"
+)
+
+type WxPusherBindSessionView struct {
+	ID          string                    `json:"id"`
+	Status      WxPusherBindSessionStatus `json:"status"`
+	QRURL       string                    `json:"qrUrl,omitempty"`
+	ExpiresAt   time.Time                 `json:"expiresAt"`
+	NextPollAt  time.Time                 `json:"nextPollAt"`
+	CompletedAt *time.Time                `json:"completedAt,omitempty"`
+	ErrorCode   string                    `json:"errorCode,omitempty"`
+	Message     string                    `json:"message"`
+}
+
 type NotificationDeliveryStatus string
 
 const (

@@ -430,7 +430,11 @@ Charge 环境文件需要包含：
 CHARGE_COOKIE_KEY=base64-encoded-32-byte-key
 YYB_API_SECRET=base64-encoded-hmac-secret
 YYB_BASE_URL=http://127.0.0.1:8000
+# 可选：启用通知中心里的微信提醒绑定
+WXPUSHER_APP_TOKEN=AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+`WXPUSHER_APP_TOKEN` 未配置时，站内通知和浏览器提醒保持可用，通知中心会显示微信提醒暂未开放。生产环境默认使用 WxPusher 官方 HTTPS 接口；`WXPUSHER_BASE_URL` 仅供本地测试或私有代理覆盖，不建议在线上随意修改。
 
 yyb_go 环境文件需要包含：
 

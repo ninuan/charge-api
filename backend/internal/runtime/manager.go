@@ -63,6 +63,8 @@ type Manager struct {
 	saveMu            sync.Mutex
 	watchMu           sync.Mutex
 	notificationMu    sync.Mutex
+	wxPusherMu        sync.Mutex
+	wxPusherAttempts  map[string][]time.Time
 	retentionMu       sync.Mutex
 	lastRetentionRun  time.Time
 	backgroundRefresh backgroundRefreshCoordinator
@@ -99,12 +101,13 @@ func NewManager(
 	minInterval time.Duration,
 ) (*Manager, error) {
 	m := &Manager{
-		repository:  repository,
-		requests:    requests,
-		minInterval: minInterval,
-		users:       make(map[string]model.User),
-		runtimes:    make(map[string]*UserRuntime),
-		invites:     make(map[string]model.InviteCode),
+		repository:       repository,
+		requests:         requests,
+		minInterval:      minInterval,
+		users:            make(map[string]model.User),
+		runtimes:         make(map[string]*UserRuntime),
+		invites:          make(map[string]model.InviteCode),
+		wxPusherAttempts: make(map[string][]time.Time),
 		settings: model.RegistrationSettings{
 			OpenRegistration: true, InviteRequired: true,
 			DefaultDeviceLimit: defaultDeviceLimit, DefaultRefreshEnabled: true,
