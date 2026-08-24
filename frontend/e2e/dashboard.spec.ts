@@ -651,7 +651,7 @@ test("dashboard fades in every port card at the same time", async ({
   })
 })
 
-test("dashboard creates and manages whole-pile cross-midnight reminders", async ({
+test("dashboard defaults to temporary reminders and keeps fixed schedules advanced", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -725,42 +725,121 @@ test("dashboard creates and manages whole-pile cross-midnight reminders", async 
       return
     }
     const payload = route.request().postDataJSON()
+    const temporary = payload.mode !== "recurring"
     const created: WatchRule = {
       id: `rule-${rules.length + 1}`,
       userId: user.id,
       deviceId: payload.deviceId,
-      mode: "recurring",
+      mode: temporary ? "temporary" : "recurring",
       enabled: payload.enabled ?? true,
       activeWeekdays: payload.activeWeekdays ?? 127,
       activeStartMinute: payload.activeStartMinute ?? 0,
       activeEndMinute: payload.activeEndMinute ?? 0,
       timezone: payload.timezone ?? "Asia/Shanghai",
-      stopAfterNotify: false,
+      stopAfterNotify: temporary,
+      expiresAt: temporary
+        ? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+        : undefined,
+      nextCheckAt: temporary
+        ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        : undefined,
+      estimatedRemainingChecks: temporary ? 12 : undefined,
       createdAt: "2026-08-10T00:00:00Z",
       updatedAt: "2026-08-10T00:00:00Z",
     }
     rules.push(created)
-    await route.fulfill({ status: 201, json: created })
+    await route.fulfill({
+      status: 201,
+      json: {
+        rule: created,
+        idlePortIds: [],
+        backgroundScheduled: true,
+        message: temporary ? "临时提醒已开始。" : "固定时段提醒已保存。",
+      },
+    })
+  })
+  await page.route("**/api/watch-rules/*", async (route) => {
+    const ruleId = route.request().url().split("/").at(-1)
+    const rule = rules.find((candidate) => candidate.id === ruleId)
+    if (!rule) {
+      await route.fulfill({ status: 404, json: { message: "提醒不存在" } })
+      return
+    }
+    if (route.request().method() === "DELETE") {
+      rules.splice(rules.indexOf(rule), 1)
+      await route.fulfill({ status: 204 })
+      return
+    }
+    const payload = route.request().postDataJSON()
+    if (payload.cancel) {
+      rule.enabled = false
+      rule.completedAt = new Date().toISOString()
+      rule.completionReason = "cancelled"
+      rule.nextCheckAt = undefined
+      rule.estimatedRemainingChecks = 0
+    } else if (payload.duration) {
+      rule.expiresAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+      rule.estimatedRemainingChecks = 24
+    } else {
+      Object.assign(rule, payload)
+    }
+    rule.updatedAt = new Date().toISOString()
+    await route.fulfill({ status: 200, json: rule })
   })
 
   await page.goto("/dashboard")
-  await page.getByRole("button", { name: "设置空闲提醒" }).click()
+  await page.getByRole("button", { name: "有空闲时提醒我" }).click()
+  const temporaryEditor = page.getByRole("dialog", {
+    name: "有空闲时提醒我",
+  })
+  await expect(
+    temporaryEditor.getByRole("tab", { name: "临时提醒" })
+  ).toHaveAttribute("data-active", "")
+  await expect(temporaryEditor.getByText(/后台最多约检查 12 次/)).toBeVisible()
+  await temporaryEditor.getByRole("button", { name: "开始提醒" }).click()
+  await expect(
+    page.getByRole("button", { name: "空闲提醒进行中" })
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: "空闲提醒进行中" }).click()
+  const sheet = page.getByRole("dialog", { name: "空闲提醒管理" })
+  await expect(sheet.getByText("最多约 12 次")).toBeVisible()
+  await expect(sheet.getByText("下次检查")).toBeVisible()
+  await page.waitForTimeout(250)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.2-watch-desktop.png",
+    fullPage: false,
+  })
+  await sheet.getByRole("button", { name: "延长" }).click()
+  await page.getByRole("button", { name: "确认延长" }).click()
+  await expect(sheet.getByText("最多约 24 次")).toBeVisible()
+
+  await sheet.getByRole("button", { name: "取消提醒" }).click()
+  await page.getByRole("button", { name: "确认取消" }).click()
+  await expect(sheet.getByText("已由你取消")).toBeVisible()
+
+  await sheet.getByRole("button", { name: "添加固定提醒" }).click()
+  const recurringEditor = page.getByRole("dialog", {
+    name: "设置固定时段提醒",
+  })
+  await expect(
+    recurringEditor.getByRole("tab", { name: "固定时段（高级）" })
+  ).toHaveAttribute("data-active", "")
   await page.getByLabel("开始时间").fill("22:30")
   await page.getByLabel("结束时间").fill("06:30")
   await expect(page.getByText(/22:30–06:30（跨午夜）/)).toBeVisible()
-  await page.getByRole("button", { name: "创建提醒" }).click()
+  await recurringEditor.getByRole("button", { name: "创建固定提醒" }).click()
   await expect(
-    page.getByRole("button", { name: "已设置空闲提醒" })
+    page.getByRole("button", { name: "空闲提醒进行中" })
   ).toBeVisible()
 
   await page.getByRole("button", { name: "空闲提醒", exact: true }).click()
-  const sheet = page.getByRole("dialog", { name: "空闲提醒管理" })
   await expect(sheet.getByText("1/5")).toBeVisible()
   await expect(sheet.getByText("每天 · 22:30–06:30（跨午夜）")).toBeVisible()
   await expect(sheet.getByText("7/480")).toBeVisible()
 
-  await sheet.getByRole("button", { name: "添加提醒" }).click()
-  const editor = page.getByRole("dialog", { name: "添加空闲提醒" })
+  await sheet.getByRole("button", { name: "开始临时提醒" }).click()
+  const editor = page.getByRole("dialog", { name: "有空闲时提醒我" })
   await expect(editor).toBeVisible()
   await expect(sheet).toBeHidden()
   await editor.getByRole("button", { name: "关闭" }).click()
@@ -779,7 +858,7 @@ test("dashboard creates and manages whole-pile cross-midnight reminders", async 
     await page.evaluate(() => document.documentElement.scrollWidth)
   ).toBeLessThanOrEqual(375)
   await page.screenshot({
-    path: "/tmp/charge-1.5.1-watch-mobile.png",
+    path: "/tmp/charge-1.5.2-watch-mobile.png",
     fullPage: false,
   })
 })

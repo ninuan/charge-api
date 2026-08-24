@@ -271,7 +271,7 @@ function PileCardComponent({
                 onClick={() => onConfigureReminder(pile.id)}
               >
                 <BellRingIcon data-icon="inline-start" />
-                {reminderEnabled ? "已设置空闲提醒" : "设置空闲提醒"}
+                {reminderEnabled ? "空闲提醒进行中" : "有空闲时提醒我"}
               </Button>
             </div>
           </div>

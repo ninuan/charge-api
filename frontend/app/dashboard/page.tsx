@@ -343,8 +343,14 @@ export default function DashboardPage() {
   const openHistory = useCallback((id: string) => setHistoryPileId(id), [])
   const configureReminder = useCallback(
     (pileId: string) => {
-      const existing = watchRules.find((rule) => rule.deviceId === pileId)
-      setWatchTarget({ pileId, ruleId: existing?.id })
+      const existing = watchRules.find(
+        (rule) => rule.deviceId === pileId && rule.enabled && !rule.completedAt
+      )
+      if (existing) {
+        setWatchManagementOpen(true)
+        return
+      }
+      setWatchTarget({ pileId, mode: "temporary" })
     },
     [watchRules]
   )
@@ -561,7 +567,10 @@ export default function DashboardPage() {
                   onMove={handleMove}
                   onHistory={openHistory}
                   reminderEnabled={watchRules.some(
-                    (rule) => rule.deviceId === entry.pile.id && rule.enabled
+                    (rule) =>
+                      rule.deviceId === entry.pile.id &&
+                      rule.enabled &&
+                      !rule.completedAt
                   )}
                   onConfigureReminder={configureReminder}
                   targetPortId={

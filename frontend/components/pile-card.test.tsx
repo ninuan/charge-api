@@ -212,7 +212,7 @@ describe("PileCard", () => {
     )
 
     const reminderButton = screen.getByRole("button", {
-      name: "已设置空闲提醒",
+      name: "空闲提醒进行中",
     })
     expect(reminderButton).toHaveAttribute("aria-pressed", "true")
     await userEvent.click(reminderButton)

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  estimatedTemporaryChecks,
+  estimatedRecurringChecks,
   formatActiveTime,
+  formatCompletionReason,
+  formatNextCheck,
   formatPowerWindow,
+  formatRemainingTime,
   formatWeekdays,
   minutesToTime,
   timeToMinutes,
@@ -28,5 +33,22 @@ describe("watch formatting", () => {
     expect(formatWeekdays(31)).toBe("工作日")
     expect(formatWeekdays(96)).toBe("周末")
     expect(formatWeekdays(65)).toBe("周一、周日")
+  })
+
+  it("formats temporary reminder timing and completion states", () => {
+    const now = new Date("2026-08-10T10:00:00Z").getTime()
+    expect(estimatedTemporaryChecks("2h", 10)).toBe(12)
+    expect(estimatedTemporaryChecks("until_power_off", 10)).toBeNull()
+    expect(estimatedRecurringChecks(22 * 60, 7 * 60, 10)).toBe(54)
+    expect(estimatedRecurringChecks(0, 0, 10)).toBe(144)
+    expect(formatRemainingTime("2026-08-10T11:25:00Z", now)).toBe(
+      "1 小时 25 分钟"
+    )
+    expect(formatNextCheck("2026-08-10T10:10:00Z", now)).toContain(
+      "约 10 分钟后"
+    )
+    expect(formatCompletionReason("notified")).toBe("已发现空闲口并完成提醒")
+    expect(formatCompletionReason("expired")).toBe("等待时间已结束")
+    expect(formatCompletionReason("cancelled")).toBe("已由你取消")
   })
 })
