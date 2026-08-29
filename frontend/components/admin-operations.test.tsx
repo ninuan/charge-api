@@ -40,11 +40,9 @@ describe("AdminOperations", () => {
         state: "healthy",
         message: "后台提醒调度运行正常。",
         enabled: true,
-        recurringEnabled: true,
         schedulerRunning: true,
         scheduledPowerOffActive: false,
         activeTemporaryRules: 3,
-        activeRecurringRules: 1,
         completedNotified24Hours: 5,
         completedExpired24Hours: 2,
         averageTemporaryMinutes: 78,
@@ -106,7 +104,7 @@ describe("AdminOperations", () => {
     expect(screen.getByText(/07\/01.*08\/05/)).toBeInTheDocument()
     expect(screen.getByText("提醒调度")).toBeInTheDocument()
     expect(screen.getByText("活动提醒")).toBeInTheDocument()
-    expect(screen.getByText("4 条")).toBeInTheDocument()
+    expect(screen.getByText("3 条")).toBeInTheDocument()
     expect(screen.getByText("95.0%")).toBeInTheDocument()
     expect(screen.getByText("WxPusher 投递")).toBeInTheDocument()
     expect(screen.getByText("90.0%")).toBeInTheDocument()

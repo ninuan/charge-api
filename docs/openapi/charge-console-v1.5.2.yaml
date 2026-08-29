@@ -3,9 +3,9 @@ info:
   title: Charge Console API
   version: 1.5.2
   description: |
-    Charge Console 1.5.2 按需整桩空闲提醒、站内通知与 WxPusher 可靠投递契约。
+    Charge Console 1.5.2 按需整桩空闲提醒、通知中心与 WxPusher 可靠投递契约。
     临时提醒仅在用户指定时长内按桩号低频检查，首次发现空闲并生成通知后自动结束。
-    WxPusher 是附加投递渠道；站内通知始终是事实来源，供应商成功不代表特定微信客户端已读。
+    WxPusher 是附加发送方式；通知中心始终保存消息，平台成功发送不代表特定客户端已读。
 servers:
   - url: /
 security:
@@ -20,7 +20,7 @@ tags:
   - name: Watch Rules
     description: 当前普通用户按充电桩设置的空闲提醒规则
   - name: Notifications
-    description: 当前普通用户的通知偏好与站内通知箱
+    description: 当前普通用户的通知偏好与通知中心
   - name: WxPusher
     description: 当前普通用户的 WxPusher 绑定、偏好、测试消息与最近投递结果
 paths:
@@ -61,7 +61,7 @@ paths:
               $ref: "#/components/schemas/WatchRuleCreateRequest"
       responses:
         "201":
-          description: 首次整桩检查结果；无空闲口时包含已创建的临时或固定提醒规则
+          description: 首次整桩检查结果；无空闲口时包含已创建的临时提醒
           headers:
             Cache-Control:
               $ref: "#/components/headers/PrivateNoStore"
@@ -216,7 +216,7 @@ paths:
   /api/notifications:
     get:
       operationId: listNotifications
-      summary: 分页获取当前用户的站内通知
+      summary: 分页获取当前用户的通知中心消息
       tags: [Notifications]
       parameters:
         - name: cursor
@@ -982,7 +982,7 @@ components:
             code: WXPUSHER_INVALID
             error: WxPusher 提醒设置无效
     WxPusherChannelConflict:
-      description: 当前用户尚未绑定 WxPusher，或微信提醒总开关处于关闭状态
+      description: 当前用户尚未绑定 WxPusher，或微信提醒处于关闭状态
       content:
         application/json:
           schema:
@@ -1035,7 +1035,7 @@ components:
             code: WXPUSHER_RATE_LIMITED
             error: 操作过于频繁，请稍后再试
     WxPusherUnavailable:
-      description: WxPusher 未配置、存储不可用或供应商暂时异常；站内通知不受影响
+      description: WxPusher 未配置、存储不可用或服务暂时异常；通知中心不受影响
       content:
         application/json:
           schema:
@@ -1094,7 +1094,9 @@ components:
           type: boolean
         recurringRemindersEnabled:
           type: boolean
-          description: 是否允许高级固定时段提醒进入后台调度；关闭后保留用户配置，临时提醒不受影响。
+          deprecated: true
+          readOnly: true
+          description: 旧客户端兼容字段，固定返回 false；固定时段提醒已停止调度，原配置仅保留用于回滚。
         watchRefreshIntervalMinutes:
           type: integer
           minimum: 5
@@ -1135,11 +1137,9 @@ components:
         - state
         - message
         - enabled
-        - recurringEnabled
         - schedulerRunning
         - scheduledPowerOffActive
         - activeTemporaryRules
-        - activeRecurringRules
         - completedNotified24Hours
         - completedExpired24Hours
         - averageTemporaryMinutes
@@ -1163,9 +1163,6 @@ components:
           type: string
         enabled:
           type: boolean
-        recurringEnabled:
-          type: boolean
-          description: 是否允许固定时段提醒进入调度队列。
         schedulerRunning:
           type: boolean
         scheduledPowerOffActive:
@@ -1173,10 +1170,6 @@ components:
         activeTemporaryRules:
           type: integer
           minimum: 0
-        activeRecurringRules:
-          type: integer
-          minimum: 0
-          description: 已计入当前调度的固定时段规则数；全局关闭时为 0。
         completedNotified24Hours:
           type: integer
           minimum: 0
@@ -1525,7 +1518,7 @@ components:
         expiresAt:
           type: string
           format: date-time
-          description: 临时提醒的硬截止时间；固定提醒不返回。
+          description: 临时提醒的硬截止时间；旧固定规则不返回。
         completedAt:
           type: string
           format: date-time
@@ -1533,7 +1526,7 @@ components:
           $ref: "#/components/schemas/WatchCompletionReason"
         stopAfterNotify:
           type: boolean
-          description: 临时提醒固定为 true，固定提醒固定为 false。
+          description: 临时提醒固定为 true；旧固定规则固定为 false。
         nextCheckAt:
           type: string
           format: date-time
@@ -1556,66 +1549,23 @@ components:
         deviceId:
           type: string
           pattern: "^[0-9]{6,64}$"
-        mode:
-          $ref: "#/components/schemas/WatchRuleMode"
-          description: 省略时由服务端使用 temporary。
         duration:
           $ref: "#/components/schemas/WatchTemporaryDuration"
-          description: 仅用于 temporary；省略时使用 2h，且服务端会将截止时间限制在当天计划断电开始前。
-        enabled:
-          type: boolean
-        activeWeekdays:
-          type: integer
-          minimum: 1
-          maximum: 127
-          description: 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。
-        activeStartMinute:
-          type: integer
-          minimum: 0
-          maximum: 1439
-          description: 当地时区当天起始分钟；与结束分钟相同时表示全天。
-        activeEndMinute:
-          type: integer
-          minimum: 0
-          maximum: 1439
-          description: 当地时区当天结束分钟；小于起始分钟时表示跨午夜。
-        timezone:
-          type: string
-          maxLength: 64
+          description: 省略时使用 2h，且服务端会将截止时间限制在当天计划断电开始前。
     WatchRuleUpdateRequest:
       type: object
       additionalProperties: false
       minProperties: 1
       properties:
-        enabled:
-          type: boolean
         duration:
           $ref: "#/components/schemas/WatchTemporaryDuration"
         cancel:
           type: boolean
-          description: true 表示将活动临时提醒原子标记为 cancelled；固定提醒不接受该字段。
-        activeWeekdays:
-          type: integer
-          minimum: 1
-          maximum: 127
-          description: 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。
-        activeStartMinute:
-          type: integer
-          minimum: 0
-          maximum: 1439
-          description: 当地时区当天起始分钟；与结束分钟相同时表示全天。
-        activeEndMinute:
-          type: integer
-          minimum: 0
-          maximum: 1439
-          description: 当地时区当天结束分钟；小于起始分钟时表示跨午夜。
-        timezone:
-          type: string
-          maxLength: 64
+          description: true 表示将活动临时提醒原子标记为 cancelled。
     WatchRuleMode:
       type: string
       enum: [temporary, recurring]
-      description: temporary 是默认按需任务；recurring 是保留的高级固定时段规则。
+      description: temporary 是当前按需提醒；recurring 仅用于读取升级前保留的已停用规则，不能新建或编辑。
     WatchTemporaryDuration:
       type: string
       enum: [1h, 2h, 4h, until_power_off]
@@ -1682,7 +1632,7 @@ components:
           description: 最近一次测试消息投递结果。
         deliveryDisclaimer:
           type: string
-          description: 明确“WxPusher 已处理”不代表特定微信客户端已展示或已读。
+          description: 提醒用户在 WxPusher App 或微信中确认是否收到；平台无法确认消息是否已读。
     WxPusherChannelUpdateRequest:
       type: object
       additionalProperties: false
@@ -1757,13 +1707,15 @@ components:
     NotificationDeliverySummary:
       type: object
       additionalProperties: false
-      required: [id, status, isTest, createdAt, updatedAt, message]
+      required: [id, status, userState, isTest, createdAt, updatedAt, message]
       properties:
         id:
           type: string
           maxLength: 128
         status:
           $ref: "#/components/schemas/NotificationDeliveryStatus"
+        userState:
+          $ref: "#/components/schemas/NotificationDeliveryUserState"
         isTest:
           type: boolean
         acceptedAt:
@@ -1787,6 +1739,17 @@ components:
           maxLength: 200
         errorCode:
           $ref: "#/components/schemas/WxPusherErrorCode"
+    NotificationDeliveryUserState:
+      type: string
+      description: 面向用户的投递事实；供应商后续查询未知不会覆盖已经确认的提交成功。
+      enum:
+        - queued
+        - submitted
+        - processed
+        - suppressed
+        - failed
+        - cancelled
+        - unknown
     NotificationPreference:
       type: object
       additionalProperties: false
@@ -1847,12 +1810,13 @@ components:
       enum: [info, warning, critical]
     NotificationStatusFilter:
       type: string
-      enum: [all, unread, resolved]
+      description: pending 和 resolved 仅包含需要用户处理的登录失效与持续离线问题；信息类通知不进入这两个列表。
+      enum: [all, unread, pending, resolved]
       default: all
     Notification:
       type: object
       additionalProperties: false
-      required: [id, userId, type, severity, title, message, createdAt]
+      required: [id, userId, type, severity, title, message, occurrenceCount, lastOccurredAt, createdAt]
       properties:
         id:
           type: string
@@ -1884,6 +1848,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        occurrenceCount:
+          type: integer
+          minimum: 1
+        lastOccurredAt:
+          type: string
+          format: date-time
         createdAt:
           type: string
           format: date-time

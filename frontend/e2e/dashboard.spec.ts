@@ -328,7 +328,7 @@ test("administrator handles a user and verifies the audit trail", async ({
   await expect(page.getByText("站内通知", { exact: true })).toBeVisible()
   await expect(page.getByText(/保留 120 天/)).toBeVisible()
   await page.getByRole("button", { name: "重新检查" }).click()
-  await expect(page.getByText("运维状态已重新检查")).toBeVisible()
+  await expect(page.getByText("运维状态已更新")).toBeVisible()
   await expect(page.getByText("管理操作日志")).toBeVisible()
   await expect(page.getByText(/修改账户状态/).first()).toBeVisible()
   await expect(page.getByText(/重置密码/).first()).toBeVisible()
@@ -559,6 +559,28 @@ test("dashboard restores URL filters and keeps the mobile controls clear", async
     path: "/tmp/charge-1.4.13-dashboard-mobile.png",
     fullPage: false,
   })
+
+  const appHeader = page.locator('[data-slot="app-header"]')
+  const searchToolbar = page.locator('[data-slot="dashboard-search-toolbar"]')
+  for (const width of [768, 1280]) {
+    await page.setViewportSize({ width, height: 500 })
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await expect
+      .poll(async () => {
+        const headerBox = await appHeader.boundingBox()
+        const toolbarBox = await searchToolbar.boundingBox()
+        if (!headerBox || !toolbarBox) return false
+        const seam = Math.round(toolbarBox.y - (headerBox.y + headerBox.height))
+        return seam >= -1 && seam <= 0
+      })
+      .toBe(true)
+  }
+  await search.focus()
+  await expect(search).toBeFocused()
+  await page.screenshot({
+    path: "/tmp/charge-1.5.2-dashboard-sticky-desktop-light.png",
+    fullPage: false,
+  })
 })
 
 test("dashboard fades in every port card at the same time", async ({
@@ -652,9 +674,7 @@ test("dashboard fades in every port card at the same time", async ({
   })
 })
 
-test("dashboard defaults to temporary reminders and keeps fixed schedules advanced", async ({
-  page,
-}) => {
+test("dashboard only exposes temporary reminders", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.addInitScript(() => {
     class LocalEventSource {
@@ -726,25 +746,20 @@ test("dashboard defaults to temporary reminders and keeps fixed schedules advanc
       return
     }
     const payload = route.request().postDataJSON()
-    const temporary = payload.mode !== "recurring"
     const created: WatchRule = {
       id: `rule-${rules.length + 1}`,
       userId: user.id,
       deviceId: payload.deviceId,
-      mode: temporary ? "temporary" : "recurring",
-      enabled: payload.enabled ?? true,
-      activeWeekdays: payload.activeWeekdays ?? 127,
-      activeStartMinute: payload.activeStartMinute ?? 0,
-      activeEndMinute: payload.activeEndMinute ?? 0,
-      timezone: payload.timezone ?? "Asia/Shanghai",
-      stopAfterNotify: temporary,
-      expiresAt: temporary
-        ? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
-        : undefined,
-      nextCheckAt: temporary
-        ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
-        : undefined,
-      estimatedRemainingChecks: temporary ? 12 : undefined,
+      mode: "temporary",
+      enabled: true,
+      activeWeekdays: 127,
+      activeStartMinute: 0,
+      activeEndMinute: 0,
+      timezone: "Asia/Shanghai",
+      stopAfterNotify: true,
+      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      nextCheckAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      estimatedRemainingChecks: 12,
       createdAt: "2026-08-10T00:00:00Z",
       updatedAt: "2026-08-10T00:00:00Z",
     }
@@ -755,7 +770,7 @@ test("dashboard defaults to temporary reminders and keeps fixed schedules advanc
         rule: created,
         idlePortIds: [],
         backgroundScheduled: true,
-        message: temporary ? "临时提醒已开始。" : "固定时段提醒已保存。",
+        message: "已开始等待空闲口，有空闲时会通知你。",
       },
     })
   })
@@ -793,10 +808,8 @@ test("dashboard defaults to temporary reminders and keeps fixed schedules advanc
   const temporaryEditor = page.getByRole("dialog", {
     name: "有空闲时提醒我",
   })
-  await expect(
-    temporaryEditor.getByRole("tab", { name: "临时提醒" })
-  ).toHaveAttribute("data-active", "")
-  await expect(temporaryEditor.getByText(/后台最多约检查 12 次/)).toBeVisible()
+  await expect(temporaryEditor.getByText(/最多约检查 12 次/)).toBeVisible()
+  await expect(temporaryEditor.getByText("固定时段（高级）")).toHaveCount(0)
   await temporaryEditor.getByRole("button", { name: "开始提醒" }).click()
   await expect(
     page.getByRole("button", { name: "空闲提醒进行中" })
@@ -819,24 +832,7 @@ test("dashboard defaults to temporary reminders and keeps fixed schedules advanc
   await page.getByRole("button", { name: "确认取消" }).click()
   await expect(sheet.getByText("已由你取消")).toBeVisible()
 
-  await sheet.getByRole("button", { name: "添加固定提醒" }).click()
-  const recurringEditor = page.getByRole("dialog", {
-    name: "设置固定时段提醒",
-  })
-  await expect(
-    recurringEditor.getByRole("tab", { name: "固定时段（高级）" })
-  ).toHaveAttribute("data-active", "")
-  await page.getByLabel("开始时间").fill("22:30")
-  await page.getByLabel("结束时间").fill("06:30")
-  await expect(page.getByText(/22:30–06:30（跨午夜）/)).toBeVisible()
-  await recurringEditor.getByRole("button", { name: "创建固定提醒" }).click()
-  await expect(
-    page.getByRole("button", { name: "空闲提醒进行中" })
-  ).toBeVisible()
-
-  await page.getByRole("button", { name: "空闲提醒", exact: true }).click()
-  await expect(sheet.getByText("1/5")).toBeVisible()
-  await expect(sheet.getByText("每天 · 22:30–06:30（跨午夜）")).toBeVisible()
+  await expect(sheet.getByText("固定时段提醒（高级）")).toHaveCount(0)
   await expect(sheet.getByText("7/480")).toBeVisible()
 
   await sheet.getByRole("button", { name: "开始临时提醒" }).click()
@@ -870,6 +866,7 @@ test("notification center completes WxPusher binding settings error recovery and
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.addInitScript(() => {
+    window.localStorage.setItem("theme", "light")
     class LocalEventSource {
       static OPEN = 1
       readyState = LocalEventSource.OPEN
@@ -910,7 +907,8 @@ test("notification center completes WxPusher binding settings error recovery and
     maskedUid: bound ? "••••1234" : undefined,
     boundAt: bound ? "2026-08-24T08:00:00Z" : undefined,
     eventTypes,
-    deliveryDisclaimer: "WxPusher 已处理不代表某台微信客户端已经展示或已读。",
+    deliveryDisclaimer:
+      "消息发出后，请在 WxPusher App 或微信中确认是否收到。页面无法确认是否已经阅读。",
     lastTestDelivery,
   })
 
@@ -921,6 +919,29 @@ test("notification center completes WxPusher binding settings error recovery and
     route.fulfill({ status: 200, json: snapshot })
   )
   await mockEmptyWatchResources(page)
+  await page.route("**/api/notifications**", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        unreadCount: 1,
+        items: [
+          {
+            id: "notice-e2e-visual",
+            userId: user.id,
+            type: "pile_available",
+            severity: "info",
+            title: "松园充电桩有空闲口",
+            message: "整桩出现至少一个空闲充电口",
+            deviceId: snapshot.piles[0].id,
+            portId: 3,
+            occurrenceCount: 1,
+            createdAt: "2026-08-26T13:40:00Z",
+            lastOccurredAt: "2026-08-26T13:40:00Z",
+          },
+        ],
+      },
+    })
+  )
   await page.route(
     "**/api/notification-channels/wxpusher/bind-sessions**",
     async (route) => {
@@ -1005,22 +1026,72 @@ test("notification center completes WxPusher binding settings error recovery and
     .getByRole("button", { name: "关闭", exact: true })
     .first()
     .click()
+  await expect(bindDialog).toBeHidden()
 
   await expect(center.getByText("已绑定", { exact: true })).toBeVisible()
-  await center.getByRole("switch", { name: "充电桩恢复在线" }).click()
+  const browserIcon = center
+    .locator('[data-slot="alert"] [data-slot="leading-icon"]')
+    .first()
+  const wxPusherIcon = center
+    .locator('[data-slot="card-header"] [data-slot="leading-icon"]')
+    .first()
+  const notificationIcon = center
+    .getByRole("article")
+    .first()
+    .locator('[data-slot="leading-icon"]')
+  await expect(notificationIcon).toBeVisible()
+  const iconBoxes = await Promise.all(
+    [browserIcon, wxPusherIcon, notificationIcon].map((icon) =>
+      icon.boundingBox()
+    )
+  )
+  for (const box of iconBoxes) {
+    expect(box?.width).toBe(36)
+    expect(box?.height).toBe(36)
+  }
+  const titleBoxes = await Promise.all([
+    center.locator('[data-slot="alert-title"]').first().boundingBox(),
+    center.locator('[data-slot="card-title"]').first().boundingBox(),
+    center.getByRole("article").first().locator("strong").boundingBox(),
+  ])
+  const titleOffsets = titleBoxes.map(
+    (box, index) => (box?.y ?? 0) - (iconBoxes[index]?.y ?? 0)
+  )
+  expect(
+    Math.max(...titleOffsets) - Math.min(...titleOffsets)
+  ).toBeLessThanOrEqual(2)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.2-notifications-desktop-light.png",
+    fullPage: false,
+  })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await page.waitForTimeout(250)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.2-notifications-desktop-dark.png",
+    fullPage: false,
+  })
+  await center.getByRole("switch", { name: "充电桩恢复连接" }).click()
   await expect(
-    center.getByRole("switch", { name: "充电桩恢复在线" })
+    center.getByRole("switch", { name: "充电桩恢复连接" })
   ).toBeChecked()
 
   await page.setViewportSize({ width: 375, height: 812 })
-  await expect(
-    center.getByRole("switch", { name: "微信提醒总开关" })
-  ).toBeVisible()
+  await expect(center.getByRole("switch", { name: "微信提醒" })).toBeVisible()
   const centerBox = await center.boundingBox()
   expect(centerBox?.width).toBeGreaterThanOrEqual(360)
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth)
   ).toBeLessThanOrEqual(375)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.2-notifications-mobile-dark.png",
+    fullPage: false,
+  })
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+  await page.waitForTimeout(250)
+  await page.screenshot({
+    path: "/tmp/charge-1.5.2-notifications-mobile-light.png",
+    fullPage: false,
+  })
   await center.getByRole("button", { name: "发送测试消息" }).click()
   await expect(center.getByText(/最近测试 · 发送失败/)).toBeVisible()
   await expect(center.getByText(/当前接收账号可能已取消关注/)).toBeVisible()
@@ -1121,6 +1192,7 @@ test("notification center closes the durable and browser alert loop on mobile", 
   page,
 }) => {
   await page.setViewportSize({ width: 375, height: 812 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
   await page.addInitScript(() => {
     class LocalEventSource {
       static OPEN = 1
@@ -1206,6 +1278,8 @@ test("notification center closes the durable and browser alert loop on mobile", 
       message: "整桩从无空闲变为至少一个空闲口。",
       deviceId: snapshot.piles[0].id,
       portId: 3,
+      occurrenceCount: 1,
+      lastOccurredAt: "2026-08-11T09:00:00Z",
       createdAt: "2026-08-11T09:00:00Z",
     },
     {
@@ -1215,6 +1289,8 @@ test("notification center closes the durable and browser alert loop on mobile", 
       severity: "critical",
       title: "扫码凭据已失效",
       message: "请重新扫码登录后恢复后台提醒。",
+      occurrenceCount: 1,
+      lastOccurredAt: "2026-08-11T08:00:00Z",
       createdAt: "2026-08-11T08:00:00Z",
     },
   ]
@@ -1270,9 +1346,15 @@ test("notification center closes the durable and browser alert loop on mobile", 
       const items = notifications.filter((notification) =>
         status === "unread"
           ? !notification.readAt
-          : status === "resolved"
-            ? Boolean(notification.resolvedAt)
-            : true
+          : status === "pending"
+            ? ["credential_expired", "pile_offline"].includes(
+                notification.type
+              ) && !notification.resolvedAt
+            : status === "resolved"
+              ? ["credential_expired", "pile_offline"].includes(
+                  notification.type
+                ) && Boolean(notification.resolvedAt)
+              : true
       )
       await route.fulfill({
         status: 200,
@@ -1306,18 +1388,30 @@ test("notification center closes the durable and browser alert loop on mobile", 
   await trigger.click()
   const sheet = page.getByRole("dialog", { name: "通知中心" })
   await expect(sheet).toBeVisible()
-  await sheet.getByRole("button", { name: "允许通知" }).click()
+  await expect(sheet.getByText("来源：空闲提醒")).toBeVisible()
   await expect(
-    sheet.getByRole("switch", { name: "浏览器即时提醒" })
-  ).toBeChecked()
+    sheet.getByText("建议：现在有空闲口，可以前往充电。")
+  ).toBeVisible()
+  await sheet.getByRole("tab", { name: "需处理" }).click()
+  await expect(sheet.getByText("需要重新登录").first()).toBeVisible()
+  await sheet.getByRole("tab", { name: "全部" }).click()
+  await sheet.getByRole("button", { name: "允许通知" }).click()
+  await expect(sheet.getByRole("switch", { name: "网页提醒" })).toBeChecked()
 
-  await sheet.getByText("松园 3 号楼有空闲口").click()
+  await sheet.getByText("3 号充电口空闲了").click()
   await expect(page.getByLabel("3 号充电口")).toHaveClass(
     /notification-target-glow/
   )
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("3 号充电口")
+        .evaluate((element) => getComputedStyle(element).animationName)
+    )
+    .toBe("none")
 
   await page.getByRole("button", { name: "通知，1 条未读" }).click()
-  await page.getByText("扫码凭据已失效").click()
+  await page.getByRole("button", { name: /需要重新登录/ }).click()
   await expect(
     page.getByRole("dialog", { name: "扫码登录远端账号" })
   ).toBeVisible()
@@ -1335,6 +1429,8 @@ test("notification center closes the durable and browser alert loop on mobile", 
     title: "松园 3 号楼持续离线",
     message: "非计划断电时段已连续检查失败。",
     deviceId: snapshot.piles[0].id,
+    occurrenceCount: 1,
+    lastOccurredAt: "2026-08-11T09:03:00Z",
     createdAt: "2026-08-11T09:03:00Z",
   }
   await page.evaluate((notification) => {
@@ -1345,9 +1441,25 @@ test("notification center closes the durable and browser alert loop on mobile", 
     ).__notificationStream?.emit("notification", notification)
   }, incoming)
 
+  await page.evaluate((notification) => {
+    ;(
+      window as typeof window & {
+        __notificationStream?: { emit: (name: string, value: unknown) => void }
+      }
+    ).__notificationStream?.emit("notification", {
+      ...notification,
+      message: "再次检查仍然离线。",
+      occurrenceCount: 2,
+      lastOccurredAt: "2026-08-11T09:08:00Z",
+    })
+  }, incoming)
+
   await expect(
     page.getByRole("button", { name: "通知，1 条未读" })
   ).toBeVisible()
+  await page.getByRole("button", { name: "通知，1 条未读" }).click()
+  await expect(page.getByText("重复 2 次")).toBeVisible()
+  await expect(page.getByText(/最近一次：08\/11 17:08/)).toBeVisible()
   expect(
     await page.evaluate(
       () =>
@@ -1357,7 +1469,7 @@ test("notification center closes the durable and browser alert loop on mobile", 
           }
         ).__browserNotifications?.length
     )
-  ).toBe(1)
+  ).toBe(2)
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth)
   ).toBeLessThanOrEqual(375)

@@ -28,7 +28,6 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 	legacyReminderSettings := settings.WatchRefreshIntervalMinutes == 0
 	if legacyReminderSettings {
 		settings.BackgroundRemindersEnabled = true
-		settings.RecurringRemindersEnabled = true
 		settings.ScheduledPowerOffEnabled = true
 		settings.ScheduledPowerOffStartMinute = defaultPowerOffStartMinute
 		settings.ScheduledPowerOffEndMinute = defaultPowerOffEndMinute
@@ -51,10 +50,14 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 	if settings.PowerRestoreJitterMinutes == 0 && legacyReminderSettings {
 		settings.PowerRestoreJitterMinutes = defaultPowerRestoreJitter
 	}
+	// Fixed-schedule reminders were retired in 1.5.2. Keep the persisted field
+	// for rollback compatibility, but never expose an enabled runtime setting.
+	settings.RecurringRemindersEnabled = false
 	return settings
 }
 
 func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
+	settings.RecurringRemindersEnabled = false
 	if settings.DefaultDeviceLimit < 1 || settings.DefaultDeviceLimit > 100 {
 		return fmt.Errorf("默认设备额度需要在 1 到 100 之间")
 	}

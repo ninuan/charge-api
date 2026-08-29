@@ -262,7 +262,7 @@ func (m *Manager) reminderTargets() ([]reminderTarget, error) {
 	m.mu.RUnlock()
 	sort.Slice(users, func(i, j int) bool { return users[i].id < users[j].id })
 
-	settings := normalizeRegistrationSettings(m.Settings())
+	now := m.reminderSchedulerNow()
 	targets := make([]reminderTarget, 0)
 	for _, user := range users {
 		rules, err := m.repository.ListWatchRules(user.id)
@@ -271,9 +271,8 @@ func (m *Manager) reminderTargets() ([]reminderTarget, error) {
 		}
 		byPile := make(map[string][]model.WatchRule)
 		for _, rule := range rules {
-			if rule.Enabled && rule.CompletedAt == nil &&
-				(rule.Mode != model.WatchRuleRecurring || settings.RecurringRemindersEnabled) &&
-				(rule.Mode != model.WatchRuleTemporary || rule.ExpiresAt != nil && rule.ExpiresAt.After(m.reminderSchedulerNow())) {
+			if rule.Mode == model.WatchRuleTemporary && rule.Enabled &&
+				rule.CompletedAt == nil && rule.ExpiresAt != nil && rule.ExpiresAt.After(now) {
 				byPile[rule.DeviceID] = append(byPile[rule.DeviceID], rule)
 			}
 		}
@@ -636,8 +635,8 @@ func (m *Manager) recordOfflineReminderResult(
 		pileLabel := strings.TrimSpace(m.notificationPileLabel(target.userID, target.deviceID))
 		if _, _, err := m.recordNotificationOnce(model.Notification{
 			UserID: target.userID, Type: model.NotificationPileOffline, Severity: "warning",
-			Title:     "充电桩持续离线",
-			Message:   pileLabel + " 已连续多次无法访问，请确认现场供电或稍后再试。",
+			Title:     "充电桩无法连接",
+			Message:   pileLabel + "在正常供电时段内多次无法连接，请稍后再试。",
 			DeviceID:  target.deviceID,
 			DedupeKey: offlineNotificationDedupeKey(target.deviceID), CreatedAt: now,
 		}); err != nil {
@@ -658,9 +657,10 @@ func (m *Manager) currentReminderPileRules(userID, deviceID string) ([]model.Wat
 		return nil, fmt.Errorf("list current reminder rules: %w", err)
 	}
 	current := make([]model.WatchRule, 0)
+	now := m.reminderSchedulerNow()
 	for _, rule := range rules {
-		if rule.DeviceID == deviceID && rule.Enabled && rule.CompletedAt == nil &&
-			(rule.Mode != model.WatchRuleTemporary || rule.ExpiresAt != nil && rule.ExpiresAt.After(m.reminderSchedulerNow())) {
+		if rule.DeviceID == deviceID && rule.Mode == model.WatchRuleTemporary &&
+			rule.Enabled && rule.CompletedAt == nil && rule.ExpiresAt != nil && rule.ExpiresAt.After(now) {
 			current = append(current, rule)
 		}
 	}

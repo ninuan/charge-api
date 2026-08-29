@@ -150,9 +150,18 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 	if len(nextPage.Items) != 1 || nextPage.NextCursor != "" {
 		t.Fatalf("unexpected next notification page: %+v", nextPage)
 	}
+	pendingPage, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: user.ID, Status: "pending", Limit: 10,
+	})
+	if err != nil || len(pendingPage.Items) != 1 || pendingPage.Items[0].ID != duplicateCredential.ID {
+		t.Fatalf("pending page included informational notifications: %+v, err %v", pendingPage, err)
+	}
 	marked, ok, err := store.MarkNotificationRead(user.ID, idleNotification.ID, now.Add(3*time.Second))
 	if err != nil || !ok || marked.ReadAt == nil {
 		t.Fatalf("MarkNotificationRead = %+v, ok %v, err %v", marked, ok, err)
+	}
+	if marked.Type.RequiresAction() || marked.ResolvedAt != nil {
+		t.Fatalf("read informational notification entered action lifecycle: %+v", marked)
 	}
 	updated, err := store.MarkAllNotificationsRead(user.ID, now.Add(4*time.Second))
 	if err != nil || updated != 2 {
@@ -249,6 +258,72 @@ func TestWatchNotificationPersistenceRoundTripAndConstraints(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("%s retained %d rows after user deletion", table, count)
 		}
+	}
+}
+
+func TestRepeatedActiveNotificationsMergeOccurrenceDetails(t *testing.T) {
+	path := t.TempDir() + "/state.db"
+	key := bytes.Repeat([]byte{0x72}, CookieKeySize)
+	store, err := OpenSQLite(path, key)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	user := model.User{
+		ID: "user-merge", Username: "merge", PasswordHash: "hash",
+		Role: model.RoleUser, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Save(State{
+		Version: schemaVersion, Users: []model.User{user},
+		UserStates: map[string]UserState{user.ID: {}},
+	}); err != nil {
+		t.Fatalf("Save user: %v", err)
+	}
+
+	first := model.Notification{
+		ID: "notification-first", UserID: user.ID,
+		Type: model.NotificationPileOffline, Severity: "warning",
+		Title: "充电桩持续离线", Message: "第一次检查仍然离线",
+		DeviceID: "pile-1", DedupeKey: "pile-offline:pile-1", CreatedAt: now,
+	}
+	stored, inserted, queued, err := store.InsertNotificationWithWxPusherDeliveryIfAbsent(first, "delivery-first", false)
+	if err != nil || !inserted || queued || stored.OccurrenceCount != 1 || !stored.LastOccurredAt.Equal(now) {
+		t.Fatalf("first notification = %+v, inserted %v, queued %v, err %v", stored, inserted, queued, err)
+	}
+
+	second := first
+	second.ID = "notification-second"
+	second.Message = "第二次检查仍然离线"
+	second.CreatedAt = now.Add(5 * time.Minute)
+	stored, inserted, queued, err = store.InsertNotificationWithWxPusherDeliveryIfAbsent(second, "delivery-second", false)
+	if err != nil || inserted || queued {
+		t.Fatalf("merged notification = %+v, inserted %v, queued %v, err %v", stored, inserted, queued, err)
+	}
+	if stored.ID != first.ID || stored.OccurrenceCount != 2 || stored.Message != second.Message ||
+		!stored.LastOccurredAt.Equal(second.CreatedAt) {
+		t.Fatalf("unexpected merged occurrence: %+v", stored)
+	}
+
+	pending, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: user.ID, Status: "pending", Limit: 10,
+	})
+	if err != nil || len(pending.Items) != 1 || pending.Items[0].OccurrenceCount != 2 {
+		t.Fatalf("pending notifications = %+v, err %v", pending, err)
+	}
+	resolvedAt := now.Add(time.Minute)
+	if err := store.SaveNotification(model.Notification{
+		ID: "notification-recovered", UserID: user.ID,
+		Type: model.NotificationPileRecovered, Severity: "info",
+		Title: "充电桩恢复在线", Message: "充电桩已经恢复",
+		DeviceID: "pile-1", ResolvedAt: &resolvedAt, CreatedAt: resolvedAt,
+	}); err != nil {
+		t.Fatalf("save legacy resolved informational notification: %v", err)
+	}
+	resolved, err := store.ListNotificationsPage(NotificationPageQuery{
+		UserID: user.ID, Status: "resolved", Limit: 10,
+	})
+	if err != nil || len(resolved.Items) != 0 {
+		t.Fatalf("resolved page included informational notifications = %+v, err %v", resolved, err)
 	}
 }
 

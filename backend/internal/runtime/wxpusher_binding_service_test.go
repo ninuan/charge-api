@@ -44,7 +44,8 @@ func TestWxPusherTestDeliveryIsQueuedRateLimitedAndDelivered(t *testing.T) {
 	client := &fakeNotificationDeliveryClient{}
 	configureTestNotificationDispatcher(manager, client, &now)
 	summary, err := manager.CreateWxPusherTestDelivery(owner.ID, true)
-	if err != nil || !summary.IsTest || summary.Status != model.NotificationDeliveryPending || summary.Message != "等待发送" {
+	if err != nil || !summary.IsTest || summary.Status != model.NotificationDeliveryPending ||
+		summary.UserState != model.NotificationDeliveryUserQueued || summary.Message != "等待发送" {
 		t.Fatalf("test delivery summary=%+v err=%v", summary, err)
 	}
 	if _, err := manager.CreateWxPusherTestDelivery(owner.ID, true); !errors.Is(err, ErrWxPusherRateLimited) {
@@ -53,7 +54,8 @@ func TestWxPusherTestDeliveryIsQueuedRateLimitedAndDelivered(t *testing.T) {
 	if err := manager.runNotificationDispatcherOnce(context.Background(), now); err != nil {
 		t.Fatalf("deliver test message: %v", err)
 	}
-	if client.sendCalls != 1 || len(client.messages) != 1 || client.messages[0].Summary != "Charge Console 测试消息" {
+	if client.sendCalls != 1 || len(client.messages) != 1 || client.messages[0].Summary != "Charge Console 测试消息" ||
+		client.messages[0].Content != "微信提醒已连接。以后有空闲口或需要重新登录时，会发到这里。" {
 		t.Fatalf("test provider messages=%+v calls=%d", client.messages, client.sendCalls)
 	}
 	state, err := manager.WxPusherChannelState(owner.ID, true)
@@ -140,7 +142,8 @@ func TestWxPusherTestDeliveryRecheckKeepsUnconfirmedResultWithoutResending(t *te
 	delivery := model.NotificationDelivery{
 		ID: "ndl_uncertain", UserID: owner.ID, Channel: "wxpusher", IsTest: true,
 		Status: model.NotificationDeliveryUncertain, ProviderRecordID: "record-uncertain",
-		LastErrorCode: "provider_status_unknown", CreatedAt: createdAt, UpdatedAt: createdAt.Add(10 * time.Minute),
+		LastErrorCode: "provider_status_unknown", AcceptedAt: &createdAt,
+		CreatedAt: createdAt, UpdatedAt: createdAt.Add(10 * time.Minute),
 	}
 	if err := manager.repository.SaveNotificationDelivery(delivery); err != nil {
 		t.Fatalf("save uncertain test delivery: %v", err)
@@ -150,8 +153,8 @@ func TestWxPusherTestDeliveryRecheckKeepsUnconfirmedResultWithoutResending(t *te
 	if err != nil {
 		t.Fatalf("recheck uncertain test delivery: %v", err)
 	}
-	if summary.Status != model.NotificationDeliveryUncertain || summary.ErrorCode != "ambiguous_result" ||
-		!summary.UpdatedAt.Equal(now) {
+	if summary.Status != model.NotificationDeliveryUncertain || summary.UserState != model.NotificationDeliveryUserSubmitted ||
+		summary.Message != "已发送，请检查手机" || summary.ErrorCode != "ambiguous_result" || !summary.UpdatedAt.Equal(now) {
 		t.Fatalf("uncertain summary=%+v", summary)
 	}
 	if client.queryCalls != 1 || client.sendCalls != 0 {

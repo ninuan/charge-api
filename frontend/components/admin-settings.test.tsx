@@ -144,11 +144,9 @@ describe("AdminSettings", () => {
       backgroundRemindersEnabled: false,
     })
 
-    await user.click(screen.getByRole("switch", { name: "允许固定时段提醒" }))
-    expect(setSettings).toHaveBeenLastCalledWith({
-      ...settings,
-      recurringRemindersEnabled: false,
-    })
+    expect(
+      screen.queryByRole("switch", { name: "允许固定时段提醒" })
+    ).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText("断电开始时间"), {
       target: { value: "22:30" },

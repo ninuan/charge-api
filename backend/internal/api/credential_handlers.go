@@ -39,7 +39,7 @@ func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.manager.UpdateCookie(user.ID, req.Cookie)
 	if err != nil {
 		s.recordDashboardDiagnostic(user, "update_cookie", "cookie_update_failed", "", appruntime.DiagnosticStatusCode(err))
-		writePublicOperationError(w, http.StatusBadRequest, "update cookie", "凭据更新失败，请检查内容后重试。", err)
+		writePublicOperationError(w, http.StatusBadRequest, "update cookie", "登录信息更新失败，请检查内容后重试。", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
@@ -130,17 +130,17 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		payload["cookieSynced"] = false
-		payload["message"] = "扫码登录已完成。添加充电桩后，系统会自动更新登录凭据"
+		payload["message"] = "扫码登录已完成。添加充电桩后，系统会自动保持登录有效"
 		if deviceID, ok, err := s.manager.FirstDeviceID(user.ID); err != nil {
 			writePublicOperationError(w, http.StatusInternalServerError, "load first device", "扫码已确认，但暂时无法读取设备信息，请稍后重试。", err)
 			return
 		} else if ok {
 			if _, err := s.manager.SyncCookieFromYYB(user.ID, deviceID, s.yybClient, s.moceleClient); err == nil {
 				payload["cookieSynced"] = true
-				payload["message"] = "扫码登录已完成，登录凭据已自动生效"
+				payload["message"] = "扫码登录已完成，登录信息已自动生效"
 			} else {
 				s.recordDashboardDiagnostic(user, "sync_cookie", "credential_sync_failed", deviceID, appruntime.DiagnosticStatusCode(err))
-				payload["message"] = "扫码登录已完成，但凭据暂未生效；请稍后刷新或重新添加充电桩"
+				payload["message"] = "扫码登录已完成，但登录信息暂未生效；请稍后刷新或重新添加充电桩"
 			}
 		}
 		writeJSON(w, http.StatusOK, payload)
@@ -177,7 +177,7 @@ func (s *Server) handleMoceleCookie(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.manager.SyncCookieFromYYB(user.ID, req.DeviceID, s.yybClient, s.moceleClient)
 	if err != nil {
 		s.recordDashboardDiagnostic(user, "sync_cookie", "credential_sync_failed", req.DeviceID, appruntime.DiagnosticStatusCode(err))
-		writePublicOperationError(w, http.StatusBadGateway, "sync YYB cookie", "暂时无法同步登录凭据，请稍后重试。", err)
+		writePublicOperationError(w, http.StatusBadGateway, "sync YYB cookie", "暂时无法同步登录信息，请稍后重试。", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)

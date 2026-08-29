@@ -1,5 +1,5 @@
 import { PlusIcon, Trash2Icon } from "lucide-react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { AppearanceSettings } from "@/components/appearance-settings"
 import { Button } from "@/components/ui/button"
@@ -68,9 +68,9 @@ export function AdminSettings({
     event.preventDefault()
     try {
       setSettings(await adminApi.saveSettings(settings))
-      toast.success("系统设置已保存")
+      notify.success("系统设置已保存")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "保存系统设置失败" })
     }
   }
 
@@ -204,30 +204,6 @@ export function AdminSettings({
                       setSettings({
                         ...settings,
                         backgroundRemindersEnabled: checked,
-                      })
-                    }
-                  />
-                </Field>
-
-                <Field
-                  orientation="horizontal"
-                  className="rounded-lg border p-3"
-                >
-                  <FieldContent>
-                    <FieldLabel htmlFor="recurring-reminders">
-                      允许固定时段提醒
-                    </FieldLabel>
-                    <FieldDescription>
-                      关闭后保留固定规则，只运行用户主动开启的临时提醒。
-                    </FieldDescription>
-                  </FieldContent>
-                  <Switch
-                    id="recurring-reminders"
-                    checked={settings.recurringRemindersEnabled}
-                    onCheckedChange={(checked) =>
-                      setSettings({
-                        ...settings,
-                        recurringRemindersEnabled: checked,
                       })
                     }
                   />
@@ -438,8 +414,13 @@ export function AdminSettings({
                 onClick={() =>
                   void adminApi
                     .createInvite()
-                    .then(() => reload(1))
-                    .catch((reason) => toast.error(reason.message))
+                    .then(async () => {
+                      await reload(1)
+                      notify.success("邀请码已生成")
+                    })
+                    .catch((reason) =>
+                      notify.error(reason, { title: "生成邀请码失败" })
+                    )
                 }
               >
                 <PlusIcon />
@@ -469,8 +450,13 @@ export function AdminSettings({
                   onClick={() =>
                     void adminApi
                       .removeInvite(invite.id)
-                      .then(() => reload(invitePage.page))
-                      .catch((reason) => toast.error(reason.message))
+                      .then(async () => {
+                        await reload(invitePage.page)
+                        notify.success("邀请码已删除")
+                      })
+                      .catch((reason) =>
+                        notify.error(reason, { title: "删除邀请码失败" })
+                      )
                   }
                 >
                   <Trash2Icon />

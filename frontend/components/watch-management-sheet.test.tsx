@@ -53,7 +53,7 @@ const { watchContextMock } = vi.hoisted(() => ({
         userId: "user-1",
         deviceId: "pile-1",
         mode: "recurring",
-        enabled: true,
+        enabled: false,
         activeWeekdays: 31,
         activeStartMinute: 480,
         activeEndMinute: 1320,
@@ -127,10 +127,11 @@ const pile: Pile = {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  window.localStorage.clear()
 })
 
 describe("WatchManagementSheet", () => {
-  it("manages temporary tasks, advanced recurring rules, and quiet hours", async () => {
+  it("manages temporary tasks, hides retired recurring rules, and keeps quiet hours", async () => {
     const user = userEvent.setup()
     watchContextMock.updateRule.mockResolvedValue({})
     watchContextMock.deleteRule.mockResolvedValue(undefined)
@@ -153,7 +154,13 @@ describe("WatchManagementSheet", () => {
     expect(screen.getByText("7/480")).toBeInTheDocument()
     expect(screen.getByText("最多约 11 次")).toBeInTheDocument()
     expect(screen.getByText("已发现空闲口并完成提醒")).toBeInTheDocument()
-    expect(screen.getByText("工作日 · 08:00–22:00")).toBeInTheDocument()
+    expect(screen.getByText("长期提醒已停用")).toBeInTheDocument()
+    expect(screen.queryByText("固定时段提醒（高级）")).not.toBeInTheDocument()
+    expect(screen.queryByText("工作日 · 08:00–22:00")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "知道了" }))
+    expect(
+      window.localStorage.getItem("charge:recurring-reminders-retired:v1")
+    ).toBe("1")
 
     await user.click(screen.getByRole("button", { name: "延长" }))
     await user.click(screen.getByRole("button", { name: "确认延长" }))
@@ -171,11 +178,6 @@ describe("WatchManagementSheet", () => {
         cancel: true,
       })
     )
-
-    await user.click(screen.getByRole("switch", { name: "停用固定时段提醒" }))
-    expect(watchContextMock.updateRule).toHaveBeenCalledWith("recurring-1", {
-      enabled: false,
-    })
 
     await user.click(screen.getByRole("tab", { name: "通知设置" }))
     expect(screen.getByText("23:00–07:00")).toBeInTheDocument()
@@ -196,7 +198,7 @@ describe("WatchManagementSheet", () => {
       })
     )
 
-    await user.click(screen.getByRole("tab", { name: "提醒任务" }))
+    await user.click(screen.getByRole("tab", { name: "空闲提醒" }))
     await user.click(screen.getByRole("button", { name: "清除记录" }))
     expect(screen.getByText("删除这条提醒记录？")).toBeVisible()
     await user.click(screen.getByRole("button", { name: "确认删除" }))

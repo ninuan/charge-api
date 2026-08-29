@@ -17,6 +17,10 @@ import type {
 } from "@/lib/api/generated"
 import { useDashboard } from "@/lib/dashboard-context"
 import { navigateToNotification } from "@/lib/notification-navigation"
+import {
+  notificationPresentation,
+  notificationRequiresAction,
+} from "@/lib/notification-semantics"
 import { isQuietHours } from "@/lib/notification-time"
 import { watchApi } from "@/lib/watch-api"
 import { useWatch } from "@/lib/watch-context"
@@ -54,11 +58,11 @@ function mergeNotifications(
   current: AppNotification[],
   incoming: AppNotification[]
 ) {
-  const known = new Set(current.map((notification) => notification.id))
-  return [
-    ...current,
-    ...incoming.filter((notification) => !known.has(notification.id)),
-  ]
+  const merged = new Map(
+    current.map((notification) => [notification.id, notification])
+  )
+  for (const notification of incoming) merged.set(notification.id, notification)
+  return Array.from(merged.values())
 }
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
@@ -79,7 +83,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const statusRef = useRef<NotificationStatusFilter>("all")
   const preferenceRef = useRef(preference)
   const lastLoadAtRef = useRef(0)
-  const streamedNotificationIdsRef = useRef(new Set<string>())
+  const streamedNotificationVersionsRef = useRef(new Map<string, string>())
+  const notificationUnreadStateRef = useRef(new Map<string, boolean>())
 
   useEffect(() => {
     preferenceRef.current = preference
@@ -103,6 +108,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const page = await watchApi.notifications({ status: nextStatus })
         if (version !== requestVersionRef.current) return
         setItems(page.items)
+        notificationUnreadStateRef.current = new Map(
+          page.items.map((notification) => [
+            notification.id,
+            !notification.readAt,
+          ])
+        )
         setUnreadCount(page.unreadCount)
         setNextCursor(page.nextCursor)
         setLoaded(true)
@@ -129,6 +140,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         cursor: nextCursor,
       })
       setItems((current) => mergeNotifications(current, page.items))
+      for (const notification of page.items)
+        notificationUnreadStateRef.current.set(
+          notification.id,
+          !notification.readAt
+        )
       setUnreadCount(page.unreadCount)
       setNextCursor(page.nextCursor)
     } catch (reason) {
@@ -142,6 +158,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const markRead = useCallback(
     async (notificationId: string) => {
       const updated = await watchApi.markNotificationRead(notificationId)
+      notificationUnreadStateRef.current.set(updated.id, false)
       setItems((current) =>
         statusRef.current === "unread"
           ? current.filter((notification) => notification.id !== updated.id)
@@ -172,6 +189,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           )
     )
     setUnreadCount(0)
+    for (const id of notificationUnreadStateRef.current.keys())
+      notificationUnreadStateRef.current.set(id, false)
     return result.updated
   }, [])
 
@@ -213,20 +232,43 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribeNotification = subscribeNotifications((notification) => {
-      if (streamedNotificationIdsRef.current.has(notification.id)) return
-      streamedNotificationIdsRef.current.add(notification.id)
-      setUnreadCount((current) => current + (notification.readAt ? 0 : 1))
+      const version = `${notification.lastOccurredAt}:${notification.readAt ?? ""}:${notification.resolvedAt ?? ""}`
       if (
-        statusRef.current === "all" ||
-        (statusRef.current === "unread" && !notification.readAt) ||
-        (statusRef.current === "resolved" && notification.resolvedAt)
-      ) {
-        setItems((current) =>
-          current.some((item) => item.id === notification.id)
-            ? current
-            : [notification, ...current]
+        streamedNotificationVersionsRef.current.get(notification.id) === version
+      )
+        return
+      streamedNotificationVersionsRef.current.set(notification.id, version)
+      const previousUnread = notificationUnreadStateRef.current.get(
+        notification.id
+      )
+      const nextUnread = !notification.readAt
+      if (nextUnread && previousUnread === false)
+        setUnreadCount((count) => count + 1)
+      else if (!nextUnread && previousUnread === true)
+        setUnreadCount((count) => Math.max(0, count - 1))
+      else if (
+        nextUnread &&
+        previousUnread === undefined &&
+        (notification.occurrenceCount ?? 1) === 1
+      )
+        setUnreadCount((count) => count + 1)
+      notificationUnreadStateRef.current.set(notification.id, nextUnread)
+      setItems((current) => {
+        const requiresAction = notificationRequiresAction(notification.type)
+        const visible =
+          statusRef.current === "all" ||
+          (statusRef.current === "unread" && !notification.readAt) ||
+          (statusRef.current === "pending" &&
+            requiresAction &&
+            !notification.resolvedAt) ||
+          (statusRef.current === "resolved" &&
+            requiresAction &&
+            Boolean(notification.resolvedAt))
+        const withoutCurrent = current.filter(
+          (item) => item.id !== notification.id
         )
-      }
+        return visible ? [notification, ...withoutCurrent] : withoutCurrent
+      })
 
       const currentPreference = preferenceRef.current
       if (
@@ -237,8 +279,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       )
         return
 
-      const browserNotification = new window.Notification(notification.title, {
-        body: notification.message,
+      const presentation = notificationPresentation(notification)
+      const browserNotification = new window.Notification(presentation.title, {
+        body: presentation.message,
         tag: notification.id,
       })
       browserNotification.onclick = () => {

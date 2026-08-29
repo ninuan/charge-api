@@ -2,14 +2,12 @@
 
 import {
   BellRingIcon,
-  CalendarClockIcon,
   CheckCircle2Icon,
   Clock3Icon,
   GaugeIcon,
   HistoryIcon,
   LoaderCircleIcon,
   MoonIcon,
-  PencilIcon,
   PlusIcon,
   PowerOffIcon,
   RotateCwIcon,
@@ -18,10 +16,15 @@ import {
   XCircleIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import type { WatchEditorTarget } from "@/components/watch-rule-dialog"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -85,11 +88,9 @@ import type { Pile } from "@/lib/types"
 import { useWatch } from "@/lib/watch-context"
 import {
   formatCompletionReason,
-  estimatedRecurringChecks,
   formatNextCheck,
   formatPowerWindow,
   formatRemainingTime,
-  formatRuleSchedule,
   formatWatchTimestamp,
   minutesToTime,
   temporaryDurationOptions,
@@ -104,6 +105,8 @@ function pileLabel(piles: Pile[], deviceId: string) {
 function ruleLabel() {
   return "整桩任意端口空闲时提醒"
 }
+
+const recurringRetirementNoticeKey = "charge:recurring-reminders-retired:v1"
 
 function QuietHoursForm({
   preference,
@@ -124,7 +127,9 @@ function QuietHoursForm({
     const startMinute = timeToMinutes(start)
     const endMinute = timeToMinutes(end)
     if (startMinute == null || endMinute == null) {
-      toast.error("请选择有效的免打扰时段")
+      notify.warning("请选择有效的免打扰时段", {
+        id: "quiet-hours-validation",
+      })
       return
     }
     setSaving(true)
@@ -135,9 +140,9 @@ function QuietHoursForm({
         quietEndMinute: endMinute,
         timezone: "Asia/Shanghai",
       })
-      toast.success("免打扰设置已保存")
+      notify.success("免打扰设置已保存")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "保存免打扰设置失败" })
     } finally {
       setSaving(false)
     }
@@ -153,7 +158,7 @@ function QuietHoursForm({
               启用免打扰
             </FieldLabel>
             <FieldDescription>
-              开启后，这段时间只保留站内通知，不弹出浏览器或微信提醒。
+              开启后，这段时间不弹出网页或微信提醒，消息仍会保留在通知中心。
             </FieldDescription>
           </FieldContent>
           <Switch
@@ -188,7 +193,7 @@ function QuietHoursForm({
           {saving ? (
             <LoaderCircleIcon
               data-icon="inline-start"
-              className="animate-spin"
+              className="motion-safe:animate-spin"
             />
           ) : null}
           {saving ? "保存中…" : "保存免打扰设置"}
@@ -215,6 +220,7 @@ export function WatchManagementSheet({
     preference,
     loading,
     loaded,
+    error,
     load,
     updateRule,
     deleteRule,
@@ -229,10 +235,18 @@ export function WatchManagementSheet({
   const [extendDuration, setExtendDuration] =
     useState<WatchTemporaryDuration>("4h")
   const [now, setNow] = useState(() => Date.now())
+  const [
+    recurringRetirementNoticeDismissed,
+    setRecurringRetirementNoticeDismissed,
+  ] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(recurringRetirementNoticeKey) === "1"
+  )
 
   useEffect(() => {
     if (open && !loaded && !loading) {
-      void load().catch((reason) => toast.error((reason as Error).message))
+      void load().catch(() => undefined)
     }
   }, [load, loaded, loading, open])
 
@@ -275,16 +289,9 @@ export function WatchManagementSheet({
     })
   }
 
-  async function toggleRecurringRule(rule: WatchRule, enabled: boolean) {
-    setRulePending(rule.id, true)
-    try {
-      await updateRule(rule.id, { enabled })
-      toast.success(enabled ? "固定时段提醒已启用" : "固定时段提醒已停用")
-    } catch (reason) {
-      toast.error((reason as Error).message)
-    } finally {
-      setRulePending(rule.id, false)
-    }
+  function dismissRecurringRetirementNotice() {
+    window.localStorage.setItem(recurringRetirementNoticeKey, "1")
+    setRecurringRetirementNoticeDismissed(true)
   }
 
   async function confirmCancel() {
@@ -294,9 +301,9 @@ export function WatchManagementSheet({
     try {
       await updateRule(candidate.id, { cancel: true })
       setCancelCandidate(null)
-      toast.success("临时提醒已取消")
+      notify.success("临时提醒已取消")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "取消临时提醒失败" })
     } finally {
       setRulePending(candidate.id, false)
     }
@@ -309,9 +316,9 @@ export function WatchManagementSheet({
     try {
       await updateRule(candidate.id, { duration: extendDuration })
       setExtendCandidate(null)
-      toast.success("临时提醒已延长")
+      notify.success("临时提醒已延长")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "延长临时提醒失败" })
     } finally {
       setRulePending(candidate.id, false)
     }
@@ -324,9 +331,9 @@ export function WatchManagementSheet({
     try {
       await deleteRule(candidate.id)
       setDeleteCandidate(null)
-      toast.success("提醒记录已删除")
+      notify.success("提醒记录已删除")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "删除提醒记录失败" })
     } finally {
       setRulePending(candidate.id, false)
     }
@@ -351,6 +358,28 @@ export function WatchManagementSheet({
           </SheetHeader>
 
           <div className="flex flex-col gap-5 p-4 sm:p-6">
+            {error ? (
+              <Alert urgent variant="destructive" className="pr-24">
+                <XCircleIcon />
+                <AlertTitle>提醒设置暂时无法加载</AlertTitle>
+                <AlertDescription>
+                  请检查网络后重试，已有提醒不会因此被删除。
+                  <details className="mt-1 text-xs">
+                    <summary className="cursor-pointer">查看详情</summary>
+                    <span className="break-words">{error}</span>
+                  </details>
+                </AlertDescription>
+                <AlertAction>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void load()}
+                  >
+                    重试
+                  </Button>
+                </AlertAction>
+              </Alert>
+            ) : null}
             {loading && !loaded ? (
               <div className="grid gap-3 sm:grid-cols-3">
                 <Skeleton className="h-24" />
@@ -390,11 +419,31 @@ export function WatchManagementSheet({
               </Alert>
             ) : null}
 
+            {recurringRules.length > 0 &&
+            !recurringRetirementNoticeDismissed ? (
+              <Alert className="pr-24">
+                <Clock3Icon />
+                <AlertTitle>长期提醒已停用</AlertTitle>
+                <AlertDescription>
+                  旧设置已经停止后台检查。需要充电时，请重新开启临时提醒。
+                </AlertDescription>
+                <AlertAction>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={dismissRecurringRetirementNotice}
+                  >
+                    知道了
+                  </Button>
+                </AlertAction>
+              </Alert>
+            ) : null}
+
             <Tabs defaultValue="tasks">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="tasks">
                   <BellRingIcon data-icon="inline-start" />
-                  提醒任务
+                  空闲提醒
                 </TabsTrigger>
                 <TabsTrigger value="settings">
                   <Settings2Icon data-icon="inline-start" />
@@ -423,7 +472,7 @@ export function WatchManagementSheet({
                       size="sm"
                       className="w-full sm:w-auto"
                       disabled={piles.length === 0}
-                      onClick={() => onEditRule({ mode: "temporary" })}
+                      onClick={() => onEditRule({})}
                     >
                       <PlusIcon data-icon="inline-start" />
                       开始临时提醒
@@ -446,7 +495,7 @@ export function WatchManagementSheet({
                       <EmptyContent>
                         <Button
                           disabled={piles.length === 0}
-                          onClick={() => onEditRule({ mode: "temporary" })}
+                          onClick={() => onEditRule({})}
                         >
                           <BellRingIcon data-icon="inline-start" />
                           有空闲时提醒我
@@ -499,7 +548,7 @@ export function WatchManagementSheet({
                             <p className="mt-1 font-medium tabular-nums">
                               {rule.estimatedRemainingChecks != null
                                 ? `最多约 ${rule.estimatedRemainingChecks} 次`
-                                : "按调度情况计算"}
+                                : "等待下次检查"}
                             </p>
                           </div>
                         </CardContent>
@@ -525,7 +574,7 @@ export function WatchManagementSheet({
                             {pending ? (
                               <LoaderCircleIcon
                                 data-icon="inline-start"
-                                className="animate-spin"
+                                className="motion-safe:animate-spin"
                               />
                             ) : (
                               <XCircleIcon data-icon="inline-start" />
@@ -580,116 +629,6 @@ export function WatchManagementSheet({
                     </div>
                   ) : null}
                 </section>
-
-                <section
-                  className="flex flex-col gap-3 border-t pt-5"
-                  aria-labelledby="recurring-reminders-title"
-                >
-                  <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3
-                        id="recurring-reminders-title"
-                        className="font-medium"
-                      >
-                        固定时段提醒（高级）
-                      </h3>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        每周长期重复运行，适合固定需求。
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full sm:w-auto"
-                      disabled={piles.length === 0}
-                      onClick={() => onEditRule({ mode: "recurring" })}
-                    >
-                      <PlusIcon data-icon="inline-start" />
-                      添加固定提醒
-                    </Button>
-                  </div>
-
-                  {recurringRules.length === 0 ? (
-                    <p className="rounded-lg border border-dashed px-4 py-5 text-sm text-muted-foreground">
-                      没有固定时段提醒。普通使用建议开启上方的临时提醒。
-                    </p>
-                  ) : (
-                    recurringRules.map((rule) => {
-                      const pending = pendingRuleIds.has(rule.id)
-                      return (
-                        <Card key={rule.id} size="sm">
-                          <CardHeader>
-                            <CardTitle>
-                              {pileLabel(piles, rule.deviceId)}
-                            </CardTitle>
-                            <CardDescription>{ruleLabel()}</CardDescription>
-                            <CardAction>
-                              <Switch
-                                size="sm"
-                                aria-label={
-                                  rule.enabled
-                                    ? "停用固定时段提醒"
-                                    : "启用固定时段提醒"
-                                }
-                                checked={rule.enabled}
-                                disabled={pending}
-                                onCheckedChange={(enabled) =>
-                                  void toggleRecurringRule(rule, enabled)
-                                }
-                              />
-                            </CardAction>
-                          </CardHeader>
-                          <CardContent className="flex flex-wrap items-center gap-2">
-                            <Badge variant="secondary">
-                              <CalendarClockIcon />
-                              固定时段
-                            </Badge>
-                            <Badge
-                              variant={rule.enabled ? "default" : "outline"}
-                            >
-                              {rule.enabled ? "已启用" : "已停用"}
-                            </Badge>
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <CalendarClockIcon className="size-3.5" />
-                              {formatRuleSchedule(rule)}
-                            </span>
-                            {overview ? (
-                              <span className="text-xs text-muted-foreground">
-                                生效日最多约{" "}
-                                {estimatedRecurringChecks(
-                                  rule.activeStartMinute,
-                                  rule.activeEndMinute,
-                                  overview.refreshIntervalMinutes
-                                )}{" "}
-                                次
-                              </span>
-                            ) : null}
-                          </CardContent>
-                          <CardFooter className="justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={pending}
-                              onClick={() => onEditRule({ ruleId: rule.id })}
-                            >
-                              <PencilIcon data-icon="inline-start" />
-                              编辑
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={pending}
-                              onClick={() => setDeleteCandidate(rule)}
-                            >
-                              <Trash2Icon data-icon="inline-start" />
-                              删除
-                            </Button>
-                          </CardFooter>
-                        </Card>
-                      )
-                    })
-                  )}
-                </section>
               </TabsContent>
 
               <TabsContent
@@ -700,7 +639,7 @@ export function WatchManagementSheet({
                   <CardHeader>
                     <CardTitle>免打扰时段</CardTitle>
                     <CardDescription>
-                      在这段时间只保留站内通知，不弹出浏览器或微信提醒。
+                      在这段时间不弹出网页或微信提醒，消息仍会保留在通知中心。
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -721,7 +660,7 @@ export function WatchManagementSheet({
                     <CardHeader>
                       <CardTitle>后台检查安排</CardTitle>
                       <CardDescription>
-                        只会检查仍在运行的提醒任务。
+                        只会检查仍在等待空闲口的充电桩。
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -850,7 +789,7 @@ export function WatchManagementSheet({
               {deleteCandidate
                 ? `${pileLabel(piles, deleteCandidate.deviceId)} · ${ruleLabel()}，`
                 : "这条提醒"}
-              将从列表移除，已有站内通知不会删除。
+              会从提醒列表移除，已收到的消息仍会保留在通知中心。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -11,7 +11,7 @@ import {
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { AdminHealthStatus } from "@/components/admin-health-status"
 import { AppShell } from "@/components/app-shell"
@@ -227,8 +227,16 @@ function AdminPageContent() {
         adminApi.health().then((nextHealth) => setHealth(nextHealth)),
         tabLoad,
       ])
+      notify.dismissBanner("admin-data-load")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "数据加载失败",
+        persistent: true,
+        bannerId: "admin-data-load",
+        description: "当前管理数据可能不是最新状态，请检查网络后重试。",
+        details: reason instanceof Error ? reason.message : undefined,
+        action: { label: "重试", onClick: () => void load() },
+      })
     } finally {
       setLoading(false)
     }
@@ -248,16 +256,21 @@ function AdminPageContent() {
   async function createUser(event: React.FormEvent) {
     event.preventDefault()
     if (form.username.trim().length < 3 || form.password.length < 8)
-      return toast.error("用户名至少 3 位，密码至少 8 位")
+      return notify.warning("请检查账户信息", {
+        description: "用户名至少 3 位，初始密码至少 8 位。",
+        id: "admin-create-user-validation",
+      })
 
     try {
       await adminApi.createUser({ ...form, username: form.username.trim() })
       setCreateOpen(false)
       setForm({ username: "", password: "", role: "user" })
-      toast.success("用户已创建")
+      notify.success("用户已创建", {
+        description: `已创建账户 ${form.username.trim()}。`,
+      })
       await loadUsers({ ...query, page: 1 })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "创建用户失败" })
     }
   }
 
@@ -359,7 +372,9 @@ function AdminPageContent() {
             disabled={loading}
             onClick={() => void load()}
           >
-            <RefreshCwIcon className={loading ? "animate-spin" : ""} />
+            <RefreshCwIcon
+              className={loading ? "motion-safe:animate-spin" : ""}
+            />
             刷新数据
           </Button>
         </div>
@@ -399,7 +414,10 @@ function AdminPageContent() {
           onTrendRangeChange={setTrendRange}
           onTrendReload={() => {
             void loadOverview().catch((reason) =>
-              toast.error((reason as Error).message)
+              notify.error(reason, {
+                title: "趋势加载失败",
+                id: "admin-trend-load",
+              })
             )
           }}
           onUser={(id) => {

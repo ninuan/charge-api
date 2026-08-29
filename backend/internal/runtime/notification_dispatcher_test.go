@@ -123,6 +123,9 @@ func TestNotificationDispatcherStopsConfirmingAfterProviderStatusTimeout(t *test
 		delivery.NextAttemptAt != nil || client.sendCalls != 1 || client.queryCalls != 3 {
 		t.Fatalf("timed out confirmation=%+v send=%d query=%d", delivery, client.sendCalls, client.queryCalls)
 	}
+	if delivery.UserState() != model.NotificationDeliveryUserSubmitted {
+		t.Fatalf("accepted delivery lost its submitted user state: %+v", delivery)
+	}
 }
 
 func TestNotificationDispatcherFailureDoesNotRemoveInAppNotification(t *testing.T) {

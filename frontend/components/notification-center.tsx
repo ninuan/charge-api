@@ -14,9 +14,14 @@ import {
   ZapIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -41,31 +46,51 @@ import type {
   NotificationStatusFilter,
 } from "@/lib/api/generated"
 import { useNotifications } from "@/lib/notification-context"
+import {
+  notificationPresentation,
+  notificationRequiresAction,
+} from "@/lib/notification-semantics"
 import type { Pile } from "@/lib/types"
 import { useWatch } from "@/lib/watch-context"
 import { formatPowerWindow } from "@/lib/watch-format"
 import { WxPusherChannelCard } from "@/components/wxpusher-channel-card"
+import { LeadingIcon } from "@/components/leading-icon"
+
+const browserSettingLayout =
+  "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 p-4 [&>[data-slot=leading-icon]]:row-span-2"
 
 const typeMeta = {
   pile_available: {
-    label: "整桩有空闲",
+    label: "有空闲充电口",
     icon: ZapIcon,
     tone: "text-success",
+    source: "空闲提醒",
+    action: "查看空闲口",
+    advice: "现在有空闲口，可以前往充电。",
   },
   credential_expired: {
-    label: "凭据失效",
+    label: "需要重新登录",
     icon: KeyRoundIcon,
     tone: "text-destructive",
+    source: "账户提醒",
+    action: "重新扫码",
+    advice: "重新扫码后，充电桩状态和空闲提醒会继续更新。",
   },
   pile_offline: {
-    label: "充电桩离线",
+    label: "充电桩无法连接",
     icon: WifiOffIcon,
     tone: "text-warning-foreground",
+    source: "连接提醒",
+    action: "查看充电桩",
+    advice: "请稍后重试；正常供电后仍无法连接时，可以联系管理员。",
   },
   pile_recovered: {
-    label: "充电桩恢复",
+    label: "充电桩恢复连接",
     icon: CheckCheckIcon,
     tone: "text-success",
+    source: "连接提醒",
+    action: "查看充电桩",
+    advice: "充电桩已经恢复，可以查看最新充电口状态。",
   },
 } as const
 
@@ -75,7 +100,8 @@ const statusOptions: Array<{
 }> = [
   { value: "all", label: "全部" },
   { value: "unread", label: "未读" },
-  { value: "resolved", label: "已解决" },
+  { value: "pending", label: "需处理" },
+  { value: "resolved", label: "已恢复" },
 ]
 
 function formatNotificationTime(value: string) {
@@ -105,10 +131,14 @@ function BrowserNotificationSetting() {
     setPending(true)
     try {
       const permission = await requestBrowserPermission()
-      if (permission === "granted") toast.success("浏览器通知已开启")
-      else if (permission === "denied") toast.error("浏览器拒绝了通知权限")
+      if (permission === "granted") notify.success("浏览器通知已开启")
+      else if (permission === "denied")
+        notify.warning("通知权限未开启", {
+          description: "请在浏览器的网站设置中允许通知。",
+          id: "browser-notification-permission",
+        })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "申请通知权限失败" })
     } finally {
       setPending(false)
     }
@@ -119,10 +149,13 @@ function BrowserNotificationSetting() {
     try {
       const applied = await setBrowserEnabled(next)
       if (next && !applied && browserPermission === "denied")
-        toast.error("请先在浏览器的网站设置中允许通知")
-      else toast.success(applied ? "浏览器通知已开启" : "浏览器通知已关闭")
+        notify.warning("通知权限未开启", {
+          description: "请先在浏览器的网站设置中允许通知。",
+          id: "browser-notification-permission",
+        })
+      else notify.success(applied ? "浏览器通知已开启" : "浏览器通知已关闭")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "更新浏览器通知失败" })
     } finally {
       setPending(false)
     }
@@ -130,33 +163,33 @@ function BrowserNotificationSetting() {
 
   if (browserPermission === "unsupported")
     return (
-      <Alert>
-        <BellOffIcon />
+      <Alert className={browserSettingLayout}>
+        <LeadingIcon icon={BellOffIcon} />
         <AlertTitle>当前浏览器不支持网页通知</AlertTitle>
         <AlertDescription>
-          站内通知仍会完整保存，可以随时从右上角通知中心查看。
+          消息仍会保留在通知中心，可以随时从右上角查看。
         </AlertDescription>
       </Alert>
     )
 
   if (browserPermission === "denied")
     return (
-      <Alert variant="destructive">
-        <BellOffIcon />
+      <Alert variant="destructive" className={browserSettingLayout}>
+        <LeadingIcon icon={BellOffIcon} className="bg-destructive/10" />
         <AlertTitle>浏览器通知权限已被拒绝</AlertTitle>
         <AlertDescription>
-          请在浏览器的网站通知设置中开启权限。站内通知仍可正常查看。
+          请在浏览器的网站通知设置中开启权限，消息仍可在通知中心查看。
         </AlertDescription>
       </Alert>
     )
 
   if (browserPermission === "default")
     return (
-      <Alert className="pr-28">
-        <BellIcon />
-        <AlertTitle>在网页打开时接收即时提醒</AlertTitle>
+      <Alert className={`${browserSettingLayout} pr-28`}>
+        <LeadingIcon icon={BellIcon} className="bg-primary/10 text-primary" />
+        <AlertTitle>网页开着时提醒我</AlertTitle>
         <AlertDescription>
-          开启后，网页保持打开时会弹出空闲和异常提醒。
+          只要此网页保持打开，就会弹出空闲口和账户异常提醒。
         </AlertDescription>
         <div className="absolute top-2 right-2">
           <Button
@@ -164,7 +197,9 @@ function BrowserNotificationSetting() {
             disabled={pending}
             onClick={() => void requestPermission()}
           >
-            {pending ? <LoaderCircleIcon className="animate-spin" /> : null}
+            {pending ? (
+              <LoaderCircleIcon className="motion-safe:animate-spin" />
+            ) : null}
             允许通知
           </Button>
         </div>
@@ -172,13 +207,13 @@ function BrowserNotificationSetting() {
     )
 
   return (
-    <Alert>
-      <BellIcon />
+    <Alert className={browserSettingLayout}>
+      <LeadingIcon icon={BellIcon} className="bg-primary/10 text-primary" />
       <AlertTitle className="flex items-center justify-between gap-3">
-        <span>浏览器即时提醒</span>
+        <span>网页提醒</span>
         <Switch
           size="sm"
-          aria-label="浏览器即时提醒"
+          aria-label="网页提醒"
           checked={enabled}
           disabled={pending || !preference}
           onCheckedChange={(next) => void toggle(next)}
@@ -186,8 +221,8 @@ function BrowserNotificationSetting() {
       </AlertTitle>
       <AlertDescription>
         {preference?.quietHoursEnabled
-          ? `${formatPowerWindow(preference.quietStartMinute, preference.quietEndMinute)} 浏览器即时提醒暂停，站内通知仍会保留。`
-          : "浏览器提醒已开启。网页打开时会及时通知你。"}
+          ? `${formatPowerWindow(preference.quietStartMinute, preference.quietEndMinute)} 暂停弹窗，消息仍会保留在通知中心。`
+          : "网页保持打开时，有空闲口或账户问题会及时提醒你。"}
       </AlertDescription>
     </Alert>
   )
@@ -206,36 +241,37 @@ function NotificationItem({
   const meta = typeMeta[notification.type]
   const Icon = meta.icon
   const targetPile = pileLabel(piles, notification.deviceId)
+  const requiresAction = notificationRequiresAction(notification.type)
+  const presentation = notificationPresentation(notification)
 
   async function openTarget() {
     try {
       if (!notification.readAt) await markRead(notification.id)
       onNavigate(notification)
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "暂时无法打开通知",
+        description: "请稍后再试，通知仍保留在这里。",
+      })
     }
   }
 
   return (
     <article
-      className={`notification-item-enter rounded-xl border bg-card transition-colors duration-200 ${
+      className={`rounded-xl border bg-card transition-colors duration-200 ${
         notification.readAt ? "" : "border-primary/25 bg-primary/3"
       }`}
     >
       <button
         type="button"
-        className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] gap-3 p-4 text-left"
+        className="grid w-full grid-cols-[auto_minmax(0,1fr)] gap-3 p-4 text-left"
         onClick={() => void openTarget()}
       >
-        <span
-          className={`mt-0.5 grid size-9 place-items-center rounded-lg bg-muted ${meta.tone}`}
-        >
-          <Icon className="size-4" />
-        </span>
+        <LeadingIcon icon={Icon} className={meta.tone} />
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-2">
             <strong className="text-sm font-semibold">
-              {notification.title}
+              {presentation.title}
             </strong>
             {!notification.readAt ? (
               <span
@@ -245,10 +281,10 @@ function NotificationItem({
             ) : null}
           </span>
           <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-            {notification.message}
+            {presentation.message}
           </span>
           <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{formatNotificationTime(notification.createdAt)}</span>
+            <span>来源：{meta.source}</span>
             {targetPile ? (
               <span className="inline-flex items-center gap-1">
                 <MapPinIcon className="size-3" />
@@ -259,14 +295,39 @@ function NotificationItem({
               <span>{notification.portId} 号充电口</span>
             ) : null}
           </span>
-          <span className="mt-2 flex flex-wrap gap-1.5">
+          <span
+            key={`${notification.lastOccurredAt}-${notification.readAt}-${notification.resolvedAt}`}
+            className="feedback-status-change mt-2 flex flex-wrap gap-1.5"
+          >
             <Badge variant="outline">{meta.label}</Badge>
-            {notification.resolvedAt ? (
-              <Badge variant="secondary">已解决</Badge>
+            {!notification.readAt ? <Badge>未读</Badge> : null}
+            {requiresAction ? (
+              notification.resolvedAt ? (
+                <Badge variant="secondary">已恢复</Badge>
+              ) : (
+                <Badge variant="outline">需处理</Badge>
+              )
+            ) : null}
+            {notification.occurrenceCount > 1 ? (
+              <Badge variant="outline">
+                重复 {notification.occurrenceCount} 次
+              </Badge>
             ) : null}
           </span>
+          <span className="mt-2 block text-xs leading-5 text-muted-foreground">
+            发生时间：{formatNotificationTime(notification.createdAt)}
+            {notification.occurrenceCount > 1
+              ? ` · 最近一次：${formatNotificationTime(notification.lastOccurredAt)}`
+              : ""}
+          </span>
+          <span className="mt-2 block text-xs leading-5">
+            建议：{meta.advice}
+          </span>
+          <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
+            {meta.action}
+            <ChevronRightIcon className="size-3" />
+          </span>
         </span>
-        <ChevronRightIcon className="mt-2 size-4 text-muted-foreground" />
       </button>
     </article>
   )
@@ -300,37 +361,36 @@ export function NotificationCenter({
   )
 
   useEffect(() => {
-    if (open && !loaded && !loading)
-      void load().catch((reason) => toast.error((reason as Error).message))
+    if (open && !loaded && !loading) void load().catch(() => undefined)
   }, [load, loaded, loading, open])
 
   async function selectStatus(value: string) {
     try {
       await load(value as NotificationStatusFilter)
-    } catch (reason) {
-      toast.error((reason as Error).message)
+    } catch {
+      return
     }
   }
 
   async function readAll() {
     try {
       const updated = await markAllRead()
-      toast.success(
-        updated ? `已将 ${updated} 条通知标记为已读` : "没有未读通知"
-      )
+      notify.success(updated ? "通知已全部标记为已读" : "没有未读通知", {
+        description: updated ? `本次更新 ${updated} 条通知。` : undefined,
+      })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "标记通知失败" })
     }
   }
 
   async function removeResolved() {
     try {
       const deleted = await clearResolved()
-      toast.success(
-        deleted ? `已清理 ${deleted} 条已解决通知` : "没有可清理的通知"
-      )
+      notify.success(deleted ? "已解决通知已清理" : "没有可清理的通知", {
+        description: deleted ? `本次清理 ${deleted} 条通知。` : undefined,
+      })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "清理通知失败" })
     }
   }
 
@@ -367,7 +427,7 @@ export function NotificationCenter({
               ) : null}
             </SheetTitle>
             <SheetDescription>
-              整桩空闲、凭据和设备异常会持久化保存在这里。
+              空闲口、重新登录和充电桩连接消息都会保留在这里。
             </SheetDescription>
           </SheetHeader>
 
@@ -381,7 +441,7 @@ export function NotificationCenter({
                 value={status}
                 onValueChange={(value) => void selectStatus(value)}
               >
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-4">
                   {statusOptions.map((option) => (
                     <TabsTrigger key={option.value} value={option.value}>
                       {option.label}
@@ -405,16 +465,31 @@ export function NotificationCenter({
                   onClick={() => void removeResolved()}
                 >
                   <Trash2Icon />
-                  清理已解决
+                  清理已恢复
                 </Button>
               </div>
             </div>
 
             {error ? (
-              <Alert variant="destructive">
+              <Alert urgent variant="destructive" className="pr-24">
                 <CircleAlertIcon />
                 <AlertTitle>通知加载失败</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>
+                  当前无法更新通知，请检查网络后重试。
+                  <details className="mt-1 text-xs">
+                    <summary className="cursor-pointer">查看详情</summary>
+                    <span className="break-words">{error}</span>
+                  </details>
+                </AlertDescription>
+                <AlertAction>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void load()}
+                  >
+                    重试
+                  </Button>
+                </AlertAction>
               </Alert>
             ) : null}
 
@@ -446,12 +521,14 @@ export function NotificationCenter({
                   <EmptyTitle>
                     {status === "unread"
                       ? "没有未读通知"
-                      : status === "resolved"
-                        ? "没有已解决通知"
-                        : "暂时没有通知"}
+                      : status === "pending"
+                        ? "没有需要处理的通知"
+                        : status === "resolved"
+                          ? "没有已恢复的问题"
+                          : "暂时没有通知"}
                   </EmptyTitle>
                   <EmptyDescription>
-                    设置空闲提醒后，有空闲充电口或需要处理的问题时会在这里通知你。
+                    开启空闲提醒后，有空闲口或账户需要处理时会在这里通知你。
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -463,12 +540,15 @@ export function NotificationCenter({
                 disabled={loadingMore}
                 onClick={() =>
                   void loadMore().catch((reason) =>
-                    toast.error((reason as Error).message)
+                    notify.error(reason, {
+                      title: "加载更早通知失败",
+                      id: "notification-load-more",
+                    })
                   )
                 }
               >
                 {loadingMore ? (
-                  <LoaderCircleIcon className="animate-spin" />
+                  <LoaderCircleIcon className="motion-safe:animate-spin" />
                 ) : null}
                 {loadingMore ? "加载中…" : "加载更早通知"}
               </Button>

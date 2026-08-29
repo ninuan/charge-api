@@ -115,8 +115,11 @@ describe("NotificationProvider", () => {
     expect(result.current.unreadCount).toBe(2)
     expect(result.current.items[0].id).toBe("notice-2")
     expect(MockBrowserNotification.instances[0]).toMatchObject({
-      title: "松园充电桩有空闲口",
-      options: expect.objectContaining({ tag: "notice-2" }),
+      title: "3 号充电口空闲了",
+      options: expect.objectContaining({
+        body: "整桩出现至少一个空闲充电口",
+        tag: "notice-2",
+      }),
     })
 
     act(() => {
@@ -143,5 +146,32 @@ describe("NotificationProvider", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("only streams actionable notifications into the pending filter", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ items: [], unreadCount: 0 }))
+    )
+    const { result } = renderHook(() => useNotifications(), { wrapper })
+    await act(() => result.current.load("pending"))
+
+    act(() => {
+      mocks.notificationListener?.({
+        ...initialNotice,
+        id: "notice-information",
+      } as never)
+    })
+    expect(result.current.items).toHaveLength(0)
+
+    act(() => {
+      mocks.notificationListener?.({
+        ...initialNotice,
+        id: "notice-problem",
+        type: "pile_offline",
+      } as never)
+    })
+    expect(result.current.items.map((item) => item.id)).toEqual([
+      "notice-problem",
+    ])
   })
 })

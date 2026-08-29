@@ -18,6 +18,7 @@ import {
 } from "react"
 
 import { Button } from "@/components/ui/button"
+import { GlobalFeedbackBanner } from "@/components/global-feedback-banner"
 import {
   Alert,
   AlertAction,
@@ -122,130 +123,138 @@ export function AppShell({
   return (
     <AppShellMenuContext.Provider value={closeMenu}>
       <div className="min-h-dvh bg-muted/35 text-foreground">
-      <a
-        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2"
-        href="#main-content"
-      >
-        跳到主要内容
-      </a>
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-              C
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight">
-                Charge Console
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                充电设施运营中心
-              </p>
+        <a
+          className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2"
+          href="#main-content"
+        >
+          跳到主要内容
+        </a>
+        <header
+          data-slot="app-header"
+          className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur"
+        >
+          <div className="mx-auto flex h-(--app-header-height) max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+                C
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold tracking-tight">
+                  Charge Console
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  充电设施运营中心
+                </p>
+              </div>
+            </div>
+            <div className="ml-auto hidden items-center gap-3 md:flex">
+              {actions}
+            </div>
+            {notificationAction ? (
+              <div className="ml-auto shrink-0 md:ml-0">
+                {notificationAction}
+              </div>
+            ) : null}
+            <div className="hidden items-center gap-3 md:flex">
+              {identity}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleLogout()}
+              >
+                <LogOutIcon />
+                退出
+              </Button>
+            </div>
+            <div
+              className={`items-center gap-1 md:hidden ${
+                notificationAction ? "flex" : "ml-auto flex"
+              }`}
+            >
+              <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+                <SheetTrigger
+                  render={
+                    <Button variant="ghost" size="icon" aria-label="打开菜单" />
+                  }
+                >
+                  <MenuIcon />
+                </SheetTrigger>
+                <SheetContent
+                  side="right"
+                  className="w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-5"
+                >
+                  <SheetTitle className="pr-8">账户与操作</SheetTitle>
+                  <div className="mt-6 grid gap-5">
+                    {identity}
+                    <section className="grid gap-2 border-b pb-5">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        当前页面
+                      </p>
+                      <div
+                        className="grid gap-2"
+                        onClick={(event) => {
+                          if (
+                            event.target instanceof Element &&
+                            event.target.closest("button, a")
+                          ) {
+                            const action = event.target.closest("button, a")
+                            if (
+                              action?.getAttribute("aria-haspopup") === "dialog"
+                            )
+                              return
+                            setMenuOpen(false)
+                          }
+                        }}
+                      >
+                        {actions}
+                      </div>
+                    </section>
+                    <section className="grid gap-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        账户操作
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="w-full border-destructive/25 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => void handleLogout()}
+                      >
+                        <LogOutIcon />
+                        退出登录
+                      </Button>
+                    </section>
+                  </div>
+                </SheetContent>
+              </Sheet>
             </div>
           </div>
-          <div className="ml-auto hidden items-center gap-3 md:flex">
-            {actions}
-          </div>
-          {notificationAction ? (
-            <div className="ml-auto shrink-0 md:ml-0">{notificationAction}</div>
-          ) : null}
-          <div className="hidden items-center gap-3 md:flex">
-            {identity}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void handleLogout()}
-            >
-              <LogOutIcon />
-              退出
-            </Button>
-          </div>
-          <div
-            className={`items-center gap-1 md:hidden ${
-              notificationAction ? "flex" : "ml-auto flex"
-            }`}
-          >
-            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-              <SheetTrigger
-                render={
-                  <Button variant="ghost" size="icon" aria-label="打开菜单" />
-                }
-              >
-                <MenuIcon />
-              </SheetTrigger>
-              <SheetContent
-                side="right"
-                className="w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-5"
-              >
-                <SheetTitle className="pr-8">账户与操作</SheetTitle>
-                <div className="mt-6 grid gap-5">
-                  {identity}
-                  <section className="grid gap-2 border-b pb-5">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      当前页面
-                    </p>
-                    <div
-                      className="grid gap-2"
-                      onClick={(event) => {
-                        if (
-                          event.target instanceof Element &&
-                          event.target.closest("button, a")
-                        ) {
-                          const action = event.target.closest("button, a")
-                          if (action?.getAttribute("aria-haspopup") === "dialog")
-                            return
-                          setMenuOpen(false)
-                        }
-                      }}
-                    >
-                      {actions}
-                    </div>
-                  </section>
-                  <section className="grid gap-2">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      账户操作
-                    </p>
-                    <Button
-                      variant="outline"
-                      className="w-full border-destructive/25 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => void handleLogout()}
-                    >
-                      <LogOutIcon />
-                      退出登录
-                    </Button>
-                  </section>
-                </div>
-              </SheetContent>
-            </Sheet>
-          </div>
-        </div>
-      </header>
-      <main
-        id="main-content"
-        className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-6"
-      >
-        {currentUser?.mustChangePassword && (
-          <Alert className="mb-4 border-warning/40 bg-warning/10 pr-28">
-            <KeyRoundIcon />
-            <AlertTitle>当前使用的是管理员生成的临时密码</AlertTitle>
-            <AlertDescription>
-              请立即修改为只有你本人知道的新密码。完成修改前，每次登录都会显示此提醒。
-            </AlertDescription>
-            <AlertAction>
-              <Button
-                size="sm"
-                onClick={() =>
-                  router.push(isAdmin ? "/admin" : "/account#change-password")
-                }
-              >
-                修改密码
-              </Button>
-            </AlertAction>
-          </Alert>
-        )}
-        {heading}
-        {children}
-      </main>
+        </header>
+        <main
+          id="main-content"
+          className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-6"
+        >
+          <GlobalFeedbackBanner />
+          {currentUser?.mustChangePassword && (
+            <Alert className="mb-4 border-warning/40 bg-warning/10 pr-28">
+              <KeyRoundIcon />
+              <AlertTitle>当前使用的是管理员生成的临时密码</AlertTitle>
+              <AlertDescription>
+                请立即修改为只有你本人知道的新密码。完成修改前，每次登录都会显示此提醒。
+              </AlertDescription>
+              <AlertAction>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    router.push(isAdmin ? "/admin" : "/account#change-password")
+                  }
+                >
+                  修改密码
+                </Button>
+              </AlertAction>
+            </Alert>
+          )}
+          {heading}
+          {children}
+        </main>
       </div>
     </AppShellMenuContext.Provider>
   )

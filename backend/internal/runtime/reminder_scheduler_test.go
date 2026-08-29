@@ -209,7 +209,7 @@ func TestReminderSchedulerRefreshesOneWholePileAndEnforcesDailyQuota(t *testing.
 	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requests, 1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[3]}`, testBackgroundPileID)
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[1,2,3,4,5,6,7,8,9,10]}`, testBackgroundPileID)
 	}))
 	deleteReminderRulesForUser(t, manager, other.ID)
 	settings := manager.Settings()
@@ -268,49 +268,6 @@ func TestReminderSchedulerRefreshesOneWholePileAndEnforcesDailyQuota(t *testing.
 	}
 }
 
-func TestReminderSchedulerRuleUpdateWakesFutureInactiveState(t *testing.T) {
-	var requests int32
-	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&requests, 1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"status":"在线","opennum":10}`, testBackgroundPileID)
-	}))
-	deleteReminderRulesForUser(t, manager, other.ID)
-	rules, err := manager.WatchRules(owner.ID)
-	if err != nil || len(rules) != 1 {
-		t.Fatalf("WatchRules owner = %+v, err %v", rules, err)
-	}
-	start := 9 * 60
-	end := 10 * 60
-	if _, err := manager.UpdateWatchRule(owner.ID, rules[0].ID, model.WatchRuleUpdateRequest{
-		ActiveStartMinute: &start, ActiveEndMinute: &end,
-	}); err != nil {
-		t.Fatalf("set inactive rule window: %v", err)
-	}
-	now := time.Date(2026, 8, 10, 2, 30, 0, 0, time.UTC) // Monday 10:30 Asia/Shanghai.
-	setReminderTestClock(manager, &now)
-	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
-		t.Fatalf("inactive scheduler cycle: %v", err)
-	}
-	state, _, err := manager.repository.LoadWatchRefreshState(owner.ID, testBackgroundPileID)
-	if err != nil || state.PausedReason != watchPauseInactiveRule || !state.NextAttemptAt.After(now) {
-		t.Fatalf("inactive state = %+v, err %v", state, err)
-	}
-	start = 0
-	end = 0
-	if _, err := manager.UpdateWatchRule(owner.ID, rules[0].ID, model.WatchRuleUpdateRequest{
-		ActiveStartMinute: &start, ActiveEndMinute: &end,
-	}); err != nil {
-		t.Fatalf("activate rule window: %v", err)
-	}
-	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
-		t.Fatalf("activated scheduler cycle: %v", err)
-	}
-	if got := atomic.LoadInt32(&requests); got != 1 {
-		t.Fatalf("active rule update produced %d requests, want 1", got)
-	}
-}
-
 func TestReminderSchedulerPowerOffWindowClearsFailuresAndSpreadsRestore(t *testing.T) {
 	var requests int32
 	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -320,11 +277,6 @@ func TestReminderSchedulerPowerOffWindowClearsFailuresAndSpreadsRestore(t *testi
 	}))
 	now := time.Date(2026, 8, 10, 15, 30, 0, 0, time.UTC) // 23:30 Asia/Shanghai.
 	setReminderTestClock(manager, &now)
-	settings := manager.Settings()
-	settings.BackgroundRemindersEnabled = false
-	if err := manager.UpdateSettings(settings); err != nil {
-		t.Fatalf("disable reminders during power-off test: %v", err)
-	}
 	var jitterCalls int32
 	manager.reminderScheduler.mu.Lock()
 	manager.reminderScheduler.restoreJitter = func(max time.Duration) time.Duration {
@@ -360,11 +312,6 @@ func TestReminderSchedulerPowerOffWindowClearsFailuresAndSpreadsRestore(t *testi
 			t.Fatalf("power-off state %d = %+v", index, state)
 		}
 	}
-	settings.BackgroundRemindersEnabled = true
-	if err := manager.UpdateSettings(settings); err != nil {
-		t.Fatalf("enable reminders before restore: %v", err)
-	}
-
 	// Repeated checks during the same outage preserve the first persisted jitter.
 	now = time.Date(2026, 8, 10, 22, 59, 0, 0, time.UTC) // 06:59 next day.
 	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
@@ -525,6 +472,7 @@ func TestReminderSchedulerLimitsGlobalRemoteConcurrency(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"id":%q,"status":"在线","opennum":10}`, testBackgroundPileID)
 	}))
 	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
 	pile := manager.runtimes[owner.ID].store.Snapshot().Piles[0]
 	third := model.User{
 		ID: "background-third", Username: "background-third", PasswordHash: "hash",
@@ -545,8 +493,6 @@ func TestReminderSchedulerLimitsGlobalRemoteConcurrency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateWatchRule third user: %v", err)
 	}
-	setReminderTestClock(manager, &now)
-
 	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
 		t.Fatalf("concurrency scheduler cycle: %v", err)
 	}
@@ -600,13 +546,14 @@ func TestReminderSchedulerChargesQuotaOnlyToSharedFlightLeader(t *testing.T) {
 	}
 }
 
-func TestReminderSchedulerTwentyFourHourRequestVolumeHonorsPowerOffWindow(t *testing.T) {
+func TestTemporaryReminderFourHourRequestVolumeStopsAtExpiry(t *testing.T) {
 	var requests int32
 	manager, owner, other := newBackgroundRefreshTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requests, 1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[3]}`, testBackgroundPileID)
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[1,2,3,4,5,6,7,8,9,10]}`, testBackgroundPileID)
 	}))
+	deleteReminderRulesForUser(t, manager, owner.ID)
 	deleteReminderRulesForUser(t, manager, other.ID)
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -615,26 +562,24 @@ func TestReminderSchedulerTwentyFourHourRequestVolumeHonorsPowerOffWindow(t *tes
 	start := time.Date(2026, 8, 10, 7, 0, 0, 0, location).UTC()
 	now := start
 	setReminderTestClock(manager, &now)
-	for now.Before(start.Add(24 * time.Hour)) {
+	duration := model.WatchDurationFourHours
+	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: testBackgroundPileID, Duration: &duration,
+	}); err != nil {
+		t.Fatalf("create four-hour reminder: %v", err)
+	}
+	for now.Before(start.Add(6 * time.Hour)) {
 		if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
 			t.Fatalf("scheduler cycle at %s: %v", now.In(location), err)
 		}
 		now = now.Add(10 * time.Minute)
 	}
-	if got := atomic.LoadInt32(&requests); got != 96 {
-		t.Fatalf("24-hour request volume = %d, want 96 outside 23:00-07:00", got)
+	if got := atomic.LoadInt32(&requests); got != 24 {
+		t.Fatalf("four-hour request volume = %d, want 24", got)
 	}
 	remoteAttempts, err := manager.repository.MetricKindCount("watch_remote", start.Add(-time.Second))
-	if err != nil || remoteAttempts != 96 {
-		t.Fatalf("watch_remote metric = %d, err %v; want 96", remoteAttempts, err)
-	}
-	quotaDate, err := reminderQuotaDate(now.Add(-10*time.Minute), manager.Settings().ScheduledPowerOffTimezone)
-	if err != nil {
-		t.Fatalf("reminderQuotaDate: %v", err)
-	}
-	quotaUsed, err := manager.repository.WatchRefreshQuotaUsed(owner.ID, quotaDate)
-	if err != nil || quotaUsed != 0 {
-		t.Fatalf("power-off day quota = %d, err %v; want 0 before next restore", quotaUsed, err)
+	if err != nil || remoteAttempts != 24 {
+		t.Fatalf("watch_remote metric = %d, err %v; want 24", remoteAttempts, err)
 	}
 }
 

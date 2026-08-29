@@ -46,6 +46,7 @@
 }
 
 :root {
+  --app-header-height: 4rem;
   /* 品牌色（电光青绿）：主按钮/焦点环/背景微染同一色相 */
   --background: oklch(0.988 0.004 168);
   --foreground: oklch(0.145 0 0);
@@ -193,10 +194,21 @@
   }
 }
 
-@keyframes notification-item-enter {
+@keyframes feedback-status-crossfade {
+  from {
+    opacity: 0.55;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes feedback-banner-enter {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
@@ -274,8 +286,23 @@
   animation: history-heatmap-cell-change 260ms ease-out both;
 }
 
-.notification-item-enter {
-  animation: notification-item-enter 180ms ease-out both;
+.feedback-status-change {
+  animation: feedback-status-crossfade 180ms ease-out both;
+}
+
+.feedback-status-card {
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.feedback-success-once {
+  animation: wxpusher-bind-success 520ms ease-out both;
+}
+
+.feedback-banner-transition {
+  animation: feedback-banner-enter 180ms ease-out both;
 }
 
 .notification-badge-change {
@@ -294,7 +321,9 @@
   .history-panel-enter,
   .admin-trend-enter,
   .history-heatmap-cell,
-  .notification-item-enter,
+  .feedback-status-change,
+  .feedback-success-once,
+  .feedback-banner-transition,
   .notification-badge-change,
   .notification-target-glow {
     animation: none !important;
@@ -303,7 +332,9 @@
   .history-chart-bar,
   .history-heatmap-cell,
   .admin-trend-content,
-  .admin-trend-bar {
+  .admin-trend-bar,
+  .feedback-status-card,
+  .cn-toast {
     transition-duration: 0.01ms !important;
   }
 }

@@ -20,7 +20,7 @@ const (
 	wxPusherCreateMinuteMax = 1
 	wxPusherCreateDayMax    = 10
 	wxPusherTestDayMax      = 5
-	wxPusherDeliveryNotice  = "消息由 WxPusher 转发，绑定成功不代表微信一定已展示。"
+	wxPusherDeliveryNotice  = "消息发出后，请在 WxPusher App 或微信中确认是否收到。页面无法确认是否已经阅读。"
 )
 
 var (
@@ -520,33 +520,32 @@ func wxPusherEventTypeMask(items []model.WxPusherEventType) (model.WxPusherEvent
 }
 
 func wxPusherDeliverySummary(delivery model.NotificationDelivery) model.NotificationDeliverySummary {
+	userState := delivery.UserState()
 	return model.NotificationDeliverySummary{
-		ID: delivery.ID, Status: delivery.Status, IsTest: delivery.IsTest,
+		ID: delivery.ID, Status: delivery.Status, UserState: userState, IsTest: delivery.IsTest,
 		AcceptedAt: delivery.AcceptedAt, ProviderSucceededAt: delivery.ProviderSucceededAt,
 		CreatedAt: delivery.CreatedAt, UpdatedAt: delivery.UpdatedAt,
-		Message:   wxPusherDeliveryMessage(delivery.Status),
+		Message:   wxPusherDeliveryMessage(userState),
 		ErrorCode: wxPusherDeliveryErrorCode(delivery.LastErrorCode),
 	}
 }
 
-func wxPusherDeliveryMessage(status model.NotificationDeliveryStatus) string {
-	switch status {
-	case model.NotificationDeliveryPending, model.NotificationDeliverySending, model.NotificationDeliveryRetryWait:
+func wxPusherDeliveryMessage(state model.NotificationDeliveryUserState) string {
+	switch state {
+	case model.NotificationDeliveryUserQueued:
 		return "等待发送"
-	case model.NotificationDeliveryAccepted:
-		return "已提交 WxPusher"
-	case model.NotificationDeliveryProviderSucceeded:
-		return "WxPusher 已处理"
-	case model.NotificationDeliverySuppressed:
+	case model.NotificationDeliveryUserSubmitted:
+		return "已发送，请检查手机"
+	case model.NotificationDeliveryUserProcessed:
+		return "已发送，请检查手机"
+	case model.NotificationDeliveryUserSuppressed:
 		return "免打扰时段未发送"
-	case model.NotificationDeliveryUncertain:
-		return "消息已提交，但无法确认处理结果"
-	case model.NotificationDeliveryFailed:
+	case model.NotificationDeliveryUserFailed:
 		return "发送失败"
-	case model.NotificationDeliveryCancelled:
+	case model.NotificationDeliveryUserCancelled:
 		return "已取消"
 	default:
-		return "状态未知"
+		return "发送结果暂时无法确认"
 	}
 }
 

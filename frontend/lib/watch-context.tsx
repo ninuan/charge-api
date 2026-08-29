@@ -27,6 +27,7 @@ type WatchContextValue = {
   preference: NotificationPreference | null
   loading: boolean
   loaded: boolean
+  error: string | null
   load: () => Promise<void>
   createRule: (
     payload: WatchRuleCreateRequest
@@ -46,7 +47,9 @@ const WatchContext = createContext<WatchContextValue | null>(null)
 function reminderPileCount(rules: WatchRule[]) {
   return new Set(
     rules
-      .filter((rule) => rule.enabled && !rule.completedAt)
+      .filter(
+        (rule) => rule.mode === "temporary" && rule.enabled && !rule.completedAt
+      )
       .map((rule) => rule.deviceId)
   ).size
 }
@@ -59,6 +62,7 @@ export function WatchProvider({ children }: { children: ReactNode }) {
   )
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const rulesRef = useRef<WatchRule[]>([])
   const loadPromiseRef = useRef<Promise<void> | null>(null)
 
@@ -81,6 +85,7 @@ export function WatchProvider({ children }: { children: ReactNode }) {
   const load = useCallback(() => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     setLoading(true)
+    setError(null)
     const pending = Promise.all([
       watchApi.rules(),
       watchApi.overview(),
@@ -92,6 +97,12 @@ export function WatchProvider({ children }: { children: ReactNode }) {
         setOverview(nextOverview)
         setPreference(nextPreference)
         setLoaded(true)
+      })
+      .catch((reason) => {
+        setError(
+          reason instanceof Error ? reason.message : "提醒设置暂时无法加载"
+        )
+        throw reason
       })
       .finally(() => {
         setLoading(false)
@@ -152,6 +163,7 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       preference,
       loading,
       loaded,
+      error,
       load,
       createRule,
       updateRule,
@@ -164,6 +176,7 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       preference,
       loading,
       loaded,
+      error,
       load,
       createRule,
       updateRule,

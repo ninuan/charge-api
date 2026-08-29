@@ -33,10 +33,13 @@ func TestOperationsStatusSummarizesReminderSchedulerAndDegradesAfterRepeatedFail
 		t.Fatalf("CreateUser: %v", err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
+	expiresAt := now.Add(time.Hour)
 	if err := manager.repository.SaveWatchRule(model.WatchRule{
 		ID: "operations-watch", UserID: user.ID, DeviceID: "620100000001",
-		Enabled: true, ActiveWeekdays: 127, Timezone: "Asia/Shanghai",
-		CreatedAt: now, UpdatedAt: now,
+		Mode: model.WatchRuleTemporary, Enabled: true, ActiveWeekdays: 127,
+		Timezone: "Asia/Shanghai", ExpiresAt: &expiresAt,
+		StopAfterNotify: true,
+		CreatedAt:       now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("SaveWatchRule: %v", err)
 	}

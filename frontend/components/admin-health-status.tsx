@@ -10,7 +10,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -117,9 +117,13 @@ export function AdminHealthStatus({
     setChecking(true)
     try {
       await onRecheck?.()
-      toast.success("服务状态已重新检查")
+      notify.success("服务状态已更新", { id: "admin-health-check" })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "检查服务状态失败",
+        id: "admin-health-check",
+        action: { label: "重试", onClick: () => void recheck() },
+      })
     } finally {
       setChecking(false)
     }

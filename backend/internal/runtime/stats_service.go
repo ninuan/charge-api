@@ -36,7 +36,6 @@ func (m *Manager) OperationsStatus() (model.OperationsStatus, error) {
 func (m *Manager) reminderOperationsStatus(settings model.RegistrationSettings, now time.Time) (model.ReminderOperationsStatus, error) {
 	result := model.ReminderOperationsStatus{
 		Enabled:          settings.BackgroundRemindersEnabled,
-		RecurringEnabled: settings.RecurringRemindersEnabled,
 		SchedulerRunning: m.reminderSchedulerRunning(),
 	}
 	inPowerOff, _, err := scheduledPowerOffWindow(now, settings)
@@ -49,9 +48,6 @@ func (m *Manager) reminderOperationsStatus(settings model.RegistrationSettings, 
 		return result, err
 	}
 	result.ActiveTemporaryRules = ruleStats.ActiveTemporaryRules
-	if settings.RecurringRemindersEnabled {
-		result.ActiveRecurringRules = ruleStats.ActiveRecurringRules
-	}
 	result.CompletedNotified24Hours = ruleStats.CompletedNotified24Hours
 	result.CompletedExpired24Hours = ruleStats.CompletedExpired24Hours
 	result.AverageTemporaryMinutes = ruleStats.AverageTemporaryMinutes

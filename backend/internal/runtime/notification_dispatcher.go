@@ -168,7 +168,7 @@ func (m *Manager) sendNotificationDelivery(ctx context.Context, delivery model.N
 	}
 	if delivery.IsTest {
 		message.Summary = "Charge Console 测试消息"
-		message.Content = "微信提醒已连接。之后开启的空闲提醒和账户异常会发送到这里。"
+		message.Content = "微信提醒已连接。以后有空闲口或需要重新登录时，会发到这里。"
 		message.URL = dashboardURL(publicBaseURL)
 	} else {
 		if delivery.NotificationID == nil {

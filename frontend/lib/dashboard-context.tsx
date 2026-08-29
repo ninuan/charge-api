@@ -221,7 +221,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ cookie }),
             timeoutMs: remoteOperationTimeoutMs,
           },
-          "凭据更新失败，请检查内容后重试。"
+          "登录信息更新失败，请检查内容后重试。"
         )
       )
     },

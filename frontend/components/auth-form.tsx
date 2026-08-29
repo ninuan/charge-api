@@ -130,7 +130,7 @@ export function AuthForm({
       !config.registrationOpen &&
       (config.authConfigVersion ?? 0) < 2
     )
-      return setError("后端服务仍是旧版本，请重启后端服务后再使用邀请码注册")
+      return setError("系统暂未完成更新，请联系管理员后再使用邀请码注册")
     if (captchaVisible && !captchaAnswer.trim())
       return setError("请输入图片验证码")
 
@@ -168,7 +168,7 @@ export function AuthForm({
         mode === "register" &&
           inviteCode.trim() &&
           message.includes("未开放注册")
-          ? "邀请码已填写，但后端仍在运行旧版本。请重启后端服务后重试"
+          ? "邀请码已填写，但系统暂未完成更新。请联系管理员后重试"
           : message
       )
       if (mode === "register") await loadCaptcha()
@@ -198,7 +198,7 @@ export function AuthForm({
                 }}
               >
                 <RefreshCwIcon
-                  className={configLoading ? "animate-spin" : ""}
+                  className={configLoading ? "motion-safe:animate-spin" : ""}
                 />
                 重新加载
               </Button>
@@ -297,7 +297,7 @@ export function AuthForm({
                   />
                 ) : (
                   <RefreshCwIcon
-                    className={captchaLoading ? "animate-spin" : ""}
+                    className={captchaLoading ? "motion-safe:animate-spin" : ""}
                   />
                 )}
               </Button>
@@ -323,7 +323,7 @@ export function AuthForm({
         >
           {submitting && (
             <LoaderCircleIcon
-              className="animate-spin"
+              className="motion-safe:animate-spin"
               data-icon="inline-start"
             />
           )}

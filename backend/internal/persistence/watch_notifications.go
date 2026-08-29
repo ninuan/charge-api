@@ -309,14 +309,16 @@ func (s *Store) LoadNotificationPreference(userID string) (model.NotificationPre
 }
 
 func (s *Store) SaveNotification(notification model.Notification) error {
+	notification = normalizeNotificationOccurrences(notification)
 	if err := validateNotification(notification); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO notifications(
 			id, user_id, type, severity, title, message, device_id, port_id,
-			source_event_id, dedupe_key, read_at, resolved_at, created_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			source_event_id, dedupe_key, read_at, resolved_at,
+			occurrence_count, last_occurred_at, created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		notification.ID,
 		notification.UserID,
@@ -330,6 +332,8 @@ func (s *Store) SaveNotification(notification model.Notification) error {
 		notification.DedupeKey,
 		unixTimeOrNil(notification.ReadAt),
 		unixTimeOrNil(notification.ResolvedAt),
+		notification.OccurrenceCount,
+		notification.LastOccurredAt.UTC().Unix(),
 		notification.CreatedAt.UTC().Unix(),
 	)
 	if err != nil {
@@ -342,14 +346,16 @@ func (s *Store) SaveNotification(notification model.Notification) error {
 // database's source-event and active-dedupe unique indexes are the authority,
 // so concurrent refresh workers cannot deliver the same fact twice.
 func (s *Store) InsertNotificationIfAbsent(notification model.Notification) (bool, error) {
+	notification = normalizeNotificationOccurrences(notification)
 	if err := validateNotification(notification); err != nil {
 		return false, err
 	}
 	result, err := s.db.Exec(`
 		INSERT INTO notifications(
 			id, user_id, type, severity, title, message, device_id, port_id,
-			source_event_id, dedupe_key, read_at, resolved_at, created_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			source_event_id, dedupe_key, read_at, resolved_at,
+			occurrence_count, last_occurred_at, created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`,
 		notification.ID,
@@ -364,6 +370,8 @@ func (s *Store) InsertNotificationIfAbsent(notification model.Notification) (boo
 		notification.DedupeKey,
 		unixTimeOrNil(notification.ReadAt),
 		unixTimeOrNil(notification.ResolvedAt),
+		notification.OccurrenceCount,
+		notification.LastOccurredAt.UTC().Unix(),
 		notification.CreatedAt.UTC().Unix(),
 	)
 	if err != nil {
@@ -384,24 +392,26 @@ func (s *Store) InsertNotificationWithWxPusherDeliveryIfAbsent(
 	notification model.Notification,
 	deliveryID string,
 	suppress bool,
-) (bool, bool, error) {
+) (model.Notification, bool, bool, error) {
+	notification = normalizeNotificationOccurrences(notification)
 	if err := validateNotification(notification); err != nil {
-		return false, false, err
+		return model.Notification{}, false, false, err
 	}
 	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
-		return false, false, fmt.Errorf("wxpusher delivery requires an id")
+		return model.Notification{}, false, false, fmt.Errorf("wxpusher delivery requires an id")
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return false, false, fmt.Errorf("begin notification outbox: %w", err)
+		return model.Notification{}, false, false, fmt.Errorf("begin notification outbox: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.Exec(`
 		INSERT INTO notifications(
 			id, user_id, type, severity, title, message, device_id, port_id,
-			source_event_id, dedupe_key, read_at, resolved_at, created_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			source_event_id, dedupe_key, read_at, resolved_at,
+			occurrence_count, last_occurred_at, created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`,
 		notification.ID,
@@ -416,20 +426,61 @@ func (s *Store) InsertNotificationWithWxPusherDeliveryIfAbsent(
 		notification.DedupeKey,
 		unixTimeOrNil(notification.ReadAt),
 		unixTimeOrNil(notification.ResolvedAt),
+		notification.OccurrenceCount,
+		notification.LastOccurredAt.UTC().Unix(),
 		notification.CreatedAt.UTC().Unix(),
 	)
 	if err != nil {
-		return false, false, fmt.Errorf("insert notification outbox fact: %w", err)
+		return model.Notification{}, false, false, fmt.Errorf("insert notification outbox fact: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return false, false, fmt.Errorf("read notification outbox result: %w", err)
+		return model.Notification{}, false, false, fmt.Errorf("read notification outbox result: %w", err)
 	}
 	if rows != 1 {
-		if err := tx.Commit(); err != nil {
-			return false, false, fmt.Errorf("commit duplicate notification outbox: %w", err)
+		if notification.SourceEventID != nil {
+			existing, scanErr := scanNotification(tx.QueryRow(`
+				SELECT id, user_id, type, severity, title, message, device_id, port_id,
+				       source_event_id, dedupe_key, read_at, resolved_at,
+				       occurrence_count, last_occurred_at, created_at
+				FROM notifications WHERE source_event_id = ?
+			`, *notification.SourceEventID))
+			if scanErr == nil {
+				if err := tx.Commit(); err != nil {
+					return model.Notification{}, false, false, fmt.Errorf("commit duplicate notification outbox: %w", err)
+				}
+				return existing, false, false, nil
+			}
+			if !errors.Is(scanErr, sql.ErrNoRows) {
+				return model.Notification{}, false, false, scanErr
+			}
 		}
-		return false, false, nil
+		if notification.DedupeKey != "" {
+			updated, scanErr := scanNotification(tx.QueryRow(`
+				UPDATE notifications
+				SET occurrence_count = occurrence_count + 1,
+				    last_occurred_at = MAX(last_occurred_at, ?),
+				    severity = ?, title = ?, message = ?, read_at = NULL
+				WHERE user_id = ? AND dedupe_key = ? AND resolved_at IS NULL
+				RETURNING id, user_id, type, severity, title, message, device_id, port_id,
+				          source_event_id, dedupe_key, read_at, resolved_at,
+				          occurrence_count, last_occurred_at, created_at
+			`, notification.LastOccurredAt.UTC().Unix(), notification.Severity,
+				notification.Title, notification.Message, notification.UserID, notification.DedupeKey))
+			if scanErr == nil {
+				if err := tx.Commit(); err != nil {
+					return model.Notification{}, false, false, fmt.Errorf("commit merged notification outbox: %w", err)
+				}
+				return updated, false, false, nil
+			}
+			if !errors.Is(scanErr, sql.ErrNoRows) {
+				return model.Notification{}, false, false, fmt.Errorf("merge duplicate notification: %w", scanErr)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return model.Notification{}, false, false, fmt.Errorf("commit duplicate notification outbox: %w", err)
+		}
+		return model.Notification{}, false, false, nil
 	}
 
 	var enabled int
@@ -438,7 +489,7 @@ func (s *Store) InsertNotificationWithWxPusherDeliveryIfAbsent(
 		SELECT enabled, event_types FROM wxpusher_bindings WHERE user_id = ?
 	`, notification.UserID).Scan(&enabled, &eventTypes)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, false, fmt.Errorf("load wxpusher outbox policy: %w", err)
+		return model.Notification{}, false, false, fmt.Errorf("load wxpusher outbox policy: %w", err)
 	}
 	shouldQueue := err == nil && enabled != 0 && eventTypes&wxPusherEventMask(notification.Type) != 0
 	if shouldQueue {
@@ -461,13 +512,13 @@ func (s *Store) InsertNotificationWithWxPusherDeliveryIfAbsent(
 			ON CONFLICT DO NOTHING
 		`, deliveryID, notification.ID, notification.UserID, wxPusherChannel, status,
 			nextAttemptAt, errorCode, now.Unix(), now.Unix()); err != nil {
-			return false, false, fmt.Errorf("insert wxpusher outbox delivery: %w", err)
+			return model.Notification{}, false, false, fmt.Errorf("insert wxpusher outbox delivery: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, false, fmt.Errorf("commit notification outbox: %w", err)
+		return model.Notification{}, false, false, fmt.Errorf("commit notification outbox: %w", err)
 	}
-	return true, shouldQueue, nil
+	return notification, true, shouldQueue, nil
 }
 
 func wxPusherEventMask(notificationType model.NotificationType) model.WxPusherEventTypes {
@@ -497,7 +548,8 @@ func (s *Store) ResolveActiveNotification(userID, dedupeKey string, at time.Time
 		SET resolved_at = ?
 		WHERE user_id = ? AND dedupe_key = ? AND resolved_at IS NULL
 		RETURNING id, user_id, type, severity, title, message, device_id, port_id,
-		          source_event_id, dedupe_key, read_at, resolved_at, created_at
+		          source_event_id, dedupe_key, read_at, resolved_at,
+		          occurrence_count, last_occurred_at, created_at
 	`, resolvedAt.Unix(), userID, dedupeKey))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Notification{}, false, nil
@@ -521,10 +573,11 @@ func (s *Store) ListNotifications(userID string, limit int) ([]model.Notificatio
 	}
 	rows, err := s.db.Query(`
 		SELECT id, user_id, type, severity, title, message, device_id, port_id,
-		       source_event_id, dedupe_key, read_at, resolved_at, created_at
+		       source_event_id, dedupe_key, read_at, resolved_at,
+		       occurrence_count, last_occurred_at, created_at
 		FROM notifications
 		WHERE user_id = ?
-		ORDER BY created_at DESC, id DESC
+		ORDER BY last_occurred_at DESC, id DESC
 		LIMIT ?
 	`, userID, limit)
 	if err != nil {
@@ -563,32 +616,37 @@ func (s *Store) ListNotificationsPage(query NotificationPageQuery) (model.Notifi
 	case "", "all":
 	case "unread":
 		clauses = append(clauses, "read_at IS NULL")
+	case "pending":
+		clauses = append(clauses, "type IN (?, ?) AND resolved_at IS NULL")
+		args = append(args, model.NotificationCredentialExpired, model.NotificationPileOffline)
 	case "resolved":
-		clauses = append(clauses, "resolved_at IS NOT NULL")
+		clauses = append(clauses, "type IN (?, ?) AND resolved_at IS NOT NULL")
+		args = append(args, model.NotificationCredentialExpired, model.NotificationPileOffline)
 	default:
 		return model.NotificationPage{}, fmt.Errorf("notification status is invalid")
 	}
 	if query.CursorID != "" {
-		var cursorCreatedAt int64
+		var cursorLastOccurredAt int64
 		err := s.db.QueryRow(`
-			SELECT created_at FROM notifications WHERE user_id = ? AND id = ?
-		`, query.UserID, query.CursorID).Scan(&cursorCreatedAt)
+			SELECT last_occurred_at FROM notifications WHERE user_id = ? AND id = ?
+		`, query.UserID, query.CursorID).Scan(&cursorLastOccurredAt)
 		if err == sql.ErrNoRows {
 			return model.NotificationPage{}, ErrNotificationCursorNotFound
 		}
 		if err != nil {
 			return model.NotificationPage{}, fmt.Errorf("load notification cursor: %w", err)
 		}
-		clauses = append(clauses, "(created_at < ? OR (created_at = ? AND id < ?))")
-		args = append(args, cursorCreatedAt, cursorCreatedAt, query.CursorID)
+		clauses = append(clauses, "(last_occurred_at < ? OR (last_occurred_at = ? AND id < ?))")
+		args = append(args, cursorLastOccurredAt, cursorLastOccurredAt, query.CursorID)
 	}
 	args = append(args, query.Limit+1)
 	rows, err := s.db.Query(`
 		SELECT id, user_id, type, severity, title, message, device_id, port_id,
-		       source_event_id, dedupe_key, read_at, resolved_at, created_at
+		       source_event_id, dedupe_key, read_at, resolved_at,
+		       occurrence_count, last_occurred_at, created_at
 		FROM notifications
 		WHERE `+strings.Join(clauses, " AND ")+`
-		ORDER BY created_at DESC, id DESC
+		ORDER BY last_occurred_at DESC, id DESC
 		LIMIT ?
 	`, args...)
 	if err != nil {
@@ -629,7 +687,8 @@ func (s *Store) LoadNotification(userID, notificationID string) (model.Notificat
 	}
 	notification, err := scanNotification(s.db.QueryRow(`
 		SELECT id, user_id, type, severity, title, message, device_id, port_id,
-		       source_event_id, dedupe_key, read_at, resolved_at, created_at
+		       source_event_id, dedupe_key, read_at, resolved_at,
+		       occurrence_count, last_occurred_at, created_at
 		FROM notifications
 		WHERE user_id = ? AND id = ?
 	`, userID, notificationID))
@@ -1048,7 +1107,7 @@ func scanNotification(scanner interface{ Scan(...any) error }) (model.Notificati
 	var notification model.Notification
 	var notificationType string
 	var portID, sourceEventID, readAt, resolvedAt sql.NullInt64
-	var createdAt int64
+	var createdAt, lastOccurredAt int64
 	if err := scanner.Scan(
 		&notification.ID,
 		&notification.UserID,
@@ -1062,6 +1121,8 @@ func scanNotification(scanner interface{ Scan(...any) error }) (model.Notificati
 		&notification.DedupeKey,
 		&readAt,
 		&resolvedAt,
+		&notification.OccurrenceCount,
+		&lastOccurredAt,
 		&createdAt,
 	); err != nil {
 		return model.Notification{}, fmt.Errorf("scan notification: %w", err)
@@ -1081,8 +1142,19 @@ func scanNotification(scanner interface{ Scan(...any) error }) (model.Notificati
 	}
 	notification.ReadAt = nullableUnixTime(readAt)
 	notification.ResolvedAt = nullableUnixTime(resolvedAt)
+	notification.LastOccurredAt = time.Unix(lastOccurredAt, 0).UTC()
 	notification.CreatedAt = time.Unix(createdAt, 0).UTC()
 	return notification, nil
+}
+
+func normalizeNotificationOccurrences(notification model.Notification) model.Notification {
+	if notification.OccurrenceCount < 1 {
+		notification.OccurrenceCount = 1
+	}
+	if notification.LastOccurredAt.IsZero() {
+		notification.LastOccurredAt = notification.CreatedAt
+	}
+	return notification
 }
 
 func unixTimeOrNil(value *time.Time) any {

@@ -1,10 +1,17 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { NotificationCenter } from "@/components/notification-center"
 
 const mocks = vi.hoisted(() => ({
+  items: [] as Array<Record<string, unknown>>,
   permission: "default" as NotificationPermission | "unsupported",
   markRead: vi.fn(),
   load: vi.fn(),
@@ -29,7 +36,7 @@ const notice = {
 
 vi.mock("@/lib/notification-context", () => ({
   useNotifications: () => ({
-    items: [notice],
+    items: mocks.items,
     unreadCount: 1,
     status: "all",
     loading: false,
@@ -60,6 +67,10 @@ vi.mock("@/lib/watch-context", () => ({
 }))
 
 describe("NotificationCenter", () => {
+  beforeEach(() => {
+    mocks.items = [notice]
+  })
+
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
@@ -75,10 +86,41 @@ describe("NotificationCenter", () => {
     await user.click(screen.getByRole("button", { name: "通知，1 条未读" }))
     expect(await screen.findByText("通知中心")).toBeVisible()
     expect(screen.getByRole("button", { name: "允许通知" })).toBeVisible()
-    await user.click(screen.getByText("松园充电桩有空闲口"))
+    expect(screen.getByText("网页开着时提醒我")).toBeVisible()
+    expect(screen.getByText("来源：空闲提醒")).toBeVisible()
+    expect(screen.getByText("建议：现在有空闲口，可以前往充电。")).toBeVisible()
+    await user.click(screen.getByText("3 号充电口空闲了"))
 
     await waitFor(() => expect(mocks.markRead).toHaveBeenCalledWith("notice-1"))
     expect(onNavigate).toHaveBeenCalledWith(notice)
+  })
+
+  it("keeps informational notices out of the action lifecycle badges", async () => {
+    const user = userEvent.setup()
+    render(<NotificationCenter piles={[]} onNavigate={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "通知，1 条未读" }))
+
+    const item = screen.getByRole("article")
+    expect(within(item).queryByText("需处理")).toBeNull()
+    expect(within(item).queryByText("已恢复")).toBeNull()
+  })
+
+  it("shows action lifecycle badges only for actionable problems", async () => {
+    mocks.items = [
+      {
+        ...notice,
+        id: "notice-actionable",
+        type: "credential_expired",
+        title: "需要重新登录",
+      },
+    ]
+    const user = userEvent.setup()
+    render(<NotificationCenter piles={[]} onNavigate={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "通知，1 条未读" }))
+
+    expect(
+      within(screen.getByRole("article")).getByText("需处理")
+    ).toBeVisible()
   })
 
   it("explains denied and unsupported browser notification states", async () => {

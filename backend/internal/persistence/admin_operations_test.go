@@ -176,7 +176,7 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 		t.Fatalf("ReminderMetricCounts = %+v, err %v", metrics, err)
 	}
 	ruleStats, err := store.ReminderRuleOperationsStats(now.Add(-time.Hour), now)
-	if err != nil || ruleStats.ActiveTemporaryRules != 1 || ruleStats.ActiveRecurringRules != 1 ||
+	if err != nil || ruleStats.ActiveTemporaryRules != 1 ||
 		ruleStats.CompletedNotified24Hours != 1 || ruleStats.AverageTemporaryMinutes != 30 {
 		t.Fatalf("ReminderRuleOperationsStats = %+v, err %v", ruleStats, err)
 	}

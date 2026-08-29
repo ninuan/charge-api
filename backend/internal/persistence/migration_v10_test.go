@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestSQLiteMigratesV9ToV10AndKeepsRecurringBehavior(t *testing.T) {
+func TestSQLiteMigratesV9ToCurrentSchemaAndRetiresRecurringBehavior(t *testing.T) {
 	path := t.TempDir() + "/state.db"
 	createV9MigrationFixture(t, path)
 	key := bytes.Repeat([]byte{0x63}, CookieKeySize)
@@ -16,7 +16,7 @@ func TestSQLiteMigratesV9ToV10AndKeepsRecurringBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSQLite v9 fixture: %v", err)
 	}
-	assertV9DataPreservedInV10(t, store)
+	assertV9DataPreservedInCurrentSchema(t, store)
 	if err := store.Close(); err != nil {
 		t.Fatalf("close migrated store: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestSQLiteMigratesV9ToV10AndKeepsRecurringBehavior(t *testing.T) {
 		t.Fatalf("reopen migrated store: %v", err)
 	}
 	defer reopened.Close()
-	assertV9DataPreservedInV10(t, reopened)
+	assertV9DataPreservedInCurrentSchema(t, reopened)
 }
 
 func createV9MigrationFixture(t *testing.T, path string) {
@@ -114,26 +114,26 @@ func createV9MigrationFixture(t *testing.T, path string) {
 	}
 }
 
-func assertV9DataPreservedInV10(t *testing.T, store *Store) {
+func assertV9DataPreservedInCurrentSchema(t *testing.T, store *Store) {
 	t.Helper()
 	var version string
 	if err := store.db.QueryRow(`SELECT value FROM metadata WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != "10" {
-		t.Fatalf("schema version = %s, want 10", version)
+	if version != "12" {
+		t.Fatalf("schema version = %s, want 12", version)
 	}
 	var mode, completionReason string
 	var expiresAt, completedAt any
-	var stopAfterNotify int
+	var stopAfterNotify, enabled int
 	if err := store.db.QueryRow(`
-		SELECT mode, expires_at, completed_at, completion_reason, stop_after_notify
+		SELECT mode, expires_at, completed_at, completion_reason, stop_after_notify, enabled
 		FROM watch_rules WHERE id='legacy-recurring'
-	`).Scan(&mode, &expiresAt, &completedAt, &completionReason, &stopAfterNotify); err != nil {
+	`).Scan(&mode, &expiresAt, &completedAt, &completionReason, &stopAfterNotify, &enabled); err != nil {
 		t.Fatalf("read migrated watch rule: %v", err)
 	}
-	if mode != "recurring" || expiresAt != nil || completedAt != nil || completionReason != "" || stopAfterNotify != 0 {
-		t.Fatalf("legacy rule lifecycle changed: mode=%s expires=%v completed=%v reason=%s stop=%d", mode, expiresAt, completedAt, completionReason, stopAfterNotify)
+	if mode != "recurring" || enabled != 0 || expiresAt != nil || completedAt != nil || completionReason != "" || stopAfterNotify != 0 {
+		t.Fatalf("legacy rule was not safely retired: mode=%s enabled=%d expires=%v completed=%v reason=%s stop=%d", mode, enabled, expiresAt, completedAt, completionReason, stopAfterNotify)
 	}
 	var rawSettings string
 	if err := store.db.QueryRow(`SELECT value FROM metadata WHERE key='registration_settings'`).Scan(&rawSettings); err != nil {
@@ -143,7 +143,7 @@ func assertV9DataPreservedInV10(t *testing.T, store *Store) {
 	if err := json.Unmarshal([]byte(rawSettings), &settings); err != nil {
 		t.Fatalf("parse migrated settings: %v", err)
 	}
-	if settings["recurringRemindersEnabled"] != true || settings["backgroundRemindersEnabled"] != true {
+	if settings["recurringRemindersEnabled"] != false || settings["backgroundRemindersEnabled"] != true {
 		t.Fatalf("reminder compatibility settings changed: %+v", settings)
 	}
 	for table, want := range map[string]int{

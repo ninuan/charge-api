@@ -76,7 +76,7 @@ func TestNormalizeRegistrationSettingsPreservesExplicitlyDisabledReminders(t *te
 func assertReminderSettingDefaults(t *testing.T, settings model.RegistrationSettings) {
 	t.Helper()
 	if !settings.BackgroundRemindersEnabled ||
-		!settings.RecurringRemindersEnabled ||
+		settings.RecurringRemindersEnabled ||
 		settings.WatchRefreshIntervalMinutes != 10 ||
 		settings.WatchPileLimitPerUser != 5 ||
 		settings.WatchDailyRefreshQuota != 480 ||

@@ -149,8 +149,11 @@ func (m *Manager) hasEnabledPileReminder(userID, deviceID string) (bool, error) 
 	if err != nil {
 		return false, fmt.Errorf("list watch rules for background refresh: %w", err)
 	}
+	now := m.reminderSchedulerNow()
 	for _, rule := range rules {
-		if rule.DeviceID == deviceID && rule.Enabled {
+		if rule.DeviceID == deviceID && rule.Mode == model.WatchRuleTemporary &&
+			rule.Enabled && rule.CompletedAt == nil && rule.ExpiresAt != nil &&
+			rule.ExpiresAt.After(now) {
 			return true, nil
 		}
 	}

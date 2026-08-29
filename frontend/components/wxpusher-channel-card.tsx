@@ -13,7 +13,12 @@ import {
   UnlinkIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
+import { LeadingIcon } from "@/components/leading-icon"
+import {
+  deliveryPresentationMessage,
+  deliveryPresentationState,
+} from "@/lib/notification-semantics"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -59,6 +64,7 @@ import {
   testWxPusherChannel,
   updateWxPusherChannel,
 } from "@/lib/wxpusher-api"
+import { cn } from "@/lib/utils"
 
 const eventOptions: Array<{
   value: WxPusherEventType
@@ -67,23 +73,23 @@ const eventOptions: Array<{
 }> = [
   {
     value: "pile_available",
-    label: "整桩有空闲",
-    description: "提醒任务发现任意充电口空闲时通知。",
+    label: "有空闲充电口",
+    description: "你正在等待的充电桩出现空闲口时通知你。",
   },
   {
     value: "credential_expired",
-    label: "登录状态失效",
-    description: "需要重新扫码登录时通知。",
+    label: "需要重新登录",
+    description: "登录过期、需要重新扫码时通知你。",
   },
   {
     value: "pile_offline",
-    label: "充电桩持续离线",
-    description: "避开学校计划断电后，仍持续离线时通知。",
+    label: "充电桩无法连接",
+    description: "在正常供电时段内，多次无法连接充电桩时通知你。",
   },
   {
     value: "pile_recovered",
-    label: "充电桩恢复在线",
-    description: "此前持续离线的充电桩恢复后通知。",
+    label: "充电桩恢复连接",
+    description: "此前无法连接的充电桩恢复后通知你。",
   },
 ]
 
@@ -96,20 +102,22 @@ const terminalDeliveryStatuses = new Set([
 ])
 
 function deliverySuggestion(delivery?: NotificationDeliverySummary) {
-  if (!delivery) return "发送测试消息，确认当前接收渠道可以正常收到提醒。"
-  switch (delivery.status) {
-    case "pending":
-    case "sending":
-    case "retry_wait":
-      return "测试消息已加入队列，系统会尽快提交到 WxPusher。"
-    case "accepted":
-      return "已提交 WxPusher，请检查接收端。WxPusher 尚未更新处理状态时，可以稍后重新查询。"
-    case "provider_succeeded":
-      return delivery.isTest
-        ? "请检查 WxPusher App 和微信是否收到；平台无法确认设备展示或已读。"
-        : "WxPusher 已处理；站内通知仍会持续保留。"
-    case "uncertain":
-      return "WxPusher 尚未更新处理状态，请检查接收端，或重新查询状态。"
+  if (!delivery) return "发送一条测试消息，确认手机能收到微信提醒。"
+  switch (deliveryPresentationState(delivery)) {
+    case "queued":
+      return "测试消息正在发送，请稍候。"
+    case "submitted":
+      return "消息已交给 WxPusher；暂未取得进一步状态，这不代表发送失败。"
+    case "processed":
+      return "消息已发送，请检查 WxPusher App 或微信。"
+    case "suppressed":
+      return "当前处于免打扰时段，本次没有发送到微信，消息已保留在通知中心。"
+    case "cancelled":
+      return "本次没有发送到微信。"
+    case "unknown":
+      return "暂时无法确认是否已发送，请稍后重新查询。"
+    case "failed":
+      break
   }
   switch (delivery.errorCode) {
     case "invalid_uid":
@@ -122,14 +130,14 @@ function deliverySuggestion(delivery?: NotificationDeliverySummary) {
     case "rate_limited":
       return delivery.isTest
         ? "WxPusher 暂时繁忙，可以稍后重新发送测试消息。"
-        : "WxPusher 暂时繁忙，站内通知不受影响。"
+        : "微信提醒暂时繁忙，消息仍会保留在通知中心。"
     case "ambiguous_result":
     case "invalid_response":
-      return "暂时无法确认处理结果，请先检查接收端，避免重复发送。"
+      return "暂时无法确认是否已发送，请先检查手机，避免重复发送。"
     default:
       return delivery.isTest
-        ? "请检查 WxPusher App 和微信是否收到；平台无法确认设备展示或已读。"
-        : "站内通知始终保留；微信渠道异常不会影响通知中心。"
+        ? "请检查 WxPusher App 和微信是否收到，稍后也可以重新发送。"
+        : "微信提醒没有发出，消息仍会保留在通知中心。"
   }
 }
 
@@ -157,6 +165,7 @@ function formatBoundAt(value?: string) {
 export function WxPusherChannelCard({ active }: { active: boolean }) {
   const [channel, setChannel] = useState<WxPusherChannelState | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [binding, setBinding] = useState(false)
   const [session, setSession] = useState<WxPusherBindSession | null>(null)
   const [bindOpen, setBindOpen] = useState(false)
@@ -169,10 +178,11 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   const abortRef = useRef<AbortController | null>(null)
   const pollInFlight = useRef(false)
   const channelLoadInFlight = useRef(false)
-  const hasPendingDelivery = [
-    channel?.lastDelivery?.status,
-    channel?.lastTestDelivery?.status,
-  ].some((status) => status && !terminalDeliveryStatuses.has(status))
+  const hasPendingDelivery =
+    !loadFailed &&
+    [channel?.lastDelivery?.status, channel?.lastTestDelivery?.status].some(
+      (status) => status && !terminalDeliveryStatuses.has(status)
+    )
 
   const loadChannel = useCallback(async () => {
     if (channelLoadInFlight.current) return
@@ -180,8 +190,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
     setLoading(true)
     try {
       setChannel(await getWxPusherChannel())
-    } catch (reason) {
-      toast.error((reason as Error).message)
+      setLoadFailed(false)
+    } catch {
+      setLoadFailed(true)
     } finally {
       channelLoadInFlight.current = false
       setLoading(false)
@@ -189,11 +200,11 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   }, [])
 
   useEffect(() => {
-    if (active && !channel && !loading) {
+    if (active && !channel && !loading && !loadFailed) {
       const task = window.setTimeout(() => void loadChannel(), 0)
       return () => window.clearTimeout(task)
     }
-  }, [active, channel, loadChannel, loading])
+  }, [active, channel, loadChannel, loadFailed, loading])
 
   useEffect(() => {
     if (!active || !hasPendingDelivery) return
@@ -261,7 +272,7 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       setSession(created)
       setBindOpen(true)
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "获取绑定二维码失败" })
     } finally {
       setBinding(false)
     }
@@ -282,10 +293,16 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       if (updated.status === "bound") {
         stopPolling()
         await loadChannel()
-        toast.success("微信提醒绑定成功")
+        notify.success("微信提醒绑定成功", {
+          id: "wxpusher-binding-poll",
+        })
       }
     } catch (reason) {
-      if (!controller.signal.aborted) toast.error((reason as Error).message)
+      if (!controller.signal.aborted)
+        notify.error(reason, {
+          title: "查询绑定状态失败",
+          id: "wxpusher-binding-poll",
+        })
     } finally {
       if (abortRef.current === controller) abortRef.current = null
       pollInFlight.current = false
@@ -342,9 +359,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
             }
           : current
       )
-      toast.success("已解除微信提醒绑定")
+      notify.success("微信提醒绑定已解除")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "解除微信绑定失败" })
     } finally {
       setUnbinding(false)
     }
@@ -355,9 +372,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
     try {
       const updated = await updateWxPusherChannel({ enabled })
       setChannel(updated)
-      toast.success(enabled ? "微信提醒已开启" : "微信提醒已关闭")
+      notify.success(enabled ? "微信提醒已开启" : "微信提醒已关闭")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "更新微信提醒失败" })
     } finally {
       setPendingSetting(null)
     }
@@ -376,9 +393,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
           .filter((value) => selected.has(value)),
       })
       setChannel(updated)
-      toast.success("接收内容已更新")
+      notify.success("微信接收内容已更新")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "更新接收内容失败" })
     } finally {
       setPendingSetting(null)
     }
@@ -391,9 +408,15 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       setChannel((current) =>
         current ? { ...current, lastTestDelivery: delivery } : current
       )
-      toast.success("测试消息已加入发送队列")
+      notify.success("测试消息正在发送", {
+        description: "发送后请检查 WxPusher App 或微信。",
+        id: "wxpusher-test-delivery",
+      })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "发送测试消息失败",
+        id: "wxpusher-test-delivery",
+      })
     } finally {
       setTesting(false)
     }
@@ -406,15 +429,32 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       setChannel((current) =>
         current ? { ...current, lastTestDelivery: delivery } : current
       )
-      if (delivery.status === "provider_succeeded") {
-        toast.success("已获取最新处理状态")
-      } else if (delivery.status === "failed") {
-        toast.error("WxPusher 返回发送失败")
+      const state = deliveryPresentationState(delivery)
+      if (state === "processed") {
+        notify.success("测试消息已发送，请检查手机", {
+          id: "wxpusher-test-delivery",
+        })
+      } else if (state === "failed") {
+        notify.error("请稍后重新发送；消息没有发出，不会重复收到。", {
+          title: "测试消息没有发出",
+          id: "wxpusher-test-delivery",
+        })
+      } else if (state === "submitted") {
+        notify.success("测试消息已发送，请检查手机", {
+          description: "请在 WxPusher App 或微信中确认是否收到。",
+          id: "wxpusher-test-delivery",
+        })
       } else {
-        toast.info("已重新查询，WxPusher 尚未更新状态")
+        notify.info("暂时无法确认是否已发送", {
+          description: "请先检查手机，稍后也可以重新查询。",
+          id: "wxpusher-test-delivery",
+        })
       }
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "查询测试消息状态失败",
+        id: "wxpusher-test-delivery",
+      })
     } finally {
       setRechecking(null)
     }
@@ -444,10 +484,14 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
 
   if (!channel.configured)
     return (
-      <Alert>
-        <MessageCircleIcon />
+      <Alert className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 p-4 [&>[data-slot=leading-icon]]:row-span-2">
+        <LeadingIcon
+          icon={MessageCircleIcon}
+          className="bg-success/10 text-success"
+          iconClassName="size-[17px]"
+        />
         <AlertTitle>微信提醒暂未开放</AlertTitle>
-        <AlertDescription>站内通知和浏览器提醒仍可正常使用。</AlertDescription>
+        <AlertDescription>通知中心和网页提醒仍可正常使用。</AlertDescription>
       </Alert>
     )
 
@@ -461,12 +505,32 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
 
   return (
     <>
+      {loadFailed ? (
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>微信提醒状态更新失败</AlertTitle>
+          <AlertDescription>
+            当前显示的是上次结果。
+            <Button
+              variant="outline"
+              size="xs"
+              className="ml-2"
+              disabled={loading}
+              onClick={() => void loadChannel()}
+            >
+              重新加载
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <Card>
         <CardHeader>
           <div className="flex min-w-0 gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-success/10 text-success">
-              <MessageCircleIcon className="size-4" />
-            </span>
+            <LeadingIcon
+              icon={MessageCircleIcon}
+              className="bg-success/10 text-success"
+              iconClassName="size-[17px]"
+            />
             <div className="min-w-0">
               <CardTitle className="flex flex-wrap items-center gap-2">
                 <span>微信提醒</span>
@@ -520,11 +584,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
                 data-disabled={pendingSetting === "enabled"}
               >
                 <FieldContent>
-                  <FieldLabel htmlFor="wxpusher-enabled">
-                    微信提醒总开关
-                  </FieldLabel>
+                  <FieldLabel htmlFor="wxpusher-enabled">微信提醒</FieldLabel>
                   <FieldDescription>
-                    临时关闭后不再发送微信消息，提醒任务和站内通知仍会继续。
+                    关闭后不再发到微信，消息仍会保留在通知中心。
                   </FieldDescription>
                 </FieldContent>
                 <Switch
@@ -569,12 +631,10 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
               </div>
 
               {recentDeliveries.map(({ label, delivery }) => {
-                const failed = delivery.status === "failed"
-                const activelySending = [
-                  "pending",
-                  "sending",
-                  "retry_wait",
-                ].includes(delivery.status)
+                const presentationState = deliveryPresentationState(delivery)
+                const failed = presentationState === "failed"
+                const unknown = presentationState === "unknown"
+                const activelySending = presentationState === "queued"
                 const waitingProvider = delivery.status === "accepted"
                 const canRecheck =
                   delivery.isTest &&
@@ -589,11 +649,12 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
                   <Alert
                     key={delivery.id}
                     variant={failed ? "destructive" : "default"}
-                    className={
-                      delivery.status === "uncertain"
-                        ? "border-amber-500/30 bg-amber-500/5"
-                        : undefined
-                    }
+                    className={cn(
+                      "feedback-status-card",
+                      unknown && "border-amber-500/30 bg-amber-500/5",
+                      presentationState === "processed" &&
+                        "feedback-success-once"
+                    )}
                   >
                     {activelySending ? (
                       <LoaderCircleIcon className="motion-safe:animate-spin" />
@@ -601,19 +662,21 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
                       <Clock3Icon />
                     ) : failed ? (
                       <CircleAlertIcon />
-                    ) : delivery.status === "uncertain" ||
-                      delivery.status === "cancelled" ? (
+                    ) : unknown || presentationState === "cancelled" ? (
                       <CircleAlertIcon className="text-amber-600" />
                     ) : (
                       <CheckCircle2Icon />
                     )}
-                    <AlertTitle>
-                      {label} · {delivery.message}
+                    <AlertTitle
+                      key={`${delivery.id}-${delivery.status}`}
+                      className="feedback-status-change"
+                    >
+                      {label} · {deliveryPresentationMessage(delivery)}
                     </AlertTitle>
                     <AlertDescription className="grid gap-2 text-balance">
                       <p>{deliverySuggestion(delivery)}</p>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums">
-                        <span>提交 {formatBoundAt(submittedAt)}</span>
+                        <span>发送 {formatBoundAt(submittedAt)}</span>
                         <span>
                           最近检查 {formatBoundAt(delivery.updatedAt)}
                         </span>
@@ -652,16 +715,6 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
                             </Button>
                           ) : null}
                         </div>
-                      ) : null}
-                      {delivery.errorCode ? (
-                        <details className="text-xs">
-                          <summary className="w-fit cursor-pointer rounded-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50">
-                            查看详情
-                          </summary>
-                          <p className="mt-1 font-mono break-all">
-                            错误代码：{delivery.errorCode}
-                          </p>
-                        </details>
                       ) : null}
                     </AlertDescription>
                   </Alert>
@@ -770,7 +823,7 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
           <DialogHeader>
             <DialogTitle>解除微信提醒绑定？</DialogTitle>
             <DialogDescription>
-              之后不会再向当前微信接收账号发送消息，站内通知不受影响。
+              之后不会再向当前微信接收账号发送消息，历史消息仍会保留在通知中心。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

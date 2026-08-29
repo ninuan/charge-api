@@ -26,13 +26,14 @@ const pileRule: WatchRule = {
   id: "rule-pile-1",
   userId: "user-1",
   deviceId: "pile-1",
-  mode: "recurring",
+  mode: "temporary",
   enabled: true,
   activeWeekdays: 127,
   activeStartMinute: 0,
   activeEndMinute: 0,
   timezone: "Asia/Shanghai",
-  stopAfterNotify: false,
+  expiresAt: "2026-08-10T02:00:00Z",
+  stopAfterNotify: true,
   createdAt: "2026-08-10T00:00:00Z",
   updatedAt: "2026-08-10T00:00:00Z",
 }
@@ -82,7 +83,7 @@ describe("WatchProvider", () => {
       rule: reminder,
       idlePortIds: [],
       backgroundScheduled: true,
-      message: "固定时段提醒已保存。",
+      message: "已开始等待空闲口，有空闲时会通知你。",
     })
 
     const { result } = renderHook(() => useWatch(), {

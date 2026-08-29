@@ -200,7 +200,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 分页获取当前用户的站内通知 */
+        /** 分页获取当前用户的通知中心消息 */
         get: operations["listNotifications"];
         put?: never;
         post?: never;
@@ -481,7 +481,10 @@ export interface components {
             createdAt: string;
             deviceId?: string;
             id: string;
+            /** Format: date-time */
+            lastOccurredAt: string;
             message: string;
+            occurrenceCount: number;
             portId?: number | null;
             /** Format: date-time */
             readAt?: string | null;
@@ -522,7 +525,13 @@ export interface components {
              * @description 最近一次本地状态更新或供应商状态查询时间。
              */
             updatedAt: string;
+            userState: components["schemas"]["NotificationDeliveryUserState"];
         };
+        /**
+         * @description 面向用户的投递事实；供应商后续查询未知不会覆盖已经确认的提交成功。
+         * @enum {string}
+         */
+        NotificationDeliveryUserState: "queued" | "submitted" | "processed" | "suppressed" | "failed" | "cancelled" | "unknown";
         NotificationPage: {
             items: components["schemas"]["Notification"][];
             nextCursor?: string;
@@ -548,10 +557,11 @@ export interface components {
         /** @enum {string} */
         NotificationSeverity: "info" | "warning" | "critical";
         /**
+         * @description pending 和 resolved 仅包含需要用户处理的登录失效与持续离线问题；信息类通知不进入这两个列表。
          * @default all
          * @enum {string}
          */
-        NotificationStatusFilter: "all" | "unread" | "resolved";
+        NotificationStatusFilter: "all" | "unread" | "pending" | "resolved";
         /** @enum {string} */
         NotificationType: "pile_available" | "credential_expired" | "pile_offline" | "pile_recovered";
         OperationsStatus: {
@@ -643,8 +653,11 @@ export interface components {
             openRegistration: boolean;
             portHistoryRetentionDays: number;
             powerRestoreJitterMinutes: number;
-            /** @description 是否允许高级固定时段提醒进入后台调度；关闭后保留用户配置，临时提醒不受影响。 */
-            recurringRemindersEnabled: boolean;
+            /**
+             * @deprecated
+             * @description 旧客户端兼容字段，固定返回 false；固定时段提醒已停止调度，原配置仅保留用于回滚。
+             */
+            readonly recurringRemindersEnabled: boolean;
             scheduledPowerOffEnabled: boolean;
             scheduledPowerOffEndMinute: number;
             scheduledPowerOffStartMinute: number;
@@ -655,8 +668,6 @@ export interface components {
             watchRefreshIntervalMinutes: number;
         };
         ReminderOperationsStatus: {
-            /** @description 已计入当前调度的固定时段规则数；全局关闭时为 0。 */
-            activeRecurringRules: number;
             activeTemporaryRules: number;
             /**
              * Format: double
@@ -675,8 +686,6 @@ export interface components {
             /** Format: date-time */
             nextAttemptAt?: string | null;
             quotaSkips24Hours: number;
-            /** @description 是否允许固定时段提醒进入调度队列。 */
-            recurringEnabled: boolean;
             remoteAttempts24Hours: number;
             remoteFailures24Hours: number;
             remoteSuccesses24Hours: number;
@@ -728,7 +737,7 @@ export interface components {
             estimatedRemainingChecks?: number;
             /**
              * Format: date-time
-             * @description 临时提醒的硬截止时间；固定提醒不返回。
+             * @description 临时提醒的硬截止时间；旧固定规则不返回。
              */
             expiresAt?: string;
             id: string;
@@ -738,7 +747,7 @@ export interface components {
              * @description 当前活动提醒预计下次后台检查时间。
              */
             nextCheckAt?: string;
-            /** @description 临时提醒固定为 true，固定提醒固定为 false。 */
+            /** @description 临时提醒固定为 true；旧固定规则固定为 false。 */
             stopAfterNotify: boolean;
             timezone: string;
             /** Format: date-time */
@@ -746,19 +755,9 @@ export interface components {
             userId: string;
         };
         WatchRuleCreateRequest: {
-            /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
-            activeEndMinute?: number;
-            /** @description 当地时区当天起始分钟；与结束分钟相同时表示全天。 */
-            activeStartMinute?: number;
-            /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
-            activeWeekdays?: number;
             deviceId: string;
-            /** @description 仅用于 temporary；省略时使用 2h，且服务端会将截止时间限制在当天计划断电开始前。 */
+            /** @description 省略时使用 2h，且服务端会将截止时间限制在当天计划断电开始前。 */
             duration?: components["schemas"]["WatchTemporaryDuration"];
-            enabled?: boolean;
-            /** @description 省略时由服务端使用 temporary。 */
-            mode?: components["schemas"]["WatchRuleMode"];
-            timezone?: string;
         };
         WatchRuleCreateResult: {
             backgroundScheduled: boolean;
@@ -767,22 +766,14 @@ export interface components {
             rule?: components["schemas"]["WatchRule"];
         };
         /**
-         * @description temporary 是默认按需任务；recurring 是保留的高级固定时段规则。
+         * @description temporary 是当前按需提醒；recurring 仅用于读取升级前保留的已停用规则，不能新建或编辑。
          * @enum {string}
          */
         WatchRuleMode: "temporary" | "recurring";
         WatchRuleUpdateRequest: {
-            /** @description 当地时区当天结束分钟；小于起始分钟时表示跨午夜。 */
-            activeEndMinute?: number;
-            /** @description 当地时区当天起始分钟；与结束分钟相同时表示全天。 */
-            activeStartMinute?: number;
-            /** @description 星期位掩码，bit 0 至 bit 6 依次代表周一至周日。 */
-            activeWeekdays?: number;
-            /** @description true 表示将活动临时提醒原子标记为 cancelled；固定提醒不接受该字段。 */
+            /** @description true 表示将活动临时提醒原子标记为 cancelled。 */
             cancel?: boolean;
             duration?: components["schemas"]["WatchTemporaryDuration"];
-            enabled?: boolean;
-            timezone?: string;
         };
         /** @enum {string} */
         WatchTemporaryDuration: "1h" | "2h" | "4h" | "until_power_off";
@@ -814,7 +805,7 @@ export interface components {
             boundAt?: string;
             /** @description 服务端是否配置 AppToken；AppToken 本身永不返回。 */
             configured: boolean;
-            /** @description 明确“WxPusher 已处理”不代表特定微信客户端已展示或已读。 */
+            /** @description 提醒用户在 WxPusher App 或微信中确认是否收到；平台无法确认消息是否已读。 */
             deliveryDisclaimer: string;
             enabled: boolean;
             eventTypes: components["schemas"]["WxPusherEventType"][];
@@ -1175,7 +1166,7 @@ export interface components {
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
-        /** @description 当前用户尚未绑定 WxPusher，或微信提醒总开关处于关闭状态 */
+        /** @description 当前用户尚未绑定 WxPusher，或微信提醒处于关闭状态 */
         WxPusherChannelConflict: {
             headers: {
                 [name: string]: unknown;
@@ -1215,7 +1206,7 @@ export interface components {
                 "application/json": components["schemas"]["CodedErrorResponse"];
             };
         };
-        /** @description WxPusher 未配置、存储不可用或供应商暂时异常；站内通知不受影响 */
+        /** @description WxPusher 未配置、存储不可用或服务暂时异常；通知中心不受影响 */
         WxPusherUnavailable: {
             headers: {
                 [name: string]: unknown;
@@ -1271,6 +1262,7 @@ export type HistoryWindow = components['schemas']['HistoryWindow'];
 export type Notification = components['schemas']['Notification'];
 export type NotificationDeliveryStatus = components['schemas']['NotificationDeliveryStatus'];
 export type NotificationDeliverySummary = components['schemas']['NotificationDeliverySummary'];
+export type NotificationDeliveryUserState = components['schemas']['NotificationDeliveryUserState'];
 export type NotificationPage = components['schemas']['NotificationPage'];
 export type NotificationPreference = components['schemas']['NotificationPreference'];
 export type NotificationPreferenceUpdateRequest = components['schemas']['NotificationPreferenceUpdateRequest'];
@@ -1985,7 +1977,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 首次整桩检查结果；无空闲口时包含已创建的临时或固定提醒规则 */
+            /** @description 首次整桩检查结果；无空闲口时包含已创建的临时提醒 */
             201: {
                 headers: {
                     "Cache-Control": components["headers"]["PrivateNoStore"];

@@ -96,7 +96,7 @@ func (m *Manager) recordNotificationOnceLocked(notification model.Notification) 
 	if err != nil {
 		return model.Notification{}, false, fmt.Errorf("load notification delivery preference: %w", err)
 	}
-	inserted, queued, err := m.repository.InsertNotificationWithWxPusherDeliveryIfAbsent(
+	stored, inserted, queued, err := m.repository.InsertNotificationWithWxPusherDeliveryIfAbsent(
 		notification,
 		randomID("ndl"),
 		suppressed,
@@ -104,13 +104,16 @@ func (m *Manager) recordNotificationOnceLocked(notification model.Notification) 
 	if err != nil {
 		return model.Notification{}, false, fmt.Errorf("record notification once: %w", err)
 	}
-	if inserted {
-		m.notificationHub.publish(notification)
+	if stored.ID != "" && (inserted || stored.OccurrenceCount > 1) {
+		m.notificationHub.publish(stored)
 	}
 	if queued && !suppressed {
 		m.wakeNotificationDispatcher()
 	}
-	return notification, inserted, nil
+	if stored.ID == "" {
+		stored = notification
+	}
+	return stored, inserted, nil
 }
 
 func (m *Manager) wxPusherQuietAt(userID string, at time.Time) (bool, error) {
@@ -246,7 +249,7 @@ func (m *Manager) processOnePileAvailability(
 	sourceEventID := event.ID
 	_, _, err = m.recordNotificationOnceLocked(model.Notification{
 		UserID: userID, Type: model.NotificationPileAvailable, Severity: "info",
-		Title:    "充电桩有空闲口",
+		Title:    pileAvailabilityTitle(idlePortIDs),
 		Message:  pileAvailabilityMessage(m.notificationPileLabel(userID, pile.ID), idlePortIDs),
 		DeviceID: pile.ID, PortID: &portID, SourceEventID: &sourceEventID,
 		DedupeKey: fmt.Sprintf("pile_available:%d", event.ID), CreatedAt: event.ChangedAt,
@@ -277,7 +280,7 @@ func (m *Manager) recordTemporaryPileAvailabilityLocked(
 	}
 	_, _, err := m.recordNotificationOnceLocked(model.Notification{
 		UserID: userID, Type: model.NotificationPileAvailable, Severity: "info",
-		Title:    "充电桩有空闲口",
+		Title:    pileAvailabilityTitle(idlePortIDs),
 		Message:  pileAvailabilityMessage(m.notificationPileLabel(userID, pile.ID), idlePortIDs),
 		DeviceID: pile.ID, PortID: &portID, SourceEventID: sourceEventID,
 		DedupeKey: "pile_available_rule:" + rule.ID, CreatedAt: observedAt,
@@ -336,7 +339,14 @@ func pileAvailabilityMessage(pileLabel string, idlePortIDs []int) string {
 	for _, portID := range idlePortIDs {
 		ports = append(ports, strconv.Itoa(portID)+" 号")
 	}
-	return fmt.Sprintf("%s目前有 %d 个空闲充电口：%s。", strings.TrimSpace(pileLabel), len(ports), strings.Join(ports, "、"))
+	return fmt.Sprintf("%s现在有 %d 个空闲充电口：%s。", strings.TrimSpace(pileLabel), len(ports), strings.Join(ports, "、"))
+}
+
+func pileAvailabilityTitle(idlePortIDs []int) string {
+	if len(idlePortIDs) == 1 {
+		return fmt.Sprintf("%d 号充电口空闲了", idlePortIDs[0])
+	}
+	return fmt.Sprintf("%d 个充电口空闲了", len(idlePortIDs))
 }
 
 func (m *Manager) recoverPendingPileAvailabilityNotifications(limit int) error {
@@ -392,7 +402,7 @@ func (m *Manager) notifyCredentialExpired(userID string, at time.Time) error {
 	defer m.notificationMu.Unlock()
 	if _, _, err := m.recordNotificationOnceLocked(model.Notification{
 		UserID: userID, Type: model.NotificationCredentialExpired, Severity: "warning",
-		Title: "登录凭据已失效", Message: "后台刷新已暂停，请重新扫码或更新登录凭据后恢复提醒。",
+		Title: "需要重新登录", Message: "登录已过期，请重新扫码后继续查看和接收提醒。",
 		DedupeKey: credentialExpiredDedupeKey, CreatedAt: at,
 	}); err != nil {
 		return err

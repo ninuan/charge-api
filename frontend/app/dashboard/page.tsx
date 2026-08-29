@@ -23,7 +23,7 @@ import {
   useMemo,
   useState,
 } from "react"
-import { toast } from "sonner"
+import { feedbackMessage, notify } from "@/lib/feedback"
 
 import { AppShell } from "@/components/app-shell"
 import { MetricCard } from "@/components/metric-card"
@@ -208,14 +208,26 @@ export default function DashboardPage() {
   }, [filter, queryReady, search])
 
   const handleError = useCallback(
-    (reason: unknown) => {
-      const message = (reason as Error).message
+    (reason: unknown, title = "操作失败", id?: string, persistent = false) => {
+      const message = feedbackMessage(reason)
       if (message.includes("登录已失效")) {
         clearSession()
         router.replace("/login")
         return
       }
-      toast.error(message)
+      notify.error(reason, {
+        title,
+        id,
+        persistent,
+        bannerId: id,
+        description: persistent
+          ? "当前内容可能不是最新状态，请检查网络后重新加载。"
+          : undefined,
+        details: persistent ? message : undefined,
+        action: persistent
+          ? { label: "重新加载", onClick: () => window.location.reload() }
+          : undefined,
+      })
     },
     [clearSession, router]
   )
@@ -269,14 +281,11 @@ export default function DashboardPage() {
       if (!user) return router.replace("/login")
       if (user.role === "admin") return router.replace("/admin")
       try {
-        await Promise.all([
-          fetchSnapshot(),
-          loadWatch().catch((reason) => handleError(reason)),
-          loadNotifications().catch((reason) => handleError(reason)),
-        ])
+        await Promise.all([fetchSnapshot(), loadWatch(), loadNotifications()])
+        notify.dismissBanner("dashboard-load")
         if (active) connectStream()
       } catch (reason) {
-        handleError(reason)
+        handleError(reason, "看板加载失败", "dashboard-load", true)
       } finally {
         if (active) setInitialLoadFinished(true)
       }
@@ -293,8 +302,8 @@ export default function DashboardPage() {
   const handleRemove = useCallback(
     (id: string) => {
       void deletePile(id)
-        .then(() => toast.success("充电桩已移除"))
-        .catch(handleError)
+        .then(() => notify.success("充电桩已移除"))
+        .catch((reason) => handleError(reason, "移除失败"))
     },
     [deletePile, handleError]
   )
@@ -305,8 +314,8 @@ export default function DashboardPage() {
       payload: { name: string; address: string; sortOrder: number }
     ) => {
       void updatePile(id, payload)
-        .then(() => toast.success("设备资料已更新"))
-        .catch(handleError)
+        .then(() => notify.success("设备资料已更新"))
+        .catch((reason) => handleError(reason, "更新失败"))
     },
     [handleError, updatePile]
   )
@@ -322,9 +331,9 @@ export default function DashboardPage() {
       setReordering(true)
       try {
         await reorderPiles(ids)
-        toast.success("充电桩顺序已调整")
+        notify.success("充电桩顺序已调整")
       } catch (reason) {
-        handleError(reason)
+        handleError(reason, "调整顺序失败")
       } finally {
         setReordering(false)
       }
@@ -350,7 +359,7 @@ export default function DashboardPage() {
         setWatchManagementOpen(true)
         return
       }
-      setWatchTarget({ pileId, mode: "temporary" })
+      setWatchTarget({ pileId })
     },
     [watchRules]
   )
@@ -377,9 +386,12 @@ export default function DashboardPage() {
     setRefreshing(true)
     try {
       const next = await refreshFromCapture()
-      toast.success(next.refresh.message || "设备状态已刷新")
+      notify.success("设备状态已刷新", {
+        description: next.refresh.message || undefined,
+        id: "dashboard-refresh",
+      })
     } catch (reason) {
-      handleError(reason)
+      handleError(reason, "刷新失败", "dashboard-refresh")
     } finally {
       setRefreshing(false)
     }
@@ -431,7 +443,9 @@ export default function DashboardPage() {
             disabled={refreshing}
             onClick={() => void refresh()}
           >
-            <RefreshCwIcon className={refreshing ? "animate-spin" : ""} />
+            <RefreshCwIcon
+              className={refreshing ? "motion-safe:animate-spin" : ""}
+            />
             {refreshing ? "刷新中…" : "刷新状态"}
           </Button>
         </div>
@@ -475,7 +489,10 @@ export default function DashboardPage() {
           />
         </CardContent>
       </Card>
-      <Card className="mt-3 shadow-xs md:sticky md:top-20 md:z-30">
+      <Card
+        data-slot="dashboard-search-toolbar"
+        className="mt-3 shadow-xs md:sticky md:top-(--app-header-height) md:z-30"
+      >
         <CardContent className="grid gap-2 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <div>
@@ -527,7 +544,9 @@ export default function DashboardPage() {
             disabled={refreshing}
             onClick={() => void refresh()}
           >
-            <RefreshCwIcon className={refreshing ? "animate-spin" : ""} />
+            <RefreshCwIcon
+              className={refreshing ? "motion-safe:animate-spin" : ""}
+            />
             {refreshing ? "刷新中…" : "主动刷新设备状态"}
           </Button>
         </CardContent>
@@ -593,7 +612,7 @@ export default function DashboardPage() {
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
                 {snapshot.piles.length
                   ? "调整搜索内容或状态条件，查看其他充电口。"
-                  : "建议先完成扫码登录，再通过添加入口录入桩号；系统会在添加设备时自动维护登录凭据。"}
+                  : "建议先完成扫码登录，再通过添加入口录入桩号；添加设备后系统会自动保持登录有效。"}
               </p>
               {snapshot.piles.length && hasActiveFilter ? (
                 <Button

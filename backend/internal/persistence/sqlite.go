@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 10
+const schemaVersion = 12
 
 type Store struct {
 	db     *sql.DB
@@ -180,6 +180,8 @@ func (s *Store) initialize() error {
 			dedupe_key TEXT NOT NULL DEFAULT '',
 			read_at INTEGER,
 			resolved_at INTEGER,
+			occurrence_count INTEGER NOT NULL DEFAULT 1 CHECK(occurrence_count >= 1),
+			last_occurred_at INTEGER NOT NULL DEFAULT 0 CHECK(last_occurred_at >= 0),
 			created_at INTEGER NOT NULL,
 			CHECK(port_id IS NULL OR port_id > 0),
 			CHECK(type <> 'port_idle' OR (length(trim(device_id)) > 0 AND port_id IS NOT NULL))
@@ -366,6 +368,18 @@ func (s *Store) initialize() error {
 	if err := s.ensureColumn("watch_rules", "stop_after_notify", "INTEGER NOT NULL DEFAULT 0 CHECK(stop_after_notify IN (0, 1))"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("notifications", "occurrence_count", "INTEGER NOT NULL DEFAULT 1 CHECK(occurrence_count >= 1)"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("notifications", "last_occurred_at", "INTEGER NOT NULL DEFAULT 0 CHECK(last_occurred_at >= 0)"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE notifications SET last_occurred_at = created_at WHERE last_occurred_at = 0`); err != nil {
+		return fmt.Errorf("backfill notification occurrence time: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS notifications_user_last_occurrence_idx ON notifications(user_id, last_occurred_at DESC, id DESC)`); err != nil {
+		return fmt.Errorf("create notification occurrence index: %w", err)
+	}
 	for column, definition := range map[string]string{
 		"browser":        "TEXT NOT NULL DEFAULT ''",
 		"os":             "TEXT NOT NULL DEFAULT ''",
@@ -383,6 +397,9 @@ func (s *Store) initialize() error {
 	if err := s.ensureSchemaV10Objects(); err != nil {
 		return err
 	}
+	if err := s.migrateSchemaV12(); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO metadata(key, value) VALUES('schema_version', ?)
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -390,6 +407,52 @@ func (s *Store) initialize() error {
 	)
 	if err != nil {
 		return fmt.Errorf("write schema version: %w", err)
+	}
+	return nil
+}
+
+// migrateSchemaV12 retires fixed-schedule reminders without deleting their
+// configuration. Old rows remain available for rollback, but cannot be picked
+// up by the scheduler after this migration.
+func (s *Store) migrateSchemaV12() error {
+	if _, ok, err := s.metadata("schema_v12_recurring_retired"); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin schema v12 migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`UPDATE watch_rules SET enabled=0 WHERE mode='recurring' AND enabled=1`); err != nil {
+		return fmt.Errorf("disable recurring watch rules: %w", err)
+	}
+	var rawSettings string
+	err = tx.QueryRow(`SELECT value FROM metadata WHERE key='registration_settings'`).Scan(&rawSettings)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("read settings for schema v12: %w", err)
+	}
+	if err == nil {
+		settings := make(map[string]any)
+		if err := json.Unmarshal([]byte(rawSettings), &settings); err != nil {
+			return fmt.Errorf("parse settings for schema v12: %w", err)
+		}
+		settings["recurringRemindersEnabled"] = false
+		encoded, err := json.Marshal(settings)
+		if err != nil {
+			return fmt.Errorf("encode settings for schema v12: %w", err)
+		}
+		if _, err := tx.Exec(`UPDATE metadata SET value=? WHERE key='registration_settings'`, string(encoded)); err != nil {
+			return fmt.Errorf("save settings for schema v12: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO metadata(key, value) VALUES('schema_v12_recurring_retired', '1')`); err != nil {
+		return fmt.Errorf("mark schema v12 migration: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema v12 migration: %w", err)
 	}
 	return nil
 }

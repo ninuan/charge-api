@@ -304,11 +304,9 @@ export interface ReminderOperationsStatus {
   state: "healthy" | "degraded" | "disabled" | "power_off" | "stopped"
   message: string
   enabled: boolean
-  recurringEnabled: boolean
   schedulerRunning: boolean
   scheduledPowerOffActive: boolean
   activeTemporaryRules: number
-  activeRecurringRules: number
   completedNotified24Hours: number
   completedExpired24Hours: number
   averageTemporaryMinutes: number

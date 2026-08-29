@@ -37,7 +37,7 @@ func TestRefreshWatchedPileUsesOwnCredentialCacheAndSeparateMetrics(t *testing.T
 		cookies = append(cookies, r.Header.Get("Cookie"))
 		cookieMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[2,8]}`, testBackgroundPileID)
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[1,2,3,4,5,6,7,8,9,10]}`, testBackgroundPileID)
 	}))
 
 	base := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
@@ -231,12 +231,14 @@ func TestRefreshWatchedPileRejectsDisabledRulesAndUnownedPilesWithoutTraffic(t *
 			t.Fatalf("DeleteWatchRule: %v", err)
 		}
 	}
-	disabled := false
-	rule, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
-		DeviceID: testBackgroundPileID, Enabled: &disabled,
-	})
-	if err != nil {
-		t.Fatalf("CreateWatchRule disabled: %v", err)
+	now := time.Now().UTC().Truncate(time.Second)
+	rule := model.WatchRule{
+		ID: "retired-recurring", UserID: owner.ID, DeviceID: testBackgroundPileID,
+		Mode: model.WatchRuleRecurring, Enabled: false, ActiveWeekdays: 127,
+		Timezone: "Asia/Shanghai", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := manager.repository.SaveWatchRule(rule); err != nil {
+		t.Fatalf("SaveWatchRule retired recurring: %v", err)
 	}
 	if _, err := manager.RefreshWatchedPile(owner.ID, testBackgroundPileID); !errors.Is(err, ErrWatchRefreshNotEnabled) {
 		t.Fatalf("disabled-rule refresh error = %v (rule %+v)", err, rule)
@@ -319,12 +321,22 @@ func newBackgroundRefreshTestManager(t *testing.T, handler http.Handler) (*Manag
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	settings = manager.Settings()
+	restoreScheduledPowerOff := settings.ScheduledPowerOffEnabled
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable scheduled power-off: %v", err)
+	}
 	for _, user := range []model.User{owner, other} {
 		if _, err := manager.CreateWatchRule(user.ID, model.WatchRuleCreateRequest{
 			DeviceID: testBackgroundPileID,
 		}); err != nil {
 			t.Fatalf("CreateWatchRule for %s: %v", user.ID, err)
 		}
+	}
+	settings.ScheduledPowerOffEnabled = restoreScheduledPowerOff
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("restore scheduled power-off: %v", err)
 	}
 	return manager, owner, other
 }

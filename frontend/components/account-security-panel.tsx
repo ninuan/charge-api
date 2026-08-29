@@ -7,7 +7,7 @@ import {
   LogOutIcon,
 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -26,7 +26,10 @@ export function AccountSecurityPanel() {
     try {
       setSessions(await fetchSessions())
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "会话加载失败",
+        id: "account-sessions-load",
+      })
     }
   }
 
@@ -37,7 +40,11 @@ export function AccountSecurityPanel() {
         if (active) setSessions(nextSessions)
       })
       .catch((reason) => {
-        if (active) toast.error((reason as Error).message)
+        if (active)
+          notify.error(reason, {
+            title: "会话加载失败",
+            id: "account-sessions-load",
+          })
       })
     return () => {
       active = false
@@ -46,16 +53,22 @@ export function AccountSecurityPanel() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (newPassword.length < 8) return toast.error("新密码至少需要 8 个字符")
+    if (newPassword.length < 8)
+      return notify.warning("新密码过短", {
+        description: "请输入至少 8 个字符。",
+        id: "password-validation",
+      })
     setSaving(true)
     try {
       await changePassword(currentPassword, newPassword)
       setCurrentPassword("")
       setNewPassword("")
       await loadSessions()
-      toast.success("密码已修改，其他设备已退出")
+      notify.success("密码已修改", {
+        description: "其他设备上的登录会话已退出。",
+      })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "修改密码失败" })
     } finally {
       setSaving(false)
     }
@@ -64,9 +77,9 @@ export function AccountSecurityPanel() {
     try {
       await logoutOtherSessions()
       await loadSessions()
-      toast.success("其他设备已退出")
+      notify.success("其他设备已退出")
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "退出设备失败" })
     }
   }
 
@@ -106,7 +119,9 @@ export function AccountSecurityPanel() {
                 />
               </Field>
               <Button className="w-full" type="submit" disabled={saving}>
-                {saving && <LoaderCircleIcon className="animate-spin" />}
+                {saving && (
+                  <LoaderCircleIcon className="motion-safe:animate-spin" />
+                )}
                 {saving ? "保存中…" : "更新密码"}
               </Button>
             </FieldGroup>

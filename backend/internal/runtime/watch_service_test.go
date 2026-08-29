@@ -17,6 +17,11 @@ const (
 
 func TestWatchRulesValidatePileOwnershipConflictAndUpdates(t *testing.T) {
 	manager, owner, other := newWatchTestManager(t)
+	settings := manager.Settings()
+	settings.ScheduledPowerOffEnabled = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("disable power-off: %v", err)
+	}
 
 	rule, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
 		DeviceID: testWatchPileOne,
@@ -24,7 +29,7 @@ func TestWatchRulesValidatePileOwnershipConflictAndUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWatchRule: %v", err)
 	}
-	if !rule.Enabled || rule.DeviceID != testWatchPileOne {
+	if !rule.Enabled || rule.DeviceID != testWatchPileOne || rule.Mode != model.WatchRuleTemporary || rule.ExpiresAt == nil {
 		t.Fatalf("unexpected whole-pile defaults: %+v", rule)
 	}
 	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
@@ -38,20 +43,9 @@ func TestWatchRulesValidatePileOwnershipConflictAndUpdates(t *testing.T) {
 		t.Fatalf("unowned pile error = %v", err)
 	}
 
-	disabled := false
-	start := 420
-	end := 1380
-	updated, err := manager.UpdateWatchRule(owner.ID, rule.ID, model.WatchRuleUpdateRequest{
-		Enabled: &disabled, ActiveStartMinute: &start, ActiveEndMinute: &end,
-	})
-	if err != nil {
-		t.Fatalf("UpdateWatchRule: %v", err)
-	}
-	if updated.Enabled || updated.ActiveStartMinute != 420 || updated.ActiveEndMinute != 1380 {
-		t.Fatalf("watch rule update did not apply: %+v", updated)
-	}
+	duration := model.WatchDurationFourHours
 	if _, err := manager.UpdateWatchRule(other.ID, rule.ID, model.WatchRuleUpdateRequest{
-		Enabled: &disabled,
+		Duration: &duration,
 	}); !errors.Is(err, ErrWatchRuleNotFound) {
 		t.Fatalf("cross-user update error = %v", err)
 	}
@@ -71,6 +65,7 @@ func TestWatchRulesEnforceWholePileLimit(t *testing.T) {
 	manager, owner, _ := newWatchTestManager(t)
 	settings := manager.Settings()
 	settings.WatchPileLimitPerUser = 1
+	settings.ScheduledPowerOffEnabled = false
 	if err := manager.UpdateSettings(settings); err != nil {
 		t.Fatalf("UpdateSettings pile limit: %v", err)
 	}
@@ -83,6 +78,42 @@ func TestWatchRulesEnforceWholePileLimit(t *testing.T) {
 		DeviceID: testWatchPileTwo,
 	}); !errors.Is(err, ErrWatchPileLimit) {
 		t.Fatalf("pile limit error = %v", err)
+	}
+}
+
+func TestRecurringWatchRulesAreRejectedAndNeverScheduled(t *testing.T) {
+	manager, owner, _ := newWatchTestManager(t)
+	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
+	setReminderTestClock(manager, &now)
+	mode := model.WatchRuleRecurring
+	if _, err := manager.CreateWatchRule(owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: testWatchPileOne, Mode: &mode,
+	}); !errors.Is(err, ErrWatchRecurringDisabled) {
+		t.Fatalf("recurring creation error = %v", err)
+	}
+	legacy := model.WatchRule{
+		ID: "legacy-recurring", UserID: owner.ID, DeviceID: testWatchPileOne,
+		Mode: model.WatchRuleRecurring, Enabled: true, ActiveWeekdays: 31,
+		ActiveStartMinute: 480, ActiveEndMinute: 1320, Timezone: "Asia/Shanghai",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := manager.repository.SaveWatchRule(legacy); err != nil {
+		t.Fatalf("seed legacy recurring rule: %v", err)
+	}
+	targets, err := manager.reminderTargets()
+	if err != nil {
+		t.Fatalf("reminderTargets: %v", err)
+	}
+	if len(targets) != 0 {
+		t.Fatalf("retired recurring rule entered scheduler: %+v", targets)
+	}
+	settings := manager.Settings()
+	settings.RecurringRemindersEnabled = true
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	if manager.Settings().RecurringRemindersEnabled {
+		t.Fatal("retired recurring setting was re-enabled")
 	}
 }
 

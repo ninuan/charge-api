@@ -599,7 +599,6 @@ func settingsAuditMessage(previous, next model.RegistrationSettings) string {
 		groups = append(groups, "数据保留")
 	}
 	if previous.BackgroundRemindersEnabled != next.BackgroundRemindersEnabled ||
-		previous.RecurringRemindersEnabled != next.RecurringRemindersEnabled ||
 		previous.WatchRefreshIntervalMinutes != next.WatchRefreshIntervalMinutes ||
 		previous.WatchPileLimitPerUser != next.WatchPileLimitPerUser ||
 		previous.WatchDailyRefreshQuota != next.WatchDailyRefreshQuota {

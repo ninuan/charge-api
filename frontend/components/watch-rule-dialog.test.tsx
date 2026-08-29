@@ -1,10 +1,4 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -96,11 +90,9 @@ describe("WatchRuleDialog", () => {
       />
     )
 
-    expect(screen.getByRole("tab", { name: "临时提醒" })).toHaveAttribute(
-      "data-active"
-    )
+    expect(screen.queryByText("固定时段（高级）")).not.toBeInTheDocument()
     expect(screen.getByLabelText("等待多久")).toHaveTextContent("2 小时")
-    expect(screen.getByText(/后台最多约检查 12 次/)).toBeInTheDocument()
+    expect(screen.getByText(/最多约检查 12 次/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "开始提醒" }))
 
     await waitFor(() =>
@@ -132,52 +124,7 @@ describe("WatchRuleDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "开始提醒" }))
     expect(await screen.findByText("3 号口、7 号口")).toBeVisible()
-    expect(
-      screen.getByText("已完成本次查询，不会创建后台提醒任务。")
-    ).toBeVisible()
+    expect(screen.getByText("已完成本次查询，不会创建后台提醒。")).toBeVisible()
     expect(onOpenChange).not.toHaveBeenCalled()
-  })
-
-  it("keeps cross-midnight recurring reminders in the advanced tab", async () => {
-    const user = userEvent.setup()
-    watchContextMock.createRule.mockResolvedValue({
-      rule: { id: "rule-1" },
-      idlePortIds: [],
-      backgroundScheduled: true,
-      message: "固定时段提醒已保存。",
-    })
-    const onOpenChange = vi.fn()
-
-    render(
-      <WatchRuleDialog
-        piles={[pile]}
-        target={{ pileId: "pile-1" }}
-        open
-        onOpenChange={onOpenChange}
-      />
-    )
-
-    await user.click(screen.getByRole("tab", { name: "固定时段（高级）" }))
-    fireEvent.change(screen.getByLabelText("开始时间"), {
-      target: { value: "22:30" },
-    })
-    fireEvent.change(screen.getByLabelText("结束时间"), {
-      target: { value: "06:30" },
-    })
-    expect(screen.getByText(/22:30–06:30（跨午夜）/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "创建固定提醒" }))
-
-    await waitFor(() =>
-      expect(watchContextMock.createRule).toHaveBeenCalledWith({
-        deviceId: "pile-1",
-        mode: "recurring",
-        enabled: true,
-        activeWeekdays: 127,
-        activeStartMinute: 1350,
-        activeEndMinute: 390,
-        timezone: "Asia/Shanghai",
-      })
-    )
-    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

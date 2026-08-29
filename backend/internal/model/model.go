@@ -471,15 +471,16 @@ type NotificationDelivery struct {
 }
 
 type NotificationDeliverySummary struct {
-	ID                  string                     `json:"id"`
-	Status              NotificationDeliveryStatus `json:"status"`
-	IsTest              bool                       `json:"isTest"`
-	AcceptedAt          *time.Time                 `json:"acceptedAt,omitempty"`
-	ProviderSucceededAt *time.Time                 `json:"providerSucceededAt,omitempty"`
-	CreatedAt           time.Time                  `json:"createdAt"`
-	UpdatedAt           time.Time                  `json:"updatedAt"`
-	Message             string                     `json:"message"`
-	ErrorCode           string                     `json:"errorCode,omitempty"`
+	ID                  string                        `json:"id"`
+	Status              NotificationDeliveryStatus    `json:"status"`
+	UserState           NotificationDeliveryUserState `json:"userState"`
+	IsTest              bool                          `json:"isTest"`
+	AcceptedAt          *time.Time                    `json:"acceptedAt,omitempty"`
+	ProviderSucceededAt *time.Time                    `json:"providerSucceededAt,omitempty"`
+	CreatedAt           time.Time                     `json:"createdAt"`
+	UpdatedAt           time.Time                     `json:"updatedAt"`
+	Message             string                        `json:"message"`
+	ErrorCode           string                        `json:"errorCode,omitempty"`
 }
 
 type NotificationPreference struct {
@@ -510,19 +511,21 @@ const (
 )
 
 type Notification struct {
-	ID            string           `json:"id"`
-	UserID        string           `json:"userId"`
-	Type          NotificationType `json:"type"`
-	Severity      string           `json:"severity"`
-	Title         string           `json:"title"`
-	Message       string           `json:"message"`
-	DeviceID      string           `json:"deviceId,omitempty"`
-	PortID        *int             `json:"portId,omitempty"`
-	SourceEventID *int64           `json:"sourceEventId,omitempty"`
-	DedupeKey     string           `json:"-"`
-	ReadAt        *time.Time       `json:"readAt,omitempty"`
-	ResolvedAt    *time.Time       `json:"resolvedAt,omitempty"`
-	CreatedAt     time.Time        `json:"createdAt"`
+	ID              string           `json:"id"`
+	UserID          string           `json:"userId"`
+	Type            NotificationType `json:"type"`
+	Severity        string           `json:"severity"`
+	Title           string           `json:"title"`
+	Message         string           `json:"message"`
+	DeviceID        string           `json:"deviceId,omitempty"`
+	PortID          *int             `json:"portId,omitempty"`
+	SourceEventID   *int64           `json:"sourceEventId,omitempty"`
+	DedupeKey       string           `json:"-"`
+	ReadAt          *time.Time       `json:"readAt,omitempty"`
+	ResolvedAt      *time.Time       `json:"resolvedAt,omitempty"`
+	OccurrenceCount int              `json:"occurrenceCount"`
+	LastOccurredAt  time.Time        `json:"lastOccurredAt"`
+	CreatedAt       time.Time        `json:"createdAt"`
 }
 
 type NotificationPage struct {
@@ -747,11 +750,9 @@ type ReminderOperationsStatus struct {
 	State                    string     `json:"state"`
 	Message                  string     `json:"message"`
 	Enabled                  bool       `json:"enabled"`
-	RecurringEnabled         bool       `json:"recurringEnabled"`
 	SchedulerRunning         bool       `json:"schedulerRunning"`
 	ScheduledPowerOffActive  bool       `json:"scheduledPowerOffActive"`
 	ActiveTemporaryRules     int        `json:"activeTemporaryRules"`
-	ActiveRecurringRules     int        `json:"activeRecurringRules"`
 	CompletedNotified24Hours int        `json:"completedNotified24Hours"`
 	CompletedExpired24Hours  int        `json:"completedExpired24Hours"`
 	AverageTemporaryMinutes  float64    `json:"averageTemporaryMinutes"`
@@ -772,7 +773,6 @@ type ReminderOperationsStatus struct {
 
 type ReminderRuleOperationsStats struct {
 	ActiveTemporaryRules     int
-	ActiveRecurringRules     int
 	CompletedNotified24Hours int
 	CompletedExpired24Hours  int
 	AverageTemporaryMinutes  float64

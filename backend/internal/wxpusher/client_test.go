@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +120,30 @@ func TestClientQueryMessageStatusAcceptsNumericProviderState(t *testing.T) {
 				t.Fatalf("numeric message status = %+v", status)
 			}
 		})
+	}
+}
+
+func TestClientQueryMessageStatusAcceptsSanitizedObservedNumericFixture(t *testing.T) {
+	response, err := os.ReadFile("testdata/status-pending-numeric.sanitized.json")
+	if err != nil {
+		t.Fatalf("read sanitized provider fixture: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/send/query/status" || r.URL.Query().Get("sendRecordId") != "2421217977" {
+			t.Fatalf("status request = %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	}))
+	defer server.Close()
+
+	status, err := newTestClient(t, server.URL, 0).QueryMessageStatus(context.Background(), "2421217977")
+	if err != nil {
+		t.Fatalf("QueryMessageStatus: %v", err)
+	}
+	if status.SendRecordID != "2421217977" || status.ProviderCode != 1 || status.Status != "等待发送" ||
+		status.Succeeded || status.Failed {
+		t.Fatalf("numeric fixture status = %+v", status)
 	}
 }
 

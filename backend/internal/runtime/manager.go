@@ -115,7 +115,7 @@ func NewManager(
 			StatsRetentionDays:           defaultStatsRetentionDays,
 			PortHistoryRetentionDays:     defaultHistoryRetentionDays,
 			BackgroundRemindersEnabled:   true,
-			RecurringRemindersEnabled:    true,
+			RecurringRemindersEnabled:    false,
 			WatchRefreshIntervalMinutes:  defaultWatchIntervalMinutes,
 			WatchPileLimitPerUser:        defaultWatchPileLimit,
 			WatchDailyRefreshQuota:       defaultWatchDailyQuota,

@@ -51,7 +51,7 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 	}
 	select {
 	case notification := <-stream:
-		if notification.Type != model.NotificationPileAvailable || notification.Title != "充电桩有空闲口" ||
+		if notification.Type != model.NotificationPileAvailable || notification.Title != "1 号充电口空闲了" ||
 			notification.SourceEventID == nil || *notification.SourceEventID != events[0].ID {
 			t.Fatalf("unexpected streamed notification: %+v", notification)
 		}
@@ -126,7 +126,7 @@ func TestIdleTransitionRecoveryCreatesOneDurableNotification(t *testing.T) {
 		}
 	}
 	notifications, err = restarted.repository.ListNotifications(owner.ID, 20)
-	if err != nil || len(notifications) != 2 {
+	if err != nil || len(notifications) != 1 {
 		t.Fatalf("concurrent durable notifications = %+v, err %v", notifications, err)
 	}
 	unchanged, err := manager.repository.RecordPortStatusTransitions(owner.ID, []model.Pile{pile})
@@ -175,7 +175,7 @@ func TestCredentialExpiryNotifiesOncePausesAndResumesAfterValidation(t *testing.
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10}`, testBackgroundPileID)
+		_, _ = fmt.Fprintf(w, `{"id":%q,"number":"6201","status":"在线","opennum":10,"used":[1,2,3,4,5,6,7,8,9,10]}`, testBackgroundPileID)
 	}))
 	deleteReminderRulesForUser(t, manager, other.ID)
 	settings := manager.Settings()
@@ -269,7 +269,7 @@ func TestOfflineNotificationWaitsForPowerRestoreThreeChecksAndThirtyMinutes(t *t
 	}
 	notifications, err := manager.repository.ListNotifications(owner.ID, 20)
 	if err != nil || len(notifications) != 1 || notifications[0].Type != model.NotificationPileOffline ||
-		notifications[0].Title != "充电桩持续离线" || notifications[0].ResolvedAt != nil {
+		notifications[0].Title != "充电桩无法连接" || notifications[0].ResolvedAt != nil {
 		t.Fatalf("offline threshold notifications = %+v, err %v", notifications, err)
 	}
 

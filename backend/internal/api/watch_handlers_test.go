@@ -19,26 +19,22 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 	if anonymous.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous status = %d, want 401", anonymous.Code)
 	}
-	create := watchAPIRequest(
-		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`","mode":"recurring"}`,
-	)
-	if create.Code != http.StatusCreated {
-		t.Fatalf("create status = %d: %s", create.Code, create.Body.String())
+	duration := model.WatchDurationTwoHours
+	rule, err := fixture.manager.CreateWatchRule(fixture.owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: deviceID, Duration: &duration,
+	})
+	if err != nil {
+		t.Fatalf("seed temporary watch rule: %v", err)
 	}
-	if create.Header().Get("Cache-Control") != "private, no-store" {
-		t.Fatalf("create cache control = %q", create.Header().Get("Cache-Control"))
-	}
-	var createResult model.WatchRuleCreateResult
-	if err := json.NewDecoder(create.Body).Decode(&createResult); err != nil {
-		t.Fatalf("decode created watch rule: %v", err)
-	}
-	if createResult.Rule == nil || !createResult.BackgroundScheduled {
-		t.Fatalf("unexpected create result: %+v", createResult)
-	}
-	rule := *createResult.Rule
 	if rule.UserID != fixture.owner.ID || rule.DeviceID != deviceID || !rule.Enabled {
 		t.Fatalf("unexpected created rule: %+v", rule)
+	}
+	retiredRecurring := watchAPIRequest(
+		t, fixture, fixture.other.ID, http.MethodPost, "/api/watch-rules",
+		`{"deviceId":"`+deviceID+`","mode":"recurring"}`,
+	)
+	if retiredRecurring.Code != http.StatusConflict || !strings.Contains(retiredRecurring.Body.String(), "WATCH_RECURRING_DISABLED") {
+		t.Fatalf("retired recurring status = %d: %s", retiredRecurring.Code, retiredRecurring.Body.String())
 	}
 
 	list := watchAPIRequest(t, fixture, fixture.owner.ID, http.MethodGet, "/api/watch-rules", "")
@@ -69,16 +65,16 @@ func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 		t.Fatalf("legacy port target status = %d: %s", legacyPortTarget.Code, legacyPortTarget.Body.String())
 	}
 
-	disabled := watchAPIRequest(
+	cancelled := watchAPIRequest(
 		t, fixture, fixture.owner.ID, http.MethodPatch, "/api/watch-rules/"+rule.ID,
-		`{"enabled":false}`,
+		`{"cancel":true}`,
 	)
-	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"enabled":false`) {
-		t.Fatalf("disable status = %d: %s", disabled.Code, disabled.Body.String())
+	if cancelled.Code != http.StatusOK || !strings.Contains(cancelled.Body.String(), `"completionReason":"cancelled"`) {
+		t.Fatalf("cancel status = %d: %s", cancelled.Code, cancelled.Body.String())
 	}
 	crossUserUpdate := watchAPIRequest(
 		t, fixture, fixture.other.ID, http.MethodPatch, "/api/watch-rules/"+rule.ID,
-		`{"enabled":true}`,
+		`{"duration":"4h"}`,
 	)
 	if crossUserUpdate.Code != http.StatusNotFound || !strings.Contains(crossUserUpdate.Body.String(), "WATCH_RULE_NOT_FOUND") {
 		t.Fatalf("cross-user update = %d: %s", crossUserUpdate.Code, crossUserUpdate.Body.String())
@@ -176,12 +172,11 @@ func TestNotificationAPIManagesPreferencesInboxAndOwnership(t *testing.T) {
 func TestWatchOverviewReturnsOnlyCurrentUserPolicyAndQuota(t *testing.T) {
 	fixture := newHistoryAPIFixture(t)
 	const deviceID = "2601201412385560088"
-	created := watchAPIRequest(
-		t, fixture, fixture.owner.ID, http.MethodPost, "/api/watch-rules",
-		`{"deviceId":"`+deviceID+`","mode":"recurring"}`,
-	)
-	if created.Code != http.StatusCreated {
-		t.Fatalf("create reminder = %d: %s", created.Code, created.Body.String())
+	duration := model.WatchDurationTwoHours
+	if _, err := fixture.manager.CreateWatchRule(fixture.owner.ID, model.WatchRuleCreateRequest{
+		DeviceID: deviceID, Duration: &duration,
+	}); err != nil {
+		t.Fatalf("seed temporary reminder: %v", err)
 	}
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {

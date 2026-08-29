@@ -7,7 +7,7 @@ import {
   ShieldCheckIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { useCloseAppShellMenu } from "@/components/app-shell"
 import { Button } from "@/components/ui/button"
@@ -86,10 +86,10 @@ const steps = [
     [
       "在看板中找到目标充电桩，点击“有空闲时提醒我”。",
       "选择等待 1、2、4 小时或持续到今晚断电前，然后点击“开始提醒”。",
-      "系统会先查看一次当前状态；如果已经有空闲口，会直接告诉你端口号，不再创建后台任务。",
+      "系统会先查看一次当前状态；如果已经有空闲口，会直接告诉你端口号，不再继续后台检查。",
       "没有空闲口时，提醒会在所选时间内运行；发现空闲、等待到期或手动取消后都会自动停止。",
       "点击看板顶部的“空闲提醒”，可以查看剩余时间和下次检查，也可以延长或取消。",
-      "如有每周固定需求，可在“固定时段提醒（高级）”中设置星期和时间。",
+      "每次需要充电时重新开启即可，发现空闲口、到期或进入计划断电时段后会自动停止。",
       "学校计划断电时段不会发送离线提醒；恢复供电后仍持续离线，才会提示你检查。",
       "如需浏览器弹窗提醒，请在通知中心点击“允许通知”，并保持网页打开。",
     ],
@@ -100,12 +100,12 @@ const steps = [
     [
       "打开右上角通知中心，在“微信提醒”中点击“获取二维码”。",
       "使用微信扫码并关注，等待页面显示“已绑定”。",
-      "打开微信提醒总开关，并选择要接收的空闲、登录失效、持续离线或恢复在线消息。",
+      "打开微信提醒，并选择要接收的空闲口、重新登录、无法连接或恢复连接消息。",
       "点击“发送测试消息”，在最近测试中确认发送结果。",
-      "免打扰时段只保留站内通知，不弹出浏览器或微信提醒。",
+      "免打扰时段不弹出网页或微信提醒，消息仍会保留在通知中心。",
       "如果使用微信 ClawBot，请按 WxPusher 页面提示激活；该微信渠道每次激活后约 24 小时可接收 10 条，WxPusher 手机端和桌面端不受这项限制。",
       "关闭总开关或解除绑定不会删除通知中心里的历史消息。",
-      "微信端是否展示和已读由接收渠道决定；页面会显示 Charge Console 能确认到的最近发送结果。",
+      "消息发出后，请在 WxPusher App 或微信中确认是否收到；页面无法确认是否已经阅读。",
     ],
   ],
 ] as const
@@ -164,7 +164,10 @@ export function UsageGuideDialog() {
       setOpen(false)
       closeAppShellMenu()
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "保存阅读状态失败",
+        id: "usage-guide-acknowledge",
+      })
     } finally {
       setSaving(false)
     }

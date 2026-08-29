@@ -15,7 +15,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { AdminUserDiagnostics } from "@/components/admin-user-diagnostics"
 import { Badge } from "@/components/ui/badge"
@@ -96,7 +96,10 @@ export function AdminUserDetailSheet({
     try {
       setDetail(await adminApi.userDetail(id))
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "用户详情加载失败",
+        id: `admin-user-detail-${id}`,
+      })
     }
   }
 
@@ -109,7 +112,11 @@ export function AdminUserDetailSheet({
         if (!ignore) setDetail(next)
       })
       .catch((reason) => {
-        if (!ignore) toast.error((reason as Error).message)
+        if (!ignore)
+          notify.error(reason, {
+            title: "用户详情加载失败",
+            id: `admin-user-detail-${userId}`,
+          })
       })
     return () => {
       ignore = true
@@ -135,10 +142,10 @@ export function AdminUserDetailSheet({
     setWorking(action)
     try {
       await adminApi.updateUser(userId, payload)
-      toast.success(message)
+      notify.success(message)
       await Promise.all([loadDetail(userId), onChanged()])
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "更新用户失败" })
     } finally {
       setWorking("")
     }
@@ -149,10 +156,10 @@ export function AdminUserDetailSheet({
     setWorking("refresh")
     try {
       await adminApi.refreshUser(userId)
-      toast.success("已完成一次强制刷新")
+      notify.success("用户设备已刷新")
       await Promise.all([loadDetail(userId), onChanged()])
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "刷新用户设备失败" })
     } finally {
       setWorking("")
     }
@@ -164,10 +171,12 @@ export function AdminUserDetailSheet({
     try {
       const result = await adminApi.resetUserPassword(userId)
       setTemporaryPassword(result.temporaryPassword)
-      toast.success("临时密码已生成，原登录会话已撤销")
+      notify.success("临时密码已生成", {
+        description: "原登录会话已撤销，请将临时密码安全地交给用户。",
+      })
       await Promise.all([loadDetail(userId), onChanged()])
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "重置密码失败" })
     } finally {
       setWorking("")
     }
@@ -176,9 +185,9 @@ export function AdminUserDetailSheet({
   async function copyTemporaryPassword() {
     try {
       await navigator.clipboard.writeText(temporaryPassword)
-      toast.success("临时密码已复制")
+      notify.success("临时密码已复制")
     } catch {
-      toast.error("复制失败，请手动选择临时密码")
+      notify.error("请手动选择并复制临时密码。", { title: "复制失败" })
     }
   }
 
@@ -187,12 +196,14 @@ export function AdminUserDetailSheet({
     setWorking("delete")
     try {
       await adminApi.removeUser(userId)
-      toast.success(`用户 ${detail.summary.user.username} 已删除`)
+      notify.success("用户已删除", {
+        description: detail.summary.user.username,
+      })
       setDeleteOpen(false)
       onOpenChange(false)
       await onChanged()
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "删除用户失败" })
     } finally {
       setWorking("")
     }
@@ -463,7 +474,7 @@ export function AdminUserDetailSheet({
                   onClick={() => void resetPassword()}
                 >
                   {working === "password" && (
-                    <LoaderCircleIcon className="animate-spin" />
+                    <LoaderCircleIcon className="motion-safe:animate-spin" />
                   )}
                   生成临时密码
                 </Button>

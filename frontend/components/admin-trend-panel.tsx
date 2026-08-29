@@ -8,9 +8,14 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 import { useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -151,11 +156,11 @@ export function AdminTrendPanel({
     try {
       const file = await adminApi.trendsCSV(requestedRange, timezone)
       triggerDownload(file.blob, file.filename)
-      toast.success(
+      notify.success(
         `${ranges.find((item) => item.value === requestedRange)?.label}趋势已导出`
       )
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "导出趋势失败" })
     } finally {
       setExporting(false)
     }
@@ -195,7 +200,7 @@ export function AdminTrendPanel({
             {exporting ? (
               <LoaderCircleIcon
                 data-icon="inline-start"
-                className="animate-spin"
+                className="motion-safe:animate-spin"
               />
             ) : (
               <DownloadIcon data-icon="inline-start" />
@@ -246,14 +251,22 @@ export function AdminTrendPanel({
         </Tabs>
 
         {error ? (
-          <Alert variant="destructive">
+          <Alert urgent variant="destructive" className="pr-28">
             <AlertCircleIcon aria-hidden="true" />
             <AlertTitle>趋势加载失败</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-            <Button variant="outline" size="sm" onClick={onReload}>
-              <RefreshCwIcon data-icon="inline-start" />
-              重新加载
-            </Button>
+            <AlertDescription>
+              当前无法更新趋势，请检查网络后重试。
+              <details className="mt-1 text-xs">
+                <summary className="cursor-pointer">查看详情</summary>
+                <span className="break-words">{error}</span>
+              </details>
+            </AlertDescription>
+            <AlertAction>
+              <Button variant="outline" size="sm" onClick={onReload}>
+                <RefreshCwIcon data-icon="inline-start" />
+                重新加载
+              </Button>
+            </AlertAction>
           </Alert>
         ) : null}
         {!trends ? (

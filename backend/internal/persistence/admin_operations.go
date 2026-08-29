@@ -359,7 +359,6 @@ func (s *Store) ReminderRuleOperationsStats(since, now time.Time) (model.Reminde
 		SELECT
 			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.enabled=1
 				AND w.completed_at IS NULL AND w.expires_at > ? THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN w.mode='recurring' AND w.enabled=1 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.completion_reason='notified'
 				AND w.completed_at >= ? THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.completion_reason='expired'
@@ -371,7 +370,6 @@ func (s *Store) ReminderRuleOperationsStats(since, now time.Time) (model.Reminde
 		WHERE u.enabled=1 AND u.role='user' AND u.refresh_enabled=1
 	`, now.UTC().Unix(), since.UTC().Unix(), since.UTC().Unix(), since.UTC().Unix()).Scan(
 		&result.ActiveTemporaryRules,
-		&result.ActiveRecurringRules,
 		&result.CompletedNotified24Hours,
 		&result.CompletedExpired24Hours,
 		&averageMinutes,

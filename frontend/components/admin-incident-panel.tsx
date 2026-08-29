@@ -8,7 +8,7 @@ import {
   MessageSquareTextIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { notify } from "@/lib/feedback"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -106,7 +106,11 @@ export function AdminIncidentPanel({
         if (!ignore) setIssues(next)
       })
       .catch((reason) => {
-        if (!ignore) toast.error((reason as Error).message)
+        if (!ignore)
+          notify.error(reason, {
+            title: "异常列表加载失败",
+            id: "admin-incidents-load",
+          })
       })
       .finally(() => {
         if (!ignore) setLoading(false)
@@ -148,10 +152,10 @@ export function AdminIncidentPanel({
       setIssues((current) =>
         current.map((issue) => (issue.id === updated.id ? updated : issue))
       )
-      toast.success(`异常已标记为${statusLabels[updated.status]}`)
+      notify.success(`异常已标记为${statusLabels[updated.status]}`)
       setTarget(null)
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, { title: "更新异常状态失败" })
     } finally {
       setSaving(false)
     }

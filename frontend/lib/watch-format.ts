@@ -108,7 +108,7 @@ export function formatRemainingTime(expiresAt?: string, now = Date.now()) {
 }
 
 export function formatNextCheck(nextCheckAt?: string, now = Date.now()) {
-  if (!nextCheckAt) return "等待调度"
+  if (!nextCheckAt) return "等待下次检查"
   const next = new Date(nextCheckAt)
   const minutes = Math.ceil((next.getTime() - now) / 60_000)
   if (minutes <= 0) return "即将检查"

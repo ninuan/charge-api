@@ -18,8 +18,8 @@ import {
   TriangleAlertIcon,
   UsersIcon,
 } from "lucide-react"
-import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { useCallback, useEffect, useState } from "react"
+import { notify } from "@/lib/feedback"
 
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -133,7 +133,7 @@ export function AdminOperations() {
   const [audit, setAudit] = useState<AuditPage | null>(null)
   const [checking, setChecking] = useState(false)
 
-  async function recheck() {
+  const recheck = useCallback(async () => {
     setChecking(true)
     try {
       const [nextOperations, nextAudit] = await Promise.all([
@@ -142,13 +142,17 @@ export function AdminOperations() {
       ])
       setOperations(nextOperations)
       setAudit(nextAudit)
-      toast.success("运维状态已重新检查")
+      notify.dismissBanner("admin-operations-load")
+      notify.success("运维状态已更新", { id: "admin-operations-check" })
     } catch (reason) {
-      toast.error((reason as Error).message)
+      notify.error(reason, {
+        title: "检查运维状态失败",
+        id: "admin-operations-check",
+      })
     } finally {
       setChecking(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void Promise.all([adminApi.operations(), adminApi.audit()])
@@ -156,8 +160,17 @@ export function AdminOperations() {
         setOperations(nextOperations)
         setAudit(nextAudit)
       })
-      .catch((reason) => toast.error((reason as Error).message))
-  }, [])
+      .catch((reason) =>
+        notify.error(reason, {
+          title: "运维数据加载失败",
+          persistent: true,
+          bannerId: "admin-operations-load",
+          description: "当前无法更新运维和审计信息，请检查网络后重试。",
+          details: reason instanceof Error ? reason.message : undefined,
+          action: { label: "重试", onClick: () => void recheck() },
+        })
+      )
+  }, [recheck])
 
   const cards = operations
     ? [
@@ -264,8 +277,8 @@ export function AdminOperations() {
                 {[
                   {
                     label: "活动提醒",
-                    value: `${operations.reminders.activeTemporaryRules + operations.reminders.activeRecurringRules} 条`,
-                    detail: `临时 ${operations.reminders.activeTemporaryRules} · 固定 ${operations.reminders.activeRecurringRules}（全局${operations.reminders.recurringEnabled ? "开启" : "关闭"}）`,
+                    value: `${operations.reminders.activeTemporaryRules} 条`,
+                    detail: "用户当前主动开启、尚未结束的临时提醒",
                     icon: BellRingIcon,
                   },
                   {

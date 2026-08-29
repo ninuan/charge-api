@@ -235,9 +235,9 @@ func (s *Server) writeWatchError(w http.ResponseWriter, operation string, err er
 		}
 		writeCodedError(w, http.StatusConflict, "WATCH_POWER_OFF_ACTIVE", "当前处于计划断电时段，请在恢复供电后再开启提醒")
 	case errors.Is(err, appruntime.ErrWatchCredentialExpired):
-		writeCodedError(w, http.StatusConflict, "WATCH_CREDENTIAL_EXPIRED", "登录凭据已失效，请先重新扫码后再开启提醒")
+		writeCodedError(w, http.StatusConflict, "WATCH_CREDENTIAL_EXPIRED", "登录已过期，请先重新扫码后再开启提醒")
 	case errors.Is(err, appruntime.ErrWatchRecurringDisabled):
-		writeCodedError(w, http.StatusConflict, "WATCH_RECURRING_DISABLED", "管理员暂未开放固定时段提醒")
+		writeCodedError(w, http.StatusConflict, "WATCH_RECURRING_DISABLED", "固定时段提醒已停用，请开启临时提醒")
 	default:
 		s.setHealthDegraded("watch", "空闲提醒存储异常")
 		logStructuredError(operation, "watch", err)

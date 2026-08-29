@@ -39,9 +39,7 @@ describe("watchApi", () => {
 
     await watchApi.createRule({
       deviceId: "pile-1",
-      activeWeekdays: 127,
-      activeStartMinute: 0,
-      activeEndMinute: 0,
+      duration: "2h",
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -50,9 +48,7 @@ describe("watchApi", () => {
         method: "POST",
         body: JSON.stringify({
           deviceId: "pile-1",
-          activeWeekdays: 127,
-          activeStartMinute: 0,
-          activeEndMinute: 0,
+          duration: "2h",
         }),
       })
     )
