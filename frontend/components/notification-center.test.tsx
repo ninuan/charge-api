@@ -105,6 +105,23 @@ describe("NotificationCenter", () => {
     expect(within(item).queryByText("已恢复")).toBeNull()
   })
 
+  it("formats repeated notification times in the application timezone", async () => {
+    mocks.items = [
+      {
+        ...notice,
+        occurrenceCount: 2,
+        lastOccurredAt: "2026-08-11T09:08:00Z",
+      },
+    ]
+    const user = userEvent.setup()
+    render(<NotificationCenter piles={[]} onNavigate={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "通知，1 条未读" }))
+
+    expect(screen.getByText("重复 2 次")).toBeVisible()
+    expect(screen.getByText(/最近一次：08\/11 17:08/)).toBeVisible()
+  })
+
   it("shows action lifecycle badges only for actionable problems", async () => {
     mocks.items = [
       {
