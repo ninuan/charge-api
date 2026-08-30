@@ -127,10 +127,32 @@ const pile: Pile = {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  watchContextMock.overview.scheduledPowerOffEnabled = true
   window.localStorage.clear()
 })
 
 describe("WatchManagementSheet", () => {
+  it("hides the power-off extension when scheduled power-off is disabled", async () => {
+    const user = userEvent.setup()
+    watchContextMock.overview.scheduledPowerOffEnabled = false
+
+    render(
+      <WatchManagementSheet
+        piles={[pile]}
+        open
+        onOpenChange={vi.fn()}
+        onEditRule={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "延长" }))
+    expect(screen.getByText("从现在起重新计算等待时间。")).toBeVisible()
+    await user.click(screen.getByLabelText("新的等待时间"))
+    expect(
+      screen.queryByRole("option", { name: "持续到今晚断电前" })
+    ).not.toBeInTheDocument()
+  })
+
   it("manages temporary tasks, hides retired recurring rules, and keeps quiet hours", async () => {
     const user = userEvent.setup()
     watchContextMock.updateRule.mockResolvedValue({})

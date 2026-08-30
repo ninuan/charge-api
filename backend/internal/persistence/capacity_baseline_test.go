@@ -114,7 +114,7 @@ func TestSQLiteCapacityBaseline(t *testing.T) {
 	if reminderQueryDuration > capacityQueryThreshold {
 		t.Fatalf("reminder operations query took %s, threshold %s", reminderQueryDuration, capacityQueryThreshold)
 	}
-	prunedNotifications, err := store.PruneResolvedNotifications(now.Add(-capacityHistoryDays * 24 * time.Hour))
+	prunedNotifications, err := store.PruneNotifications(now.Add(-capacityHistoryDays * 24 * time.Hour))
 	if err != nil {
 		t.Fatalf("prune capacity notifications: %v", err)
 	}

@@ -174,4 +174,32 @@ describe("NotificationProvider", () => {
       "notice-problem",
     ])
   })
+
+  it("reloads unread state after clearing resolved notifications", async () => {
+    const resolvedUnreadNotice = {
+      ...initialNotice,
+      resolvedAt: "2026-08-11T09:05:00Z",
+    }
+    vi.mocked(fetch)
+      .mockReset()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ items: [resolvedUnreadNotice], unreadCount: 1 })
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ deleted: 1 })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [], unreadCount: 0 }))
+      )
+
+    const { result } = renderHook(() => useNotifications(), { wrapper })
+    await act(() => result.current.load("resolved"))
+    expect(result.current.unreadCount).toBe(1)
+
+    await act(() => result.current.clearResolved())
+
+    expect(result.current.items).toEqual([])
+    expect(result.current.unreadCount).toBe(0)
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
 })

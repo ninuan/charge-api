@@ -196,11 +196,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const clearResolved = useCallback(async () => {
     const result = await watchApi.clearResolvedNotifications()
-    setItems((current) =>
-      current.filter((notification) => !notification.resolvedAt)
-    )
+    await load(statusRef.current)
     return result.deleted
-  }, [])
+  }, [load])
 
   const requestBrowserPermission = useCallback(async () => {
     if (!("Notification" in window)) {

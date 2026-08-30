@@ -20,6 +20,14 @@ export const temporaryDurationOptions: ReadonlyArray<{
   },
 ]
 
+export function getTemporaryDurationOptions(scheduledPowerOffEnabled: boolean) {
+  return scheduledPowerOffEnabled
+    ? temporaryDurationOptions
+    : temporaryDurationOptions.filter(
+        (option) => option.value !== "until_power_off"
+      )
+}
+
 export const weekdays = [
   { bit: 1, short: "一", label: "周一" },
   { bit: 2, short: "二", label: "周二" },

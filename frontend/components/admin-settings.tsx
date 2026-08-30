@@ -289,7 +289,7 @@ export function AdminSettings({
                       }
                     />
                     <FieldDescription>
-                      仅清理超过期限且已经解决的通知。
+                      清理超过期限的信息通知和已解决问题；待处理问题会继续保留。
                     </FieldDescription>
                   </Field>
                 </FieldGroup>

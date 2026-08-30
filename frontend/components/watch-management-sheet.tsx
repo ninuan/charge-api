@@ -92,8 +92,8 @@ import {
   formatPowerWindow,
   formatRemainingTime,
   formatWatchTimestamp,
+  getTemporaryDurationOptions,
   minutesToTime,
-  temporaryDurationOptions,
   timeToMinutes,
 } from "@/lib/watch-format"
 
@@ -234,6 +234,11 @@ export function WatchManagementSheet({
   const [extendCandidate, setExtendCandidate] = useState<WatchRule | null>(null)
   const [extendDuration, setExtendDuration] =
     useState<WatchTemporaryDuration>("4h")
+  const availableDurationOptions = useMemo(
+    () =>
+      getTemporaryDurationOptions(Boolean(overview?.scheduledPowerOffEnabled)),
+    [overview?.scheduledPowerOffEnabled]
+  )
   const [now, setNow] = useState(() => Date.now())
   const [
     recurringRetirementNoticeDismissed,
@@ -710,13 +715,15 @@ export function WatchManagementSheet({
           <DialogHeader>
             <DialogTitle>延长临时提醒</DialogTitle>
             <DialogDescription>
-              从现在起重新计算等待时间，且不会超过今晚计划断电时间。
+              {overview?.scheduledPowerOffEnabled
+                ? "从现在起重新计算等待时间，且不会超过今晚计划断电时间。"
+                : "从现在起重新计算等待时间。"}
             </DialogDescription>
           </DialogHeader>
           <Field>
             <FieldLabel htmlFor="extend-duration">新的等待时间</FieldLabel>
             <Select
-              items={temporaryDurationOptions.map((option) => ({
+              items={availableDurationOptions.map((option) => ({
                 value: option.value,
                 label: option.label,
               }))}
@@ -730,7 +737,7 @@ export function WatchManagementSheet({
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {temporaryDurationOptions.map((option) => (
+                  {availableDurationOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>

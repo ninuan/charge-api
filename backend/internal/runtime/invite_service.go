@@ -126,11 +126,11 @@ func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, int64, e
 	if err != nil {
 		return metricRows, 0, 0, fmt.Errorf("prune port history: %w", err)
 	}
-	notificationRows, err := m.repository.PruneResolvedNotifications(
+	notificationRows, err := m.repository.PruneNotifications(
 		now.UTC().AddDate(0, 0, -settings.NotificationRetentionDays),
 	)
 	if err != nil {
-		return metricRows, historyRows, 0, fmt.Errorf("prune resolved notifications: %w", err)
+		return metricRows, historyRows, 0, fmt.Errorf("prune notifications: %w", err)
 	}
 	if _, _, err := m.repository.PruneWxPusherHistory(
 		now.UTC().AddDate(0, 0, -settings.NotificationRetentionDays),

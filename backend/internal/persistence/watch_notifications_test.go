@@ -327,7 +327,7 @@ func TestRepeatedActiveNotificationsMergeOccurrenceDetails(t *testing.T) {
 	}
 }
 
-func TestPruneResolvedNotificationsKeepsActiveAndBoundaryRows(t *testing.T) {
+func TestPruneNotificationsRemovesOldTerminalRowsAndKeepsActiveProblems(t *testing.T) {
 	store, err := OpenSQLite(
 		t.TempDir()+"/notifications.db",
 		bytes.Repeat([]byte{0x73}, CookieKeySize),
@@ -347,17 +347,20 @@ func TestPruneResolvedNotificationsKeepsActiveAndBoundaryRows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save user: %v", err)
 	}
+	boundary := now.Add(-90 * 24 * time.Hour)
 	for _, notification := range []model.Notification{
 		{ID: "active-old", UserID: user.ID, Type: model.NotificationPileOffline, Severity: "warning", Title: "active", Message: "active", CreatedAt: now.Add(-100 * 24 * time.Hour)},
 		{ID: "resolved-old", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "old", Message: "old", CreatedAt: now.Add(-100 * 24 * time.Hour)},
 		{ID: "resolved-boundary", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "boundary", Message: "boundary", CreatedAt: now.Add(-90 * 24 * time.Hour)},
 		{ID: "resolved-new", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "new", Message: "new", CreatedAt: now.Add(-2 * 24 * time.Hour)},
+		{ID: "informational-old", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "old info", Message: "old info", CreatedAt: now.Add(-100 * 24 * time.Hour)},
+		{ID: "informational-boundary", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "boundary info", Message: "boundary info", CreatedAt: boundary},
+		{ID: "informational-new", UserID: user.ID, Type: model.NotificationPileRecovered, Severity: "info", Title: "new info", Message: "new info", CreatedAt: now.Add(-2 * 24 * time.Hour)},
 	} {
 		if err := store.SaveNotification(notification); err != nil {
 			t.Fatalf("SaveNotification %s: %v", notification.ID, err)
 		}
 	}
-	boundary := now.Add(-90 * 24 * time.Hour)
 	for id, resolvedAt := range map[string]time.Time{
 		"resolved-old":      boundary.Add(-time.Second),
 		"resolved-boundary": boundary,
@@ -367,9 +370,9 @@ func TestPruneResolvedNotificationsKeepsActiveAndBoundaryRows(t *testing.T) {
 			t.Fatalf("resolve %s: %v", id, err)
 		}
 	}
-	deleted, err := store.PruneResolvedNotifications(boundary)
-	if err != nil || deleted != 1 {
-		t.Fatalf("PruneResolvedNotifications deleted %d, err %v; want 1", deleted, err)
+	deleted, err := store.PruneNotifications(boundary)
+	if err != nil || deleted != 2 {
+		t.Fatalf("PruneNotifications deleted %d, err %v; want 2", deleted, err)
 	}
 	rows, err := store.ListNotifications(user.ID, 10)
 	if err != nil {
@@ -379,7 +382,10 @@ func TestPruneResolvedNotificationsKeepsActiveAndBoundaryRows(t *testing.T) {
 	for _, row := range rows {
 		remaining[row.ID] = true
 	}
-	if remaining["resolved-old"] || !remaining["active-old"] || !remaining["resolved-boundary"] || !remaining["resolved-new"] {
+	if remaining["resolved-old"] || remaining["informational-old"] ||
+		!remaining["active-old"] || !remaining["resolved-boundary"] ||
+		!remaining["resolved-new"] || !remaining["informational-boundary"] ||
+		!remaining["informational-new"] {
 		t.Fatalf("unexpected retained notifications: %+v", remaining)
 	}
 }

@@ -42,8 +42,8 @@ import type { Pile } from "@/lib/types"
 import { useWatch } from "@/lib/watch-context"
 import {
   estimatedTemporaryChecks,
+  getTemporaryDurationOptions,
   minutesToTime,
-  temporaryDurationOptions,
 } from "@/lib/watch-format"
 
 export type WatchEditorTarget = {
@@ -98,13 +98,18 @@ export function WatchRuleDialog({
       })),
     [piles]
   )
+  const availableDurationOptions = useMemo(
+    () =>
+      getTemporaryDurationOptions(Boolean(overview?.scheduledPowerOffEnabled)),
+    [overview?.scheduledPowerOffEnabled]
+  )
   const durationOptions = useMemo(
     () =>
-      temporaryDurationOptions.map((option) => ({
+      availableDurationOptions.map((option) => ({
         value: option.value,
         label: option.label,
       })),
-    []
+    [availableDurationOptions]
   )
   const estimatedChecks = overview
     ? estimatedTemporaryChecks(duration, overview.refreshIntervalMinutes)
@@ -223,7 +228,7 @@ export function WatchRuleDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {temporaryDurationOptions.map((option) => (
+                    {availableDurationOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>

@@ -760,19 +760,31 @@ func (s *Store) DeleteResolvedNotifications(userID string) (int64, error) {
 	return rows, nil
 }
 
-// PruneResolvedNotifications removes only resolved notifications older than
-// the retention boundary. Active notifications are kept regardless of age so
-// maintenance can never hide an unresolved user action.
-func (s *Store) PruneResolvedNotifications(before time.Time) (int64, error) {
+// PruneNotifications removes resolved notifications and terminal informational
+// notifications older than the retention boundary. Unresolved actionable
+// notifications are kept regardless of age so maintenance never hides a user
+// action that is still required.
+func (s *Store) PruneNotifications(before time.Time) (int64, error) {
 	if before.IsZero() {
 		return 0, fmt.Errorf("notification retention boundary is required")
 	}
-	return s.pruneRowsInBatchesWhere(
+	cutoff := before.UTC().Unix()
+	resolved, err := s.pruneRowsInBatchesWhere(
 		"notifications",
 		"resolved_at",
-		before.UTC().Unix(),
+		cutoff,
 		"resolved_at IS NOT NULL",
 	)
+	if err != nil {
+		return resolved, err
+	}
+	informational, err := s.pruneRowsInBatchesWhere(
+		"notifications",
+		"COALESCE(NULLIF(last_occurred_at, 0), created_at)",
+		cutoff,
+		"resolved_at IS NULL AND type IN ('port_idle', 'pile_recovered')",
+	)
+	return resolved + informational, err
 }
 
 func (s *Store) SaveWatchRefreshState(state model.WatchRefreshState) error {

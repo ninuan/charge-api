@@ -9,6 +9,7 @@ import {
   formatPowerWindow,
   formatRemainingTime,
   formatWeekdays,
+  getTemporaryDurationOptions,
   minutesToTime,
   timeToMinutes,
 } from "@/lib/watch-format"
@@ -50,5 +51,14 @@ describe("watch formatting", () => {
     expect(formatCompletionReason("notified")).toBe("已发现空闲口并完成提醒")
     expect(formatCompletionReason("expired")).toBe("等待时间已结束")
     expect(formatCompletionReason("cancelled")).toBe("已由你取消")
+  })
+
+  it("only offers the power-off duration when scheduled power-off is enabled", () => {
+    expect(
+      getTemporaryDurationOptions(false).map((option) => option.value)
+    ).toEqual(["1h", "2h", "4h"])
+    expect(
+      getTemporaryDurationOptions(true).map((option) => option.value)
+    ).toContain("until_power_off")
   })
 })

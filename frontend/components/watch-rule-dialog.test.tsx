@@ -93,6 +93,11 @@ describe("WatchRuleDialog", () => {
     expect(screen.queryByText("固定时段（高级）")).not.toBeInTheDocument()
     expect(screen.getByLabelText("等待多久")).toHaveTextContent("2 小时")
     expect(screen.getByText(/最多约检查 12 次/)).toBeInTheDocument()
+    await user.click(screen.getByLabelText("等待多久"))
+    expect(
+      screen.queryByRole("option", { name: "持续到今晚断电前" })
+    ).not.toBeInTheDocument()
+    await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "开始提醒" }))
 
     await waitFor(() =>
