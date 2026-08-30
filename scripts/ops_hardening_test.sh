@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 README="$ROOT_DIR/README.md"
+DEPLOYMENT_GUIDE="$ROOT_DIR/docs/deployment.md"
 CHARGE_SERVICE="$ROOT_DIR/deploy/systemd/charge.service"
 YYB_SERVICE="$ROOT_DIR/deploy/systemd/yyb-go.service"
 
@@ -25,17 +26,22 @@ require_contains() {
 }
 
 require_file "$README"
+require_file "$DEPLOYMENT_GUIDE"
 require_file "$CHARGE_SERVICE"
 require_file "$YYB_SERVICE"
 
-require_contains "$README" "## 生产运维加固"
-require_contains "$README" "/opt/charge-api/backend/charge-server -listen 127.0.0.1:8080"
-require_contains "$README" "/opt/yyb_go/yyb-go -host 127.0.0.1 -port 8000"
-require_contains "$README" "ss -lntp | grep ':8000'"
-require_contains "$README" "127.0.0.1:8000"
-require_contains "$README" "stat -c '%a %n' /etc/charge-api.env /etc/yyb-go.env /var/lib/charge-api/charge_state.db /opt/yyb_go/resource/db/yyb.db"
-require_contains "$README" "加密备份"
-require_contains "$README" "8000/tcp"
+require_contains "$README" "[生产部署与运维指南](docs/deployment.md)"
+require_contains "$DEPLOYMENT_GUIDE" "## 安全加固"
+require_contains "$DEPLOYMENT_GUIDE" "/opt/charge-api/backend/charge-server"
+require_contains "$DEPLOYMENT_GUIDE" "-listen 127.0.0.1:8080"
+require_contains "$DEPLOYMENT_GUIDE" "/opt/yyb_go/yyb-go"
+require_contains "$DEPLOYMENT_GUIDE" "127.0.0.1:8000"
+require_contains "$DEPLOYMENT_GUIDE" "ss -lntp | grep -E ':8080|:8000'"
+require_contains "$DEPLOYMENT_GUIDE" "stat -c '%a %n'"
+require_contains "$DEPLOYMENT_GUIDE" "/etc/charge-api.env"
+require_contains "$DEPLOYMENT_GUIDE" "/var/lib/charge-api/charge_state.db"
+require_contains "$DEPLOYMENT_GUIDE" "加密异地保存"
+require_contains "$DEPLOYMENT_GUIDE" "8000/tcp"
 
 for service in "$CHARGE_SERVICE" "$YYB_SERVICE"; do
   require_contains "$service" "NoNewPrivileges=true"

@@ -43,6 +43,7 @@ dist/
 Thumbs.db
 
 docs/*
+!docs/deployment.md
 !docs/openapi/
 docs/openapi/*
 !docs/openapi/charge-console-v1.5.0.yaml
