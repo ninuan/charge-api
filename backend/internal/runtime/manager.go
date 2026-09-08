@@ -77,6 +77,8 @@ type Manager struct {
 	users                  map[string]model.User
 	runtimes               map[string]*UserRuntime
 	initialPass            string
+	initialPasswordFile    string
+	initialPasswordUserID  string
 	migrated               bool
 	settings               model.RegistrationSettings
 	invites                map[string]model.InviteCode

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"charge-dashboard/internal/model"
@@ -23,6 +24,40 @@ func TestParsePayloadTreatsNotOnlineAsOffline(t *testing.T) {
 		if port.Status != model.PortOffline {
 			t.Fatalf("expected port %d to be offline, got %s", port.ID, port.Status)
 		}
+	}
+}
+
+func TestParsePayloadErrorDoesNotIncludeRemoteBody(t *testing.T) {
+	_, err := ParsePayload("remote", []byte(`{"password":"remote-secret","message":"bad"}`))
+	if err == nil {
+		t.Fatal("ParsePayload expected an error")
+	}
+	if strings.Contains(err.Error(), "remote-secret") || strings.Contains(err.Error(), "password") {
+		t.Fatalf("ParsePayload error exposed remote response: %v", err)
+	}
+}
+
+func TestValidateCaptureURLRequiresHTTPSOrLoopbackHTTP(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "https", url: "https://example.com/api", want: true},
+		{name: "loopback ipv4", url: "http://127.0.0.1:8080/api", want: true},
+		{name: "loopback ipv6", url: "http://[::1]:8080/api", want: true},
+		{name: "localhost", url: "http://localhost:8080/api", want: true},
+		{name: "public http", url: "http://example.com/api", want: false},
+		{name: "ftp", url: "ftp://example.com/api", want: false},
+		{name: "credentials", url: "https://user:pass@example.com/api", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCaptureURL(tt.url)
+			if (err == nil) != tt.want {
+				t.Fatalf("validateCaptureURL(%q) error = %v, want valid=%v", tt.url, err, tt.want)
+			}
+		})
 	}
 }
 

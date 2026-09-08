@@ -16,6 +16,7 @@ import (
 
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/security"
 )
 
 func (s *Server) handleAdminIncidents(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +202,7 @@ func adminUserUpdateAction(req model.UserUpdateRequest) string {
 func logStructuredError(operation, subject string, err error) {
 	payload, _ := json.Marshal(map[string]string{
 		"level": "error", "operation": operation,
-		"subject": subject, "error": err.Error(),
+		"subject": subject, "error": security.SanitizeLogText(err.Error(), 1024),
 	})
 	log.Print(string(payload))
 }
@@ -339,7 +340,7 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 		}
 		if req.Role != nil || req.Enabled != nil {
 			if err := s.sessions.DeleteUser(userID); err != nil {
-				log.Printf("revoke sessions for user %s: %v", userID, err)
+				log.Printf("revoke sessions for user %s: %v", userID, security.SanitizeLogText(err.Error(), 1024))
 				s.recordAdminAudit(admin, adminUserUpdateAction(req), "user", userID, targetLabel, "failure")
 				clearSessionCookie(w, r)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "用户已更新，但撤销旧登录状态失败"})
@@ -358,7 +359,7 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if err := s.sessions.DeleteUser(userID); err != nil {
-			log.Printf("revoke sessions for deleted user %s: %v", userID, err)
+			log.Printf("revoke sessions for deleted user %s: %v", userID, security.SanitizeLogText(err.Error(), 1024))
 			s.recordAdminAudit(admin, "user.delete", "user", userID, targetLabel, "failure")
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "用户已删除，但清理登录状态失败"})
 			return

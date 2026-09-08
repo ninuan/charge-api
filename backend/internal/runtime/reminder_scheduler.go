@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"charge-dashboard/internal/security"
 	"context"
 	cryptorand "crypto/rand"
 	"errors"
@@ -148,7 +149,7 @@ func (m *Manager) runReminderScheduler(ctx context.Context, wake <-chan struct{}
 			timer.Reset(0)
 		case <-timer.C:
 			if err := m.runReminderSchedulerOnce(ctx, m.reminderSchedulerNow()); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("watch scheduler cycle failed: %v", err)
+				log.Printf("watch scheduler cycle failed: %v", security.SanitizeLogText(err.Error(), 1024))
 				m.recordMetric("system", "watch_scheduler_error")
 			}
 			timer.Reset(m.reminderSchedulerPollInterval())

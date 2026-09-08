@@ -2,6 +2,7 @@ package api
 
 import (
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -145,14 +146,15 @@ func TestSecurityHeadersAreSetOnEveryResponse(t *testing.T) {
 		}
 	}
 	policy := recorder.Header().Get("Content-Security-Policy")
+	if strings.Contains(policy, "cloudflareinsights.com") {
+		t.Fatal("analytics must not be allowed by default")
+	}
 	for _, directive := range []string{
 		"frame-ancestors 'none'",
 		"object-src 'none'",
 		"base-uri 'none'",
 		"frame-src 'none'",
 		"connect-src 'self'",
-		"https://static.cloudflareinsights.com",
-		"https://cloudflareinsights.com",
 	} {
 		if !strings.Contains(policy, directive) {
 			t.Fatalf("CSP %q is missing %q", policy, directive)
@@ -160,5 +162,62 @@ func TestSecurityHeadersAreSetOnEveryResponse(t *testing.T) {
 	}
 	if recorder.Header().Get("Strict-Transport-Security") != "" {
 		t.Fatalf("HSTS must not be sent over plaintext http")
+	}
+}
+
+func TestStaticPolicyHashesInlineScripts(t *testing.T) {
+	policy := staticPolicy([]byte(`<html><script>window.__BOOT__=1</script></html>`))
+	if strings.Contains(policy, "script-src 'self' 'unsafe-inline'") || !strings.Contains(policy, "'sha256-") {
+		t.Fatalf("static policy did not replace inline script allowance: %s", policy)
+	}
+}
+
+func TestRequestBodyLimitBeforeDispatch(t *testing.T) {
+	for _, route := range []string{"/api/auth/login", "/api/cookie", "/api/stream", "/future-upload"} {
+		for _, contentType := range []string{"application/json", "application/x-www-form-urlencoded"} {
+			for _, chunked := range []bool{false, true} {
+				t.Run(route+contentType+fmt.Sprint(chunked), func(t *testing.T) {
+					called := false
+					handler := WithRequestBodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+					request := httptest.NewRequest(http.MethodPost, route, strings.NewReader(strings.Repeat("x", int(MaxRequestBodyBytes)+1)))
+					request.Header.Set("Content-Type", contentType)
+					if chunked {
+						request.ContentLength = -1
+						request.TransferEncoding = []string{"chunked"}
+					}
+					recorder := httptest.NewRecorder()
+					handler.ServeHTTP(recorder, request)
+					if recorder.Code != http.StatusRequestEntityTooLarge || called {
+						t.Fatalf("status=%d handler called=%v", recorder.Code, called)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRequestBodyLimitPreservesExactBody(t *testing.T) {
+	payload := strings.Repeat("x", int(MaxRequestBodyBytes))
+	handler := WithRequestBodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != payload {
+			t.Fatalf("body changed: length=%d error=%v", len(body), err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/test", strings.NewReader(payload)))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status=%d", recorder.Code)
+	}
+}
+
+func TestDecodeJSONRejectsOversizedTrailingWhitespace(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/test", strings.NewReader(`{}`+strings.Repeat(" ", 64)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	var target struct{}
+	if decodeJSON(recorder, request, 32, &target) || recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d, want 413", recorder.Code)
 	}
 }

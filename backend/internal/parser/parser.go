@@ -3,6 +3,8 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,6 +63,9 @@ func DefaultCaptureRequests() []CaptureRequest {
 }
 
 func ParseCaptureRequests(dir string) ([]CaptureRequest, error) {
+	if err := validateCaptureDirectory(dir); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read capture dir: %w", err)
@@ -69,12 +74,15 @@ func ParseCaptureRequests(dir string) ([]CaptureRequest, error) {
 	var requests []CaptureRequest
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			if entry.Type()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("capture entries must not be symbolic links")
+			}
 			continue
 		}
 
 		request, parseErr := parseCaptureRequest(filepath.Join(dir, entry.Name()), entry.Name())
 		if parseErr != nil {
-			continue
+			return nil, fmt.Errorf("invalid capture template %q: %w", entry.Name(), parseErr)
 		}
 		requests = append(requests, request)
 	}
@@ -93,7 +101,7 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 	}
 
 	if raw.ID == "" {
-		return model.Pile{}, fmt.Errorf("远端接口没有返回设备ID，请输入设备长ID（例如 2601201412385560001），不要输入短桩号；响应：%s", compactPayload(body))
+		return model.Pile{}, fmt.Errorf("远端接口没有返回设备ID，请输入设备长ID（例如 2601201412385560001），不要输入短桩号")
 	}
 
 	now := time.Now()
@@ -199,14 +207,6 @@ func statusIsOnline(status string) bool {
 	return strings.Contains(normalized, "在线") || strings.Contains(normalized, "online")
 }
 
-func compactPayload(body []byte) string {
-	text := strings.TrimSpace(string(body))
-	if len(text) > 180 {
-		return text[:180] + "..."
-	}
-	return text
-}
-
 func formatDuration(seconds int) string {
 	if seconds <= 0 {
 		return ""
@@ -301,17 +301,20 @@ func ParseCaptureDir(dir string) ([]model.Pile, error) {
 }
 
 func parseCaptureRequest(dir string, name string) (CaptureRequest, error) {
-	urlBytes, err := os.ReadFile(filepath.Join(dir, "basic"))
+	if err := validateCaptureDirectory(dir); err != nil {
+		return CaptureRequest{}, err
+	}
+	urlBytes, err := readCaptureFile(dir, "basic")
 	if err != nil {
 		return CaptureRequest{}, err
 	}
 
-	bodyBytes, err := os.ReadFile(filepath.Join(dir, "request_body"))
+	bodyBytes, err := readCaptureFile(dir, "request_body")
 	if err != nil {
 		return CaptureRequest{}, err
 	}
 
-	headerBytes, err := os.ReadFile(filepath.Join(dir, "request_headers"))
+	headerBytes, err := readCaptureFile(dir, "request_headers")
 	if err != nil {
 		return CaptureRequest{}, err
 	}
@@ -321,13 +324,40 @@ func parseCaptureRequest(dir string, name string) (CaptureRequest, error) {
 		method = "POST"
 	}
 
+	requestURL := strings.TrimSpace(string(urlBytes))
+	if err := validateCaptureURL(requestURL); err != nil {
+		return CaptureRequest{}, err
+	}
+
 	return CaptureRequest{
 		Name:    name,
-		URL:     strings.TrimSpace(string(urlBytes)),
+		URL:     requestURL,
 		Method:  method,
 		Body:    string(bodyBytes),
 		Headers: headers,
 	}, nil
+}
+
+func validateCaptureURL(raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
+		return fmt.Errorf("capture request URL must be HTTPS or loopback HTTP")
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme != "http" {
+		return fmt.Errorf("capture request URL must be HTTPS or loopback HTTP")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("capture request URL must be HTTPS or loopback HTTP")
 }
 
 func parseRequestHeaders(raw string) (string, map[string]string) {

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"charge-dashboard/internal/security"
 	"context"
 	"errors"
 	"fmt"
@@ -120,7 +121,7 @@ func (m *Manager) runNotificationDispatcher(ctx context.Context, wake <-chan str
 			timer.Reset(0)
 		case <-timer.C:
 			if err := m.runNotificationDispatcherOnce(ctx, m.notificationDispatcherNow()); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("notification dispatcher: %v", err)
+				log.Printf("notification dispatcher: %v", security.SanitizeLogText(err.Error(), 1024))
 			}
 			timer.Reset(m.notificationDispatcherPollInterval())
 		}

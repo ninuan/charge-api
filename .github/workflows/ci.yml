@@ -42,6 +42,13 @@ jobs:
       - name: Run checks
         run: bash scripts/check.sh
 
+      - name: Scan Go dependencies
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: Scan frontend dependencies
+        run: pnpm --dir frontend audit --audit-level high
+
       - name: Install Playwright browser
         run: pnpm --dir frontend exec playwright install --with-deps chromium
 

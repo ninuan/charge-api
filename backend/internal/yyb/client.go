@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -199,7 +198,7 @@ func (c *Client) doJSON(ctx context.Context, method string, path string, payload
 		return err
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := security.ReadLimited(resp.Body, security.MaxUpstreamBodyBytes)
 	if err != nil {
 		return err
 	}

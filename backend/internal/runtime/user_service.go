@@ -88,6 +88,7 @@ func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) (m
 	if err := m.Save(); err != nil {
 		return model.CurrentUser{}, err
 	}
+	m.cleanupInitialPasswordFile(userID)
 	return publicUser(user), nil
 }
 

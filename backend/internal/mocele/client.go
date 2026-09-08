@@ -3,7 +3,6 @@ package mocele
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -84,12 +83,12 @@ func (c *Client) ExchangeCode(ctx context.Context, deviceID string, code string)
 		return CookieResult{}, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	_, err = security.ReadLimited(resp.Body, security.MaxUpstreamBodyBytes)
 	if err != nil {
 		return CookieResult{}, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return CookieResult{}, fmt.Errorf("mocele autologin failed: status=%d body=%s", resp.StatusCode, security.RedactText(string(body), 256))
+		return CookieResult{}, fmt.Errorf("mocele autologin failed: status=%d", resp.StatusCode)
 	}
 	cookies := map[string]string{}
 	for _, cookie := range jar.Cookies(resp.Request.URL) {

@@ -120,6 +120,34 @@ func TestResetUserPasswordRequiresChangeOnNextLogin(t *testing.T) {
 	}
 }
 
+func TestInitialPasswordFileIsRemovedAfterAdminChangesPassword(t *testing.T) {
+	repository := testRepository(t)
+	manager, err := NewManager(repository, "", nil, "initial-password-123", time.Minute)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	passwordFile := t.TempDir() + "/initial-admin-password.txt"
+	if err := os.WriteFile(passwordFile, []byte("initial-password-123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ConfigureInitialPasswordFile(passwordFile); err != nil {
+		t.Fatalf("ConfigureInitialPasswordFile: %v", err)
+	}
+	adminID := ""
+	for _, user := range manager.ListUsers() {
+		adminID = user.User.ID
+	}
+	if adminID == "" {
+		t.Fatal("admin user was not created")
+	}
+	if _, err := manager.ChangePassword(adminID, "initial-password-123", "replacement-password-123"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if _, err := os.Stat(passwordFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("initial password file still exists: %v", err)
+	}
+}
+
 func TestConcurrentSaveProducesValidState(t *testing.T) {
 	repository := testRepository(t)
 	manager := &Manager{
@@ -873,11 +901,14 @@ func TestNewManagerMigratesLegacyJSONAndRemovesPlaintextCookie(t *testing.T) {
 		Users: []model.User{{
 			ID:           "user-1",
 			Username:     "alice",
-			PasswordHash: "hash",
+			PasswordHash: "legacy-password-hash",
 			Role:         model.RoleUser,
 			Enabled:      true,
 			CreatedAt:    now,
 			UpdatedAt:    now,
+		}},
+		Invites: []model.InviteCode{{
+			ID: "invite-1", Code: "legacy-invite-secret", Enabled: true, CreatedAt: now,
 		}},
 		UserStates: map[string]persistence.UserState{
 			"user-1": {
@@ -919,6 +950,11 @@ func TestNewManagerMigratesLegacyJSONAndRemovesPlaintextCookie(t *testing.T) {
 	}
 	if bytes.Contains(archive, []byte("legacy-plaintext-cookie")) {
 		t.Fatal("sanitized migration archive contains plaintext cookie")
+	}
+	for _, secret := range []string{"legacy-password-hash", "legacy-invite-secret", "passwordHash", `"code":"legacy`} {
+		if bytes.Contains(archive, []byte(secret)) {
+			t.Fatalf("sanitized migration archive contains %q", secret)
+		}
 	}
 
 	loaded, ok, err := repository.Load()

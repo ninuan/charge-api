@@ -1,6 +1,7 @@
 package main
 
 import (
+	"charge-dashboard/internal/security"
 	"context"
 	"flag"
 	"fmt"
@@ -102,11 +103,11 @@ func main() {
 
 	absDatabasePath, err := filepath.Abs(*databasePath)
 	if err != nil {
-		log.Fatalf("resolve database path: %v", err)
+		log.Fatalf("resolve database path: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	absLegacyState, err := filepath.Abs(*legacyState)
 	if err != nil {
-		log.Fatalf("resolve legacy state path: %v", err)
+		log.Fatalf("resolve legacy state path: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 
 	requests := parser.DefaultCaptureRequests()
@@ -114,16 +115,16 @@ func main() {
 	if *captureDir != "" {
 		absCaptureDir, err := filepath.Abs(*captureDir)
 		if err != nil {
-			log.Fatalf("resolve capture dir: %v", err)
+			log.Fatalf("resolve capture dir: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		if _, err := os.Stat(absCaptureDir); err != nil {
-			log.Fatalf("capture dir not available: %v", err)
+			log.Fatalf("capture dir not available: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		requests, err = parser.ParseCaptureRequests(absCaptureDir)
 		if err != nil {
-			log.Fatalf("parse capture requests: %v", err)
+			log.Fatalf("parse capture requests: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
-		templateSource = absCaptureDir
+		templateSource = "configured capture directory"
 	}
 
 	password := *adminPassword
@@ -132,60 +133,63 @@ func main() {
 	}
 	yybClient, err := yybClientFromEnv(os.Getenv)
 	if err != nil {
-		log.Fatalf("configure yyb client: %v", err)
+		log.Fatalf("configure yyb client: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	if yybClient != nil {
 		log.Printf("yyb sidecar integration enabled")
 	}
 	wxPusherClient, err := wxPusherClientFromEnv(os.Getenv)
 	if err != nil {
-		log.Fatalf("configure wxpusher client: %v", err)
+		log.Fatalf("configure wxpusher client: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	if wxPusherClient != nil {
 		log.Printf("wxpusher integration enabled")
 	}
 	publicBaseURL, err := publicBaseURLFromEnv(os.Getenv, wxPusherClient != nil)
 	if err != nil {
-		log.Fatalf("configure public base url: %v", err)
+		log.Fatalf("configure public base url: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 
 	cookieKey, err := persistence.DecodeCookieKey(os.Getenv("CHARGE_COOKIE_KEY"))
 	if err != nil {
-		log.Fatalf("cookie encryption key: %v", err)
+		log.Fatalf("cookie encryption key: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	repository, err := persistence.OpenSQLite(absDatabasePath, cookieKey)
 	if err != nil {
-		log.Fatalf("open state database: %v", err)
+		log.Fatalf("open state database: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	defer repository.Close()
 
 	const minRefreshInterval = 30 * time.Second
 	manager, err := appruntime.NewManager(repository, absLegacyState, requests, password, minRefreshInterval)
 	if err != nil {
-		log.Fatalf("create runtime manager: %v", err)
+		log.Fatalf("create runtime manager: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
 	if err := manager.StartReminderScheduler(schedulerCtx); err != nil {
-		log.Fatalf("start reminder scheduler: %v", err)
+		log.Fatalf("start reminder scheduler: %v", security.SanitizeLogText(err.Error(), 1024))
 	}
 	dispatcherStarted := false
 	if wxPusherClient != nil {
 		if err := manager.StartNotificationDispatcher(schedulerCtx, wxPusherClient, publicBaseURL); err != nil {
-			log.Fatalf("start notification dispatcher: %v", err)
+			log.Fatalf("start notification dispatcher: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		dispatcherStarted = true
 	}
 	defer stopScheduler()
 	if manager.MigratedLegacyJSON() {
-		log.Printf("legacy JSON state imported from %s", absLegacyState)
+		log.Print("legacy JSON state imported")
 	}
 	if initialPassword := manager.InitialAdminPassword(); initialPassword != "" {
 		// 日志会进 journald 并常被采集外送，初始密码只落一次性的 0600 文件。
 		passwordPath := filepath.Join(filepath.Dir(absDatabasePath), "initial-admin-password.txt")
 		if err := os.WriteFile(passwordPath, []byte(initialPassword+"\n"), 0o600); err != nil {
-			log.Fatalf("write initial admin password to %s: %v", passwordPath, err)
+			log.Fatalf("write initial admin password: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
-		log.Printf("generated initial admin password for admin, saved to %s (delete it after first login)", passwordPath)
+		log.Print("generated initial admin password; stored in initial-admin-password.txt in the database directory")
+	}
+	if err := manager.ConfigureInitialPasswordFile(filepath.Join(filepath.Dir(absDatabasePath), "initial-admin-password.txt")); err != nil {
+		log.Fatal("initialize password file lifecycle: check the file type and permissions in the database directory")
 	}
 
 	sessions := auth.NewPersistentSessionManager(7*24*time.Hour, repository)
@@ -203,11 +207,11 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	server.Register(mux)
-	mux.Handle("/", http.FileServer(http.Dir("../frontend/dist")))
+	mux.Handle("/", api.StaticHandler("../frontend/dist"))
 	allowedOrigins := splitCommaSeparated(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	rateLimiter := api.NewIPRateLimiter(300, time.Minute)
 	content := api.WithCacheHeaders(api.WithCompression(mux))
-	handler := api.WithSecurityHeaders(api.WithCORS(rateLimiter.Middleware(content), allowedOrigins))
+	handler := api.WithSecurityHeaders(api.WithCORS(rateLimiter.Middleware(api.WithRequestBodyLimit(content)), allowedOrigins))
 	httpServer := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           handler,
@@ -219,7 +223,7 @@ func main() {
 
 	log.Printf("Charge Console %s listening on %s", version.Current, *listenAddr)
 	log.Printf("request template loaded from %s", templateSource)
-	log.Printf("state database: %s", absDatabasePath)
+	log.Print("state database opened")
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- httpServer.ListenAndServe()
@@ -232,16 +236,16 @@ func main() {
 		stopScheduler()
 		waitCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if waitErr := manager.WaitReminderScheduler(waitCtx); waitErr != nil {
-			log.Printf("reminder scheduler shutdown failed: %v", waitErr)
+			log.Printf("reminder scheduler shutdown failed: %v", security.SanitizeLogText(waitErr.Error(), 1024))
 		}
 		if dispatcherStarted {
 			if waitErr := manager.WaitNotificationDispatcher(waitCtx); waitErr != nil {
-				log.Printf("notification dispatcher shutdown failed: %v", waitErr)
+				log.Printf("notification dispatcher shutdown failed: %v", security.SanitizeLogText(waitErr.Error(), 1024))
 			}
 		}
 		cancel()
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server stopped: %v", err)
+			log.Fatalf("server stopped: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 	case sig := <-signals:
 		log.Printf("received %s, shutting down", sig)
@@ -249,17 +253,17 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Printf("graceful shutdown failed: %v", err)
+			log.Printf("graceful shutdown failed: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		if err := <-errCh; err != nil && err != http.ErrServerClosed {
-			log.Printf("server stopped: %v", err)
+			log.Printf("server stopped: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		if err := manager.WaitReminderScheduler(shutdownCtx); err != nil {
-			log.Printf("reminder scheduler shutdown failed: %v", err)
+			log.Printf("reminder scheduler shutdown failed: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		if dispatcherStarted {
 			if err := manager.WaitNotificationDispatcher(shutdownCtx); err != nil {
-				log.Printf("notification dispatcher shutdown failed: %v", err)
+				log.Printf("notification dispatcher shutdown failed: %v", security.SanitizeLogText(err.Error(), 1024))
 			}
 		}
 	}

@@ -18,6 +18,7 @@ import (
 	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/security"
 	"charge-dashboard/internal/version"
 	"charge-dashboard/internal/wxpusher"
 	"charge-dashboard/internal/yyb"
@@ -48,6 +49,7 @@ type Server struct {
 	devForceAuthExpired bool
 	healthMu            sync.RWMutex
 	healthDegradations  map[string]string
+	streams             streamLimits
 }
 
 type captchaService interface {
@@ -160,16 +162,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
 	user, ok := s.requireDashboardUser(w, r)
 	if !ok {
 		return
 	}
+	if !s.streams.acquire(user.ID) {
+		writeRateLimit(w, streamHeartbeatInterval, "实时连接数量已达上限，请关闭多余标签页")
+		return
+	}
+	defer s.streams.release(user.ID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	flusher, ok := w.(http.Flusher)
+	_, ok = w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
 		return
@@ -189,36 +200,40 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	defer s.manager.Unsubscribe(user.ID, ch)
 
 	ctx := r.Context()
+	heartbeat := time.NewTicker(streamHeartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			if !s.streamSessionValid(r, user.ID) || writeStreamEvent(w, "", nil) != nil {
+				return
+			}
 		case snapshot, ok := <-ch:
-			if !ok {
+			if !ok || !s.streamSessionValid(r, user.ID) {
 				return
 			}
 			payload, err := json.Marshal(snapshot)
 			if err != nil {
-				log.Printf("marshal snapshot: %v", err)
+				log.Printf("marshal snapshot: %v", security.SanitizeLogText(err.Error(), 1024))
 				continue
 			}
-			if _, err = fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", payload); err != nil {
+			if err = writeStreamEvent(w, "snapshot", payload); err != nil {
 				return
 			}
-			flusher.Flush()
 		case notification, ok := <-notificationCh:
-			if !ok {
+			if !ok || !s.streamSessionValid(r, user.ID) {
 				return
 			}
 			payload, err := json.Marshal(notification)
 			if err != nil {
-				log.Printf("marshal notification: %v", err)
+				log.Printf("marshal notification: %v", security.SanitizeLogText(err.Error(), 1024))
 				continue
 			}
-			if _, err = fmt.Fprintf(w, "event: notification\ndata: %s\n\n", payload); err != nil {
+			if err = writeStreamEvent(w, "notification", payload); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }
@@ -360,7 +375,7 @@ func writeCodedError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func writePublicOperationError(w http.ResponseWriter, status int, operation, message string, err error) {
-	log.Printf("%s: %v", operation, err)
+	log.Printf("%s: %s", operation, security.SanitizeLogText(err.Error(), 1024))
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
@@ -384,6 +399,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, limit int64, target any)
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+			return false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain one JSON object"})
 		return false
 	}
@@ -449,7 +469,7 @@ func (s *Server) recordAuthFailure(w http.ResponseWriter, ip string, username st
 		writeRateLimit(w, retryAfter, "失败次数过多，已临时锁定")
 		return false
 	}
-	log.Printf("%s: %v", operation, err)
+	log.Printf("%s: %s", operation, security.SanitizeLogText(err.Error(), 1024))
 	return true
 }
 

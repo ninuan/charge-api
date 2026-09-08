@@ -103,6 +103,15 @@ if [[ -z "$DEPLOY_HOST" ]]; then
   exit 1
 fi
 
+if [[ ! "$SERVICE_NAME" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
+  echo "SERVICE_NAME contains unsupported characters" >&2
+  exit 2
+fi
+if [[ "$HEALTH_URL" != http://* && "$HEALTH_URL" != https://* ]] || [[ "$HEALTH_URL" =~ [[:space:][:cntrl:]] ]]; then
+  echo "HEALTH_URL must use http:// or https://" >&2
+  exit 2
+fi
+
 require_command rsync
 require_command ssh
 
@@ -119,6 +128,8 @@ npm_registry_quoted="$(printf '%q' "$NPM_REGISTRY")"
 pnpm_fetch_timeout_quoted="$(printf '%q' "$PNPM_FETCH_TIMEOUT")"
 pnpm_fetch_retries_quoted="$(printf '%q' "$PNPM_FETCH_RETRIES")"
 pnpm_network_concurrency_quoted="$(printf '%q' "$PNPM_NETWORK_CONCURRENCY")"
+service_name_quoted="$(printf '%q' "$SERVICE_NAME")"
+health_url_quoted="$(printf '%q' "$HEALTH_URL")"
 
 log "Create remote directory"
 run_ssh "mkdir -p $remote_path_quoted"
@@ -188,10 +199,12 @@ pnpm run build:static
 cd ../backend
 go build -o charge-server.new ./cmd/server
 mv charge-server.new charge-server
-sudo systemctl restart $SERVICE_NAME
+service_name=$service_name_quoted
+health_url=$health_url_quoted
+sudo systemctl restart "\$service_name"
 health_ready=0
 for _ in {1..15}; do
-  if curl --silent --fail --max-time 2 $HEALTH_URL >/dev/null; then
+  if curl --silent --fail --max-time 2 "\$health_url" >/dev/null; then
     health_ready=1
     break
   fi
@@ -199,11 +212,11 @@ for _ in {1..15}; do
 done
 if [[ "\$health_ready" -ne 1 ]]; then
   echo "Charge health check failed after restart. Recent service diagnostics:" >&2
-  sudo systemctl --no-pager --full status $SERVICE_NAME || true
-  sudo journalctl -u $SERVICE_NAME -n 80 --no-pager || true
+  sudo systemctl --no-pager --full status "\$service_name" || true
+  sudo journalctl -u "\$service_name" -n 80 --no-pager || true
   exit 1
 fi
-echo "Remote service is healthy: $HEALTH_URL"
+echo "Remote service is healthy: \$health_url"
 REMOTE
 
 run_ssh "$remote_script"

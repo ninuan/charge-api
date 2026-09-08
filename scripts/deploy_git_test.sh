@@ -62,7 +62,16 @@ if [[ "$dry_run_output" != *"pnpm_fetch_timeout=120000"* ]] || [[ "$dry_run_outp
   exit 1
 fi
 
-if [[ "$dry_run_output" != *"health_ready=0"* ]] || [[ "$dry_run_output" != *"journalctl -u charge-api"* ]]; then
+if [[ "$dry_run_output" != *"health_ready=0"* ]] || [[ "$dry_run_output" != *"journalctl -u \"\$service_name\""* ]]; then
   echo "dry-run should retry health checks and print service diagnostics on failure"
+  exit 1
+fi
+
+set +e
+SERVICE_NAME='charge-api; echo INJECTED' HEALTH_URL='http://127.0.0.1:8080/healthz; echo INJECTED_URL' DEPLOY_HOST=root@example.invalid SKIP_CHECK=1 DEPLOY_BRANCH=main "$DEPLOY_SCRIPT" --dry-run >/dev/null 2>&1
+malicious_status=$?
+set -e
+if [[ "$malicious_status" -eq 0 ]]; then
+  echo "deploy-git should reject shell syntax in service settings"
   exit 1
 fi

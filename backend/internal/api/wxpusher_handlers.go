@@ -10,6 +10,7 @@ import (
 
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/security"
 	"charge-dashboard/internal/wxpusher"
 )
 
@@ -173,7 +174,7 @@ func (s *Server) writeWxPusherError(w http.ResponseWriter, operation string, err
 			return
 		}
 		s.setHealthDegraded("wxpusher", "微信提醒存储异常")
-		log.Printf("operation=%s component=wxpusher error=%v", operation, err)
+		log.Printf("operation=%s component=wxpusher error=%s", operation, security.SanitizeLogText(err.Error(), 1024))
 		writeCodedError(w, http.StatusServiceUnavailable, "WXPUSHER_UNAVAILABLE", "微信提醒暂时不可用，请稍后重试")
 	}
 }

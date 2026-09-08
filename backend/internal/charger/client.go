@@ -3,7 +3,6 @@ package charger
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -309,12 +308,12 @@ func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := security.ReadLimited(resp.Body, security.MaxUpstreamBodyBytes)
 	if err != nil {
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return "", fmt.Errorf("桩号解析接口返回 %s: %s", resp.Status, security.RedactText(strings.TrimSpace(string(body)), 512))
+		return "", fmt.Errorf("桩号解析接口返回 %s", resp.Status)
 	}
 	if id := extractCnumDeviceID(resp, body); id != "" {
 		return id, nil
@@ -459,7 +458,7 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := security.ReadLimited(resp.Body, security.MaxUpstreamBodyBytes)
 	if err != nil {
 		return model.Pile{}, err
 	}
@@ -467,7 +466,7 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 		return model.Pile{}, fmt.Errorf("%w: remote API returned %s", ErrAuthExpired, resp.Status)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return model.Pile{}, fmt.Errorf("remote API returned %s: %s", resp.Status, security.RedactText(strings.TrimSpace(string(body)), 512))
+		return model.Pile{}, fmt.Errorf("remote API returned %s", resp.Status)
 	}
 
 	pile, err := parser.ParsePayload(captureRequest.URL, body)

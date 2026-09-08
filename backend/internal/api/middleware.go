@@ -1,14 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 )
 
-// 静态导出无法为内联脚本注入 nonce：next-themes 的防闪烁脚本和 Next 的
-// flight 数据都直接内联在导出的 HTML 里，因此 script-src 必须放行 unsafe-inline。
+// Static HTML adds hashes for its exact inline scripts in StaticHandler.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"base-uri 'none'; " +
 	"object-src 'none'; " +
@@ -17,9 +19,9 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"img-src 'self' data: https:; " +
 	"font-src 'self' data:; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; " +
+	"script-src 'self'; " +
 	"frame-src 'none'; " +
-	"connect-src 'self' https://cloudflareinsights.com"
+	"connect-src 'self'"
 
 func WithSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -164,4 +166,36 @@ func qualityValue(params string) float64 {
 		return quality
 	}
 	return 1
+}
+
+// MaxRequestBodyBytes is the shared ceiling; handlers retain their smaller limits.
+const MaxRequestBodyBytes int64 = 64 << 10
+
+// WithRequestBodyLimit validates before dispatch, including chunked bodies on
+// routes that do not read a body (such as SSE). Memory per request is bounded.
+func WithRequestBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > MaxRequestBodyBytes {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+			return
+		}
+		if r.Body != nil && r.Body != http.NoBody {
+			limited := http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
+			defer limited.Close()
+			body, err := io.ReadAll(limited)
+			if err != nil {
+				status := http.StatusBadRequest
+				message := "invalid request body"
+				var tooLarge *http.MaxBytesError
+				if errors.As(err, &tooLarge) {
+					status = http.StatusRequestEntityTooLarge
+					message = "request body is too large"
+				}
+				writeJSON(w, status, map[string]string{"error": message})
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		next.ServeHTTP(w, r)
+	})
 }

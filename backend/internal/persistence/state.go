@@ -52,6 +52,12 @@ func LoadJSON(path string) (State, bool, error) {
 
 func ArchiveMigratedJSON(path string, state State) error {
 	state.Cookie = ""
+	for index := range state.Users {
+		state.Users[index].PasswordHash = ""
+	}
+	for index := range state.Invites {
+		state.Invites[index].Code = ""
+	}
 	for userID, userState := range state.UserStates {
 		userState.Cookie = ""
 		userState.YYBBinding = nil

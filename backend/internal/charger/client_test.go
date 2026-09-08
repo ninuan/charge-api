@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"charge-dashboard/internal/parser"
+	"charge-dashboard/internal/security"
 )
 
 func TestFetchPilesUsesBoundedConcurrencyAndReturnsPartialResults(t *testing.T) {
@@ -321,10 +322,23 @@ func TestFetchPileRedactsUpstreamErrorBody(t *testing.T) {
 			t.Fatalf("error leaked %q: %s", secret, msg)
 		}
 	}
-	for _, marker := range []string{"<redacted:cookie:len=13>", "<redacted:info:len=11>", "<redacted:verifycode:len=11>"} {
-		if !strings.Contains(msg, marker) {
-			t.Fatalf("error missing marker %q: %s", marker, msg)
-		}
+}
+
+func TestFetchPileRejectsOversizedUpstreamResponse(t *testing.T) {
+	client := NewClient([]parser.CaptureRequest{{
+		Name: "device-1", Method: http.MethodPost,
+		URL: "https://example.invalid/action/i/api/devicewithnumbers",
+	}})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusOK, strings.Repeat("x", int(security.MaxUpstreamBodyBytes)+1)), nil
+	})}
+
+	result := client.FetchPiles(true)
+	if len(result.Failures) != 1 || result.Failures[0].Err == nil {
+		t.Fatalf("expected one oversized-response failure, got %#v", result.Failures)
+	}
+	if !strings.Contains(result.Failures[0].Err.Error(), "response exceeds") {
+		t.Fatalf("unexpected oversized-response error: %v", result.Failures[0].Err)
 	}
 }
 
