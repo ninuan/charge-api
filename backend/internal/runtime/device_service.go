@@ -308,7 +308,7 @@ func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) er
 	if len(piles) == 0 {
 		return nil
 	}
-	events, err := m.repository.RecordPortStatusTransitions(userID, piles)
+	events, err := m.recordReminderStatusEvents(userID, piles)
 	if err != nil {
 		return fmt.Errorf("record remote port status transitions: %w", err)
 	}
@@ -338,4 +338,34 @@ func (m *Manager) Unsubscribe(userID string, ch chan model.DashboardSnapshot) {
 		return
 	}
 	runtime.store.Unsubscribe(ch)
+}
+
+// Manual refreshes only persist events needed for active reminders. The table
+// remains the notification recovery/outbox source, not a usage history feed.
+func (m *Manager) recordReminderStatusEvents(userID string, piles []model.Pile) ([]model.PortStatusEvent, error) {
+	rules, err := m.repository.ListWatchRules(userID)
+	if err != nil {
+		return nil, err
+	}
+	watched := make(map[string]bool)
+	now := time.Now().UTC()
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		active, _, err := reminderRuleActiveAt(rule, now)
+		if err != nil {
+			return nil, err
+		}
+		if active {
+			watched[rule.DeviceID] = true
+		}
+	}
+	selected := make([]model.Pile, 0, len(piles))
+	for _, pile := range piles {
+		if watched[pile.ID] {
+			selected = append(selected, pile)
+		}
+	}
+	return m.repository.RecordPortStatusTransitions(userID, selected)
 }

@@ -120,7 +120,7 @@ function pileLabel(piles: Pile[], deviceId?: string) {
   return pile?.name || pile?.number || deviceId
 }
 
-function BrowserNotificationSetting() {
+export function BrowserNotificationSetting() {
   const { preference } = useWatch()
   const { browserPermission, requestBrowserPermission, setBrowserEnabled } =
     useNotifications()

@@ -5,6 +5,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEV_ENV_FILE="${LOCAL_DEV_ENV_FILE:-$ROOT_DIR/.local/dev.env}"
 source "$ROOT_DIR/scripts/lib/dev_env.sh"
+source "$ROOT_DIR/scripts/lib/dev_process.sh"
 load_dev_env_file "$DEV_ENV_FILE"
 
 DATABASE_FILE="${LOCAL_DATABASE_FILE:-$ROOT_DIR/.local/charge_state.db}"
@@ -19,14 +20,6 @@ FRONTEND_PID=""
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "缺少命令: $1。请先运行 make setup 或安装对应运行环境。"
-    exit 1
-  fi
-}
-
-check_port() {
-  local port="$1"
-  if command -v lsof >/dev/null 2>&1 && lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "端口 $port 已被占用，请先停止对应服务。"
     exit 1
   fi
 }
@@ -51,12 +44,8 @@ wait_for_backend() {
 
 cleanup() {
   trap - EXIT
-  if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" >/dev/null 2>&1; then
-    kill "$FRONTEND_PID" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
-    kill "$BACKEND_PID" >/dev/null 2>&1 || true
-  fi
+  trap '' INT TERM
+  dev_stop_groups "$FRONTEND_PID" "$BACKEND_PID"
   wait "$FRONTEND_PID" "$BACKEND_PID" 2>/dev/null || true
   echo
   echo "本地前后端已停止。"
@@ -65,8 +54,10 @@ cleanup() {
 require_command go
 require_command pnpm
 require_command curl
-check_port "$BACKEND_PORT"
-check_port "$FRONTEND_PORT"
+require_command lsof
+require_command ps
+dev_prepare_port "$BACKEND_PORT" backend
+dev_prepare_port "$FRONTEND_PORT" frontend
 
 mkdir -p "$(dirname "$DATABASE_FILE")"
 mkdir -p "$(dirname "$COOKIE_KEY_FILE")"
@@ -89,6 +80,9 @@ fi
 
 trap cleanup EXIT
 trap 'exit 0' INT TERM
+# Each background service gets its own process group, including go run / pnpm
+# descendants. Cleanup must still work if the wrapper exits before its child.
+set -m
 
 echo "启动本地开发环境..."
 echo "前端地址: http://127.0.0.1:$FRONTEND_PORT"

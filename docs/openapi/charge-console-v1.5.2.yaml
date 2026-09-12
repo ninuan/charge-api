@@ -636,40 +636,31 @@ paths:
   /api/piles/{deviceId}/history:
     get:
       operationId: getDeviceHistory
-      summary: 获取充电桩历史分析
+      deprecated: true
+      summary: 使用历史已下线
       tags: [History]
       parameters:
         - $ref: "#/components/parameters/DeviceId"
         - $ref: "#/components/parameters/HistoryRange"
         - $ref: "#/components/parameters/Timezone"
       responses:
-        "200":
-          description: 设备维度的历史指标、每日趋势、热力图和端口摘要
-          headers:
-            Cache-Control:
-              $ref: "#/components/headers/PrivateNoStore"
+        "410":
+          description: 使用历史已下线，错误码 HISTORY_REMOVED
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeviceHistoryResponse"
-        "400":
-          $ref: "#/components/responses/InvalidHistoryQuery"
+                $ref: "#/components/schemas/CodedErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/OrdinaryUserRequired"
-        "404":
-          $ref: "#/components/responses/HistoryNotFound"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
-        "422":
-          $ref: "#/components/responses/HistoryRangeTooLarge"
-        "503":
-          $ref: "#/components/responses/HistoryUnavailable"
   /api/piles/{deviceId}/ports/{portId}/history:
     get:
       operationId: getPortHistory
-      summary: 获取单个充电口历史分析
+      deprecated: true
+      summary: 使用历史已下线
       tags: [History]
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -677,29 +668,19 @@ paths:
         - $ref: "#/components/parameters/HistoryRange"
         - $ref: "#/components/parameters/Timezone"
       responses:
-        "200":
-          description: 单个端口的历史指标、每日趋势和最近状态时间线
-          headers:
-            Cache-Control:
-              $ref: "#/components/headers/PrivateNoStore"
+        "410":
+          description: 使用历史已下线，错误码 HISTORY_REMOVED
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PortHistoryResponse"
-        "400":
-          $ref: "#/components/responses/InvalidPortHistoryQuery"
+                $ref: "#/components/schemas/CodedErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/OrdinaryUserRequired"
-        "404":
-          $ref: "#/components/responses/HistoryNotFound"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
-        "422":
-          $ref: "#/components/responses/HistoryRangeTooLarge"
-        "503":
-          $ref: "#/components/responses/HistoryUnavailable"
+
 components:
   securitySchemes:
     sessionCookie:

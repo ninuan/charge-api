@@ -170,7 +170,7 @@ describe("PileCard", () => {
     )
   })
 
-  it("opens history from an explicit card action", async () => {
+  it("does not expose retired history actions", async () => {
     const onHistory = vi.fn()
     render(
       <PileCard
@@ -188,8 +188,10 @@ describe("PileCard", () => {
       />
     )
 
-    await userEvent.click(screen.getByRole("button", { name: "历史趋势" }))
-    expect(onHistory).toHaveBeenCalledWith("pile-1")
+    expect(
+      screen.queryByRole("button", { name: "历史趋势" })
+    ).not.toBeInTheDocument()
+    expect(onHistory).not.toHaveBeenCalled()
   })
 
   it("offers one whole-pile reminder entry point", async () => {

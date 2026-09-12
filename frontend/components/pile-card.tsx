@@ -4,7 +4,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   BatteryChargingIcon,
-  BarChart3Icon,
   BellRingIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -57,20 +56,24 @@ function portMeta(port: Port) {
     return {
       label: "充电中",
       icon: ZapIcon,
-      className:
-        "border-warning/30 bg-warning/10 text-warning-foreground dark:bg-warning/15",
+      className: "text-warning-foreground",
+      dotClassName:
+        "bg-warning shadow-[0_0_0_3px_color-mix(in_oklab,var(--warning)_16%,transparent)]",
     }
   if (port.status === "offline")
     return {
       label: "离线",
       icon: WifiOffIcon,
-      className: "border-destructive/25 bg-destructive/5 text-destructive",
+      className: "text-destructive",
+      dotClassName:
+        "bg-destructive shadow-[0_0_0_3px_color-mix(in_oklab,var(--destructive)_14%,transparent)]",
     }
   return {
     label: "空闲",
     icon: CheckCircle2Icon,
-    className:
-      "border-success/25 bg-success/10 text-success-foreground dark:bg-success/15",
+    className: "text-success-foreground",
+    dotClassName:
+      "bg-success shadow-[0_0_0_3px_color-mix(in_oklab,var(--success)_15%,transparent)]",
   }
 }
 
@@ -113,7 +116,7 @@ function PortStatusCard({ port, targeted }: { port: Port; targeted: boolean }) {
     <section
       ref={setCardRef}
       aria-label={`${port.id} 号充电口`}
-      className={`rounded-lg border p-4 transition-[color,background-color,border-color,box-shadow] duration-200 hover:shadow-sm ${meta.className} ${targeted ? "notification-target-glow" : ""}`}
+      className={`group bg-card p-3.5 transition-[color,background-color,box-shadow] duration-150 hover:bg-muted/45 ${meta.className} ${targeted ? "notification-target-glow" : ""}`}
       onAnimationEnd={(event) => {
         if (event.target !== event.currentTarget) return
         event.currentTarget.classList.remove(
@@ -123,15 +126,16 @@ function PortStatusCard({ port, targeted }: { port: Port; targeted: boolean }) {
       }}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-lg font-semibold tabular-nums">
+        <span className="text-[1.05rem] font-semibold tabular-nums">
           {String(port.id).padStart(2, "0")}
         </span>
         <div className="flex items-center gap-1">
-          <Icon className="size-4" aria-hidden />
+          <span className={`size-1.5 rounded-full ${meta.dotClassName}`} />
+          <Icon className="size-4 opacity-75" aria-hidden />
         </div>
       </div>
-      <p className="mt-5 text-sm font-semibold">{meta.label}</p>
-      <div className="mt-2 min-h-9 space-y-1 text-xs leading-4 opacity-80">
+      <p className="mt-4 text-[0.78rem] font-semibold">{meta.label}</p>
+      <div className="mt-2 min-h-9 space-y-1 text-[0.68rem] leading-4 opacity-80">
         {port.status === "in_use" ? (
           <>
             <p className="flex items-center gap-1">
@@ -164,7 +168,6 @@ function PileCardComponent({
   canMoveDown,
   reordering,
   onMove,
-  onHistory,
   reminderEnabled,
   onConfigureReminder,
   targetPortId,
@@ -199,11 +202,13 @@ function PileCardComponent({
 
   return (
     <>
-      <Card className="overflow-hidden shadow-xs transition-shadow hover:shadow-sm">
-        <CardHeader className="flex flex-col gap-4 border-b p-5 sm:flex-row sm:items-start sm:justify-between lg:p-6">
+      <Card
+        className={`pile-workbench overflow-hidden shadow-xs transition-[box-shadow,border-color] hover:shadow-md ${hasIssue ? "border-l-[3px] border-l-destructive" : inUseCount ? "border-l-[3px] border-l-warning" : "border-l-[3px] border-l-success"}`}
+      >
+        <CardHeader className="flex flex-col gap-4 border-b border-border/70 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-xl font-semibold tracking-tight">
+              <h2 className="truncate text-lg font-semibold tracking-tight sm:text-xl">
                 {pile.name}
               </h2>
               <Badge
@@ -236,7 +241,7 @@ function PileCardComponent({
                     : "运行正常"}
               </Badge>
             </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.72rem] text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
                 <PlugZapIcon className="size-3.5" />
                 桩号 {pile.number || pile.id}
@@ -256,14 +261,6 @@ function PileCardComponent({
             )}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onHistory(pile.id)}
-              >
-                <BarChart3Icon data-icon="inline-start" />
-                历史趋势
-              </Button>
-              <Button
                 variant={reminderEnabled ? "secondary" : "outline"}
                 size="sm"
                 className="transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.98]"
@@ -276,7 +273,7 @@ function PileCardComponent({
             </div>
           </div>
           <div className="flex items-center justify-between gap-3 sm:justify-end">
-            <div className="flex gap-4 text-right text-xs text-muted-foreground">
+            <div className="flex gap-4 text-right text-[0.7rem] text-muted-foreground">
               <span>
                 <strong className="block text-lg font-semibold text-foreground tabular-nums">
                   {inUseCount}
@@ -290,7 +287,7 @@ function PileCardComponent({
                 空闲
               </span>
             </div>
-            <div className="flex">
+            <div className="flex rounded-lg border border-border/70 bg-muted/45 p-0.5">
               <Button
                 variant="ghost"
                 size="icon"
@@ -347,7 +344,7 @@ function PileCardComponent({
         {!collapsed && (
           <CardContent
             id={cardId}
-            className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5 lg:p-6"
+            className="grid grid-cols-2 gap-px bg-border/70 p-px sm:grid-cols-3 lg:grid-cols-5"
           >
             {displayedPorts.map((port) => (
               <PortStatusCard

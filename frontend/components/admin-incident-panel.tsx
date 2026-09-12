@@ -8,6 +8,9 @@ import {
   MessageSquareTextIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import { useOnline } from "@/lib/browser-state"
+import { WorkbenchSearch } from "@/components/workbench/surfaces"
 import { notify } from "@/lib/feedback"
 
 import { Badge } from "@/components/ui/badge"
@@ -80,11 +83,13 @@ function matchesFilter(issue: SystemException, filter: string) {
 type AdminIncidentPanelProps = {
   initialIssues?: SystemException[]
   onUser: (id: string) => void
+  compact?: boolean
 }
 
 export function AdminIncidentPanel({
   initialIssues = [],
   onUser,
+  compact = false,
 }: AdminIncidentPanelProps) {
   const [issues, setIssues] = useState(initialIssues)
   const [loading, setLoading] = useState(!initialIssues.length)
@@ -97,20 +102,30 @@ export function AdminIncidentPanel({
     useState<SystemException["status"]>("acknowledged")
   const [note, setNote] = useState("")
   const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState("")
+  const [search, setSearch] = useState("")
+  const online = useOnline()
 
   useEffect(() => {
     let ignore = false
     void adminApi
       .incidents()
       .then((next) => {
-        if (!ignore) setIssues(next)
+        if (!ignore) {
+          setIssues(next)
+          setLoadError("")
+        }
       })
       .catch((reason) => {
-        if (!ignore)
+        if (!ignore) {
+          setLoadError(
+            reason instanceof Error ? reason.message : "异常列表暂时不可用。"
+          )
           notify.error(reason, {
             title: "异常列表加载失败",
             id: "admin-incidents-load",
           })
+        }
       })
       .finally(() => {
         if (!ignore) setLoading(false)
@@ -125,11 +140,14 @@ export function AdminIncidentPanel({
       issues.filter(
         (issue) =>
           matchesFilter(issue, filter) &&
+          `${issue.username} ${issue.message} ${issue.deviceId ?? ""}`
+            .toLocaleLowerCase()
+            .includes(search.trim().toLocaleLowerCase()) &&
           (status === "active"
             ? issue.status !== "resolved"
             : issue.status === status)
       ),
-    [filter, issues, status]
+    [filter, issues, status, search]
   )
 
   function startUpdate(
@@ -142,7 +160,7 @@ export function AdminIncidentPanel({
   }
 
   async function save() {
-    if (!target) return
+    if (!target || !online) return
     setSaving(true)
     try {
       const updated = await adminApi.updateIncident(target.id, {
@@ -163,10 +181,10 @@ export function AdminIncidentPanel({
 
   return (
     <>
-      <Card className="shadow-xs">
+      <Card className="wb-incident-panel shadow-xs">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            最近异常
+            {compact ? "需要关注" : "异常列表"}
             <Badge variant={visible.length ? "destructive" : "secondary"}>
               {visible.length} 条
             </Badge>
@@ -175,44 +193,89 @@ export function AdminIncidentPanel({
             重复异常会自动合并；用户异常可点击进入详情处理。
           </CardDescription>
           <CardAction>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <FilterIcon className="size-3.5" />
-              快捷筛选
-            </div>
+            {compact ? (
+              <Link href="/admin?tab=incidents" className="wb-text-link">
+                全部异常
+              </Link>
+            ) : (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <FilterIcon className="size-3.5" />
+                快捷筛选
+              </div>
+            )}
           </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-1.5">
-            {filters.map((item) => (
+          {loadError && (
+            <div className="wb-state-banner wb-banner-warning" role="alert">
+              <div>
+                <strong>异常列表未能更新</strong>
+                <span>{loadError}</span>
+              </div>
               <Button
-                key={item.id}
-                size="xs"
-                variant={filter === item.id ? "default" : "outline"}
-                onClick={() => setFilter(item.id)}
+                variant="outline"
+                disabled={!online}
+                onClick={() => {
+                  setLoading(true)
+                  void adminApi
+                    .incidents()
+                    .then((next) => {
+                      setIssues(next)
+                      setLoadError("")
+                    })
+                    .catch((reason) =>
+                      setLoadError(
+                        reason instanceof Error ? reason.message : "未能加载"
+                      )
+                    )
+                    .finally(() => setLoading(false))
+                }}
               >
-                {item.label}
+                重试
               </Button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1.5 border-b pb-3">
-            {(
-              [
-                ["active", "待处理"],
-                ["open", "未处理"],
-                ["acknowledged", "已确认"],
-                ["resolved", "已解决"],
-              ] as const
-            ).map(([value, label]) => (
-              <Button
-                key={value}
-                size="xs"
-                variant={status === value ? "secondary" : "ghost"}
-                onClick={() => setStatus(value)}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
+            </div>
+          )}
+          {!compact && (
+            <>
+              <WorkbenchSearch
+                label="搜索异常"
+                placeholder="搜索异常、用户或设备"
+                value={search}
+                onChange={setSearch}
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {filters.map((item) => (
+                  <Button
+                    key={item.id}
+                    size="xs"
+                    variant={filter === item.id ? "default" : "outline"}
+                    onClick={() => setFilter(item.id)}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1.5 border-b pb-3">
+                {(
+                  [
+                    ["active", "待处理"],
+                    ["open", "未处理"],
+                    ["acknowledged", "已确认"],
+                    ["resolved", "已解决"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    size="xs"
+                    variant={status === value ? "secondary" : "ghost"}
+                    onClick={() => setStatus(value)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </>
+          )}
           <div
             key={`${filter}-${status}`}
             className="grid gap-2 motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in"
@@ -223,22 +286,10 @@ export function AdminIncidentPanel({
                 <Skeleton className="h-16 w-full" />
               </>
             ) : visible.length ? (
-              visible.slice(0, 12).map((issue) => (
+              (compact ? visible.slice(0, 3) : visible).map((issue) => (
                 <div
                   key={issue.id}
-                  role={issue.userId ? "button" : undefined}
-                  tabIndex={issue.userId ? 0 : undefined}
-                  className="flex flex-col gap-3 rounded-lg border p-3 transition-colors duration-150 hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
-                  onClick={() => issue.userId && onUser(issue.userId)}
-                  onKeyDown={(event) => {
-                    if (
-                      issue.userId &&
-                      (event.key === "Enter" || event.key === " ")
-                    ) {
-                      event.preventDefault()
-                      onUser(issue.userId)
-                    }
-                  }}
+                  className="wb-incident-row flex flex-col gap-3 border-b py-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -298,6 +349,7 @@ export function AdminIncidentPanel({
                       <Button
                         size="xs"
                         variant="outline"
+                        disabled={!online}
                         onClick={() => startUpdate(issue, "acknowledged")}
                       >
                         <CircleAlertIcon />
@@ -308,6 +360,7 @@ export function AdminIncidentPanel({
                       <Button
                         size="xs"
                         variant="outline"
+                        disabled={!online}
                         onClick={() => startUpdate(issue, "resolved")}
                       >
                         <CheckIcon />
@@ -319,7 +372,9 @@ export function AdminIncidentPanel({
               ))
             ) : (
               <p className="py-5 text-center text-sm text-muted-foreground">
-                当前筛选下没有异常。
+                {loadError
+                  ? "暂时无法确认是否有待处理异常。"
+                  : "当前筛选下没有异常。"}
               </p>
             )}
           </div>
@@ -349,7 +404,7 @@ export function AdminIncidentPanel({
             <Button variant="outline" onClick={() => setTarget(null)}>
               取消
             </Button>
-            <Button disabled={saving} onClick={() => void save()}>
+            <Button disabled={saving || !online} onClick={() => void save()}>
               {saving ? "正在保存…" : "确认更新"}
             </Button>
           </DialogFooter>

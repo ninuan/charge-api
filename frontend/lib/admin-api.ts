@@ -162,6 +162,7 @@ export const adminApi = {
       deviceLimit?: number
       refreshEnabled?: boolean
       password?: string
+      role?: UserRole
     }
   ) =>
     request<CurrentUser>(
@@ -189,13 +190,13 @@ export const adminApi = {
       },
       "保存设置失败"
     ),
-  createInvite: () =>
+  createInvite: (payload: { code?: string; expiresAt?: string } = {}) =>
     request<InviteCode>(
       "/api/admin/invites",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(payload),
       },
       "创建邀请码失败"
     ),

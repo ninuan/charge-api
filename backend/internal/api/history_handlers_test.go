@@ -2,10 +2,8 @@ package api
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -105,112 +103,20 @@ func historyAPIRequest(t *testing.T, fixture historyAPIFixture, userID, path str
 	return recorder
 }
 
-func TestUserHistoryAPIReturnsOwnedDeviceAndPortAnalytics(t *testing.T) {
+func TestHistoryEndpointsAreRetiredAndStillRequireAuthentication(t *testing.T) {
 	fixture := newHistoryAPIFixture(t)
-	const deviceID = "2601201412385560088"
-
-	deviceRecorder := historyAPIRequest(
-		t, fixture, fixture.owner.ID,
-		"/api/piles/"+deviceID+"/history?range=24h&timezone=UTC",
-	)
-	if deviceRecorder.Code != http.StatusOK {
-		t.Fatalf("device history status = %d: %s", deviceRecorder.Code, deviceRecorder.Body.String())
-	}
-	if cacheControl := deviceRecorder.Header().Get("Cache-Control"); cacheControl != "private, no-store" {
-		t.Fatalf("device history cache control = %q", cacheControl)
-	}
-	var device model.DeviceHistoryResponse
-	if err := json.NewDecoder(deviceRecorder.Body).Decode(&device); err != nil {
-		t.Fatalf("decode device history: %v", err)
-	}
-	if device.Device.ID != deviceID || device.Window.Range != "24h" || device.Window.Timezone != "UTC" || len(device.Ports) != 1 {
-		t.Fatalf("unexpected device history: %+v", device)
-	}
-
-	portRecorder := historyAPIRequest(
-		t, fixture, fixture.owner.ID,
-		"/api/piles/"+deviceID+"/ports/1/history?range=7d&timezone=Asia%2FShanghai",
-	)
-	if portRecorder.Code != http.StatusOK {
-		t.Fatalf("port history status = %d: %s", portRecorder.Code, portRecorder.Body.String())
-	}
-	var port model.PortHistoryResponse
-	if err := json.NewDecoder(portRecorder.Body).Decode(&port); err != nil {
-		t.Fatalf("decode port history: %v", err)
-	}
-	if port.PortID != 1 || port.Device.ID != deviceID || len(port.Timeline) != 1 {
-		t.Fatalf("unexpected port history: %+v", port)
-	}
-	for _, secret := range []string{fixture.owner.ID, "passwordHash", "cookieCiphertext"} {
-		if strings.Contains(strings.ToLower(portRecorder.Body.String()), strings.ToLower(secret)) {
-			t.Fatalf("port history response leaked %q: %s", secret, portRecorder.Body.String())
+	for _, path := range []string{"/api/piles/2601201412385560088/history", "/api/piles/2601201412385560088/ports/1/history"} {
+		for _, user := range []string{fixture.owner.ID, fixture.other.ID} {
+			response := historyAPIRequest(t, fixture, user, path)
+			if response.Code != http.StatusGone || !bytes.Contains(response.Body.Bytes(), []byte("HISTORY_REMOVED")) {
+				t.Fatalf("retired endpoint = %d %s", response.Code, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "private, no-store" {
+				t.Fatal("retired response must not be cached")
+			}
 		}
-	}
-}
-
-func TestUserHistoryAPIValidatesQueryAndHidesUnownedTargets(t *testing.T) {
-	fixture := newHistoryAPIFixture(t)
-	const deviceID = "2601201412385560088"
-	tests := []struct {
-		name   string
-		userID string
-		path   string
-		status int
-		code   string
-	}{
-		{name: "anonymous", path: "/api/piles/" + deviceID + "/history", status: http.StatusUnauthorized},
-		{name: "other user", userID: fixture.other.ID, path: "/api/piles/" + deviceID + "/history", status: http.StatusNotFound, code: "HISTORY_NOT_FOUND"},
-		{name: "invalid range", userID: fixture.owner.ID, path: "/api/piles/" + deviceID + "/history?range=14d", status: http.StatusBadRequest, code: "HISTORY_QUERY_INVALID"},
-		{name: "invalid timezone", userID: fixture.owner.ID, path: "/api/piles/" + deviceID + "/history?timezone=..%2F..%2Fetc%2Fpasswd", status: http.StatusBadRequest, code: "HISTORY_QUERY_INVALID"},
-		{name: "unknown port", userID: fixture.owner.ID, path: "/api/piles/" + deviceID + "/ports/2/history", status: http.StatusNotFound, code: "HISTORY_NOT_FOUND"},
-		{name: "invalid port", userID: fixture.owner.ID, path: "/api/piles/" + deviceID + "/ports/no/history", status: http.StatusBadRequest, code: "PORT_ID_INVALID"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			recorder := historyAPIRequest(t, fixture, test.userID, test.path)
-			if recorder.Code != test.status {
-				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.status, recorder.Body.String())
-			}
-			if test.code != "" && !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
-				t.Fatalf("response missing code %q: %s", test.code, recorder.Body.String())
-			}
-		})
-	}
-}
-
-func TestHistoryStorageFailureMarksServiceHealthDegraded(t *testing.T) {
-	fixture := newHistoryAPIFixture(t)
-	if err := fixture.repository.Close(); err != nil {
-		t.Fatalf("close repository: %v", err)
-	}
-	recorder := historyAPIRequest(
-		t, fixture, fixture.owner.ID,
-		"/api/piles/2601201412385560088/history?range=24h&timezone=UTC",
-	)
-	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), "HISTORY_UNAVAILABLE") {
-		t.Fatalf("storage failure status = %d: %s", recorder.Code, recorder.Body.String())
-	}
-	if reason := fixture.server.adminDegradation(); !strings.Contains(reason, "端口历史查询失败") {
-		t.Fatalf("history failure did not degrade service health: %q", reason)
-	}
-}
-
-func TestHistoryErrorResponsesUseStableCodes(t *testing.T) {
-	server := &Server{healthDegradations: make(map[string]string)}
-	tests := []struct {
-		err    error
-		status int
-		code   string
-	}{
-		{err: appruntime.ErrHistoryQueryInvalid, status: http.StatusBadRequest, code: "HISTORY_QUERY_INVALID"},
-		{err: appruntime.ErrHistoryNotFound, status: http.StatusNotFound, code: "HISTORY_NOT_FOUND"},
-		{err: appruntime.ErrHistoryTooLarge, status: http.StatusUnprocessableEntity, code: "HISTORY_RANGE_TOO_LARGE"},
-	}
-	for _, test := range tests {
-		recorder := httptest.NewRecorder()
-		server.writeHistoryError(recorder, "history_test", "6001", test.err)
-		if recorder.Code != test.status || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
-			t.Fatalf("error %v returned %d: %s", test.err, recorder.Code, recorder.Body.String())
+		if response := historyAPIRequest(t, fixture, "", path); response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated = %d", response.Code)
 		}
 	}
 }

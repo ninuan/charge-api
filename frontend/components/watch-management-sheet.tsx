@@ -108,7 +108,7 @@ function ruleLabel() {
 
 const recurringRetirementNoticeKey = "charge:recurring-reminders-retired:v1"
 
-function QuietHoursForm({
+export function QuietHoursForm({
   preference,
   onSave,
 }: {

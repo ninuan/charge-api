@@ -1,7 +1,83 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
+import { ShieldCheckIcon } from "lucide-react"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { Brand } from "@/components/workbench/brand"
 
-export function AuthPageShell({ mode, children }: { mode: "login" | "register"; children: ReactNode }) {
+export function AuthPageShell({
+  mode,
+  children,
+}: {
+  mode: "login" | "register"
+  children: ReactNode
+}) {
   const register = mode === "register"
-  return <main className="min-h-dvh bg-muted/35 px-4 pt-[max(1rem,6dvh)] pb-4 sm:px-6"><section className="mx-auto w-full max-w-md rounded-xl border bg-background p-6 shadow-sm sm:p-8"><Link href="/login" className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">C</span><span><strong className="block text-sm tracking-tight">Charge Console</strong><small className="block text-xs text-muted-foreground">充电设施运营中心</small></span></Link><div className="mt-8"><p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">{register ? "Create account" : "Welcome back"}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight">{register ? "注册" : "登录"}</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">{register ? "创建账户后，即可配置个人充电桩。" : "登录查看个人绑定状态"}</p></div><nav className="mt-7 grid grid-cols-2 rounded-lg bg-muted p-1" aria-label="认证方式"><Link className={`rounded-md px-3 py-2 text-center text-sm font-medium transition-colors duration-200 ${!register ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`} href="/login">登录</Link><Link className={`rounded-md px-3 py-2 text-center text-sm font-medium transition-colors duration-200 ${register ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`} href="/register">注册</Link></nav><div className="mt-7 min-h-[22rem]"><div key={mode} className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-300">{children}</div></div><p className="mt-7 text-center text-xs leading-5 text-muted-foreground">登录状态最长保留 7 天。公共设备上使用后请及时退出。</p></section></main>
+  return (
+    <div className="wb-theme wb-auth-page auth-workbench min-h-dvh">
+      <section className="wb-auth-story" aria-label="Charge Console">
+        <Link href="/login" aria-label="Charge 首页">
+          <Brand />
+        </Link>
+        <div>
+          <p className="wb-eyebrow">给日常，留一点余量。</p>
+          <h2 className="wb-auth-headline">
+            有空闲，
+            <br />
+            再出发<span>。</span>
+          </h2>
+          <p>
+            把常去的充电桩放在一起。
+            <br />
+            看一眼状态，或等一个恰好的提醒。
+          </p>
+          <dl className="wb-auth-features" aria-label="主要功能">
+            <div>
+              <dt>常用桩</dt>
+              <dd>常去的地方，一处查看</dd>
+            </div>
+            <div>
+              <dt>端口状态</dt>
+              <dd>查看最近读取的使用情况</dd>
+            </div>
+            <div>
+              <dt>空闲提醒</dt>
+              <dd>有空闲时，告诉你一声</dd>
+            </div>
+          </dl>
+        </div>
+        <p className="wb-small wb-muted">
+          Charge Console · 常用桩状态与空闲提醒
+        </p>
+      </section>
+      <main className="wb-auth-form-section">
+        <div className="wb-auth-form-wrap">
+          <div className="wb-auth-topline">
+            <Link href="/login" aria-label="Charge Console">
+              <Brand small />
+            </Link>
+            <ThemeToggle />
+          </div>
+          <h1>{register ? "创建你的账户" : "欢迎回来"}</h1>
+          <p>
+            {register
+              ? "创建独立账户，开始整理常用充电桩。"
+              : "登录后，接着看看常去的地方。"}
+          </p>
+          <nav className="wb-section-tabs wb-auth-tabs" aria-label="认证方式">
+            <Link href="/login" aria-current={!register ? "page" : undefined}>
+              登录
+            </Link>
+            <Link href="/register" aria-current={register ? "page" : undefined}>
+              注册
+            </Link>
+          </nav>
+          <div className="wb-auth-fields">{children}</div>
+          <p className="wb-auth-security">
+            <ShieldCheckIcon size={14} />
+            公共设备使用后，请及时退出账户。
+          </p>
+        </div>
+      </main>
+    </div>
+  )
 }

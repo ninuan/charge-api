@@ -85,6 +85,7 @@ export function MetricCard({
   const summary = (
     <div
       aria-label={`${label} 指标`}
+      data-slot="metric-card"
       className={cn(
         "flex items-start justify-between gap-3",
         compact ? "p-3" : "p-4",

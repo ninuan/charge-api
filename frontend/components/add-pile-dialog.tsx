@@ -24,8 +24,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
 import { useDashboard } from "@/lib/dashboard-context"
+import type { Pile } from "@/lib/types"
 
-export function AddPileDialog() {
+export function AddPileDialog({
+  onAdded,
+  disabled = false,
+}: { onAdded?: (pile: Pile) => void; disabled?: boolean } = {}) {
   const { currentUser } = useAuth()
   const { addPile } = useDashboard()
   const closeAppShellMenu = useCloseAppShellMenu()
@@ -53,7 +57,7 @@ export function AddPileDialog() {
     const number = form.number.trim()
     setSubmitting(true)
     try {
-      await addPile({
+      const added = await addPile({
         id,
         name: form.name.trim() || `充电桩 ${number || id.slice(-6)}`,
         number,
@@ -71,6 +75,7 @@ export function AddPileDialog() {
       })
       handleOpenChange(false)
       notify.success("充电桩已添加")
+      onAdded?.(added)
     } catch (reason) {
       notify.error(reason, { title: "添加充电桩失败" })
     } finally {
@@ -82,7 +87,7 @@ export function AddPileDialog() {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button>
+          <Button disabled={disabled}>
             <PlusIcon />
             添加充电桩
           </Button>

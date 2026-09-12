@@ -17,7 +17,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 
-const { authState } = vi.hoisted(() => ({
+const { authState, routerMock } = vi.hoisted(() => ({
+  routerMock: { replace: vi.fn(), push: vi.fn() },
   authState: {
     currentUser: { username: "alice" } as {
       username: string
@@ -26,10 +27,11 @@ const { authState } = vi.hoisted(() => ({
     isAdmin: false,
     ready: true,
     logout: vi.fn(),
+    clearSession: vi.fn(),
   },
 }))
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }) }))
+vi.mock("next/navigation", () => ({ useRouter: () => routerMock }))
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => authState,
 }))
@@ -43,9 +45,7 @@ function DialogAction() {
   }
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<button type="button" />}>
-        使用说明
-      </DialogTrigger>
+      <DialogTrigger render={<button type="button" />}>使用说明</DialogTrigger>
       <DialogContent>
         <DialogTitle>说明内容</DialogTitle>
       </DialogContent>
@@ -138,31 +138,29 @@ describe("AppShell", () => {
       "overflow-y-auto"
     )
     expect(
-      within(drawer as HTMLElement).getByRole("button", { name: "使用说明" })
-    ).toBeVisible()
-    expect(within(drawer as HTMLElement).getByText("当前页面")).toBeVisible()
-    expect(within(drawer as HTMLElement).getByText("账户操作")).toBeVisible()
+      within(drawer as HTMLElement).getByRole("link", { name: "空闲提醒" })
+    ).toHaveAttribute("href", "/dashboard/reminders")
     expect(
-      within(drawer as HTMLElement).getByRole("button", { name: "退出登录" })
-    ).toHaveClass("text-destructive")
+      within(drawer as HTMLElement).getByRole("link", { name: "通知" })
+    ).toHaveAttribute("href", "/dashboard/notifications")
+    expect(
+      within(drawer as HTMLElement).getByRole("link", { name: "账户安全" })
+    ).toHaveAttribute("href", "/account?tab=security")
+    expect(
+      screen.queryByRole("button", { name: "退出登录" })
+    ).not.toBeInTheDocument()
 
-    await user.click(
-      within(drawer as HTMLElement).getByRole("button", { name: "使用说明" })
-    )
+    await user.keyboard("{Escape}")
     await waitFor(() => expect(drawer).not.toBeVisible())
   })
 
-  it("keeps the mobile menu mounted until its action dialog closes", async () => {
+  it("does not duplicate page actions inside navigation and restores their focus", async () => {
     authState.currentUser = { username: "alice" }
     authState.isAdmin = false
     authState.ready = true
     const user = userEvent.setup()
     render(
-      <AppShell
-        title="看板"
-        description="说明"
-        actions={<DialogAction />}
-      >
+      <AppShell title="看板" description="说明" actions={<DialogAction />}>
         <p>主要内容</p>
       </AppShell>
     )
@@ -171,22 +169,58 @@ describe("AppShell", () => {
     const drawer = screen
       .getByText("账户与操作")
       .closest("[data-slot=sheet-content]")
-    await user.click(
-      within(drawer as HTMLElement).getByRole("button", {
-        name: "使用说明",
-      })
-    )
-
     expect(
-      screen.getByRole("dialog", { name: "说明内容" })
-    ).toHaveTextContent("说明内容")
-    expect(drawer).toBeVisible()
+      within(drawer as HTMLElement).queryByRole("button", { name: "使用说明" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getAllByRole("button", { name: "使用说明", hidden: true })
+    ).toHaveLength(1)
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(drawer).not.toBeVisible())
+    const trigger = screen.getByRole("button", { name: "使用说明" })
+    await user.click(trigger)
+
+    expect(screen.getByRole("dialog", { name: "说明内容" })).toHaveTextContent(
+      "说明内容"
+    )
 
     await user.click(
-      within(
-        screen.getByRole("dialog", { name: "说明内容" })
-      ).getByRole("button", { name: "关闭" })
+      within(screen.getByRole("dialog", { name: "说明内容" })).getByRole(
+        "button",
+        { name: "关闭" }
+      )
     )
-    await waitFor(() => expect(drawer).not.toBeVisible())
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "说明内容" })
+      ).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("uses the current workspace navigation and sends administrator searches to the user directory", async () => {
+    authState.currentUser = { username: "admin" }
+    authState.isAdmin = true
+    authState.ready = true
+    const user = userEvent.setup()
+    render(
+      <AppShell title="运行概览" activeSection="overview" description="说明">
+        <p>内容</p>
+      </AppShell>
+    )
+    const nav = screen.getByRole("navigation", { name: "主导航" })
+    expect(
+      within(nav).queryByRole("link", { name: "常用充电桩" })
+    ).not.toBeInTheDocument()
+    expect(within(nav).getByRole("link", { name: "运行概览" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    )
+    await user.click(screen.getByRole("button", { name: "打开快速搜索" }))
+    await user.type(screen.getByRole("textbox", { name: "快速搜索" }), "alice")
+    await user.click(screen.getByRole("button", { name: /查找用户“alice”/ }))
+    expect(routerMock.push).toHaveBeenCalledWith(
+      "/admin?tab=users&search=alice"
+    )
   })
 })

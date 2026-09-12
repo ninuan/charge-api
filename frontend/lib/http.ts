@@ -19,6 +19,7 @@ const publicErrorMessages: Record<string, string> = {
   HISTORY_QUERY_INVALID: "历史范围或时区参数无效",
   HISTORY_NOT_FOUND: "未找到对应的历史记录",
   HISTORY_RANGE_TOO_LARGE: "该范围内历史变化过多，请缩短查询范围",
+  HISTORY_REMOVED: "使用历史已下线，请查看充电桩最近状态。",
   HISTORY_UNAVAILABLE: "历史数据暂时不可用，请稍后重试",
   ADMIN_TREND_QUERY_INVALID: "趋势范围或时区参数无效",
   ADMIN_TRENDS_UNAVAILABLE: "运营趋势暂时不可用，请稍后重试",
@@ -81,6 +82,7 @@ export class RequestError extends Error {
 }
 
 const defaultTimeoutMs = 30_000
+export const sessionExpiredEvent = "charge:session-expired"
 
 export type RequestOptions = RequestInit & {
   // 需要串联远端设备请求的长操作（刷新、添加桩等）可放宽超时。
@@ -118,6 +120,14 @@ export async function request<T>(
   }
 
   if (!response.ok && response.status !== 204) {
+    if (
+      response.status === 401 &&
+      path !== "/api/auth/login" &&
+      path !== "/api/auth/register" &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new Event(sessionExpiredEvent))
+    }
     const error = await responseError(response, fallback)
     throw new RequestError(error.message, response.status, error.code)
   }

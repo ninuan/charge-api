@@ -26,7 +26,7 @@ describe("dashboard modal layouts", () => {
       screen.getByRole("heading", { name: "使用空闲提醒" })
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/请在通知中心点击“允许通知”，并保持网页打开/)
+      screen.getByText(/账户与设置 → 通知设置.*允许通知，并保持网页打开/)
     ).toBeInTheDocument()
   })
 

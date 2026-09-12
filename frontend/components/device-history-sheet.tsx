@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -43,6 +44,7 @@ import type {
   HistoryHeatmapCell,
   HistoryHourInsight,
   HistorySampleState,
+  HistoryRange,
   PortHistoryMetrics,
   PortHistoryResponse,
   PortStatus,
@@ -70,6 +72,8 @@ type Props = {
   pile: Pile
   open: boolean
   onOpenChange: (open: boolean) => void
+  inline?: boolean
+  initialPort?: number
 }
 
 function resolveTimezone() {
@@ -435,14 +439,53 @@ function HistoryLoading() {
   )
 }
 
-export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
+function HistoryFrame({
+  inline,
+  open,
+  onOpenChange,
+  children,
+}: {
+  inline: boolean
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  children: ReactNode
+}) {
+  return inline ? (
+    <section className="wb-history-embedded" aria-label="使用历史">
+      {children}
+    </section>
+  ) : (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full gap-0 overflow-hidden p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl data-[side=right]:lg:max-w-4xl">
+        {children}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+export function DeviceHistorySheet({
+  pile,
+  open,
+  onOpenChange,
+  inline = false,
+  initialPort,
+}: Props) {
   const [timezone] = useState(resolveTimezone)
+  const [range, setRange] = useState<HistoryRange>("7d")
+  const rangeLabel =
+    range === "24h"
+      ? "最近 24 小时"
+      : range === "30d"
+        ? "最近 30 天"
+        : "最近 7 天"
   const timezoneLabel = timezone === "Asia/Shanghai" ? "北京时间" : timezone
   const [device, setDevice] = useState<DeviceHistoryResponse | null>(null)
   const [deviceLoading, setDeviceLoading] = useState(false)
   const [deviceError, setDeviceError] = useState("")
-  const [selectedPort, setSelectedPort] = useState<number | null>(
-    () => pile.ports[0]?.id ?? null
+  const [selectedPort, setSelectedPort] = useState<number | null>(() =>
+    pile.ports.some((port) => port.id === initialPort)
+      ? initialPort!
+      : (pile.ports[0]?.id ?? null)
   )
   const [port, setPort] = useState<PortHistoryResponse | null>(null)
   const [portLoading, setPortLoading] = useState(false)
@@ -456,10 +499,11 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
     deviceController.current = controller
     setDeviceLoading(true)
     setDeviceError("")
+    setDevice(null)
     try {
       const next = await historyApi.device(
         pile.id,
-        { range: "7d", timezone },
+        { range, timezone },
         { signal: controller.signal }
       )
       if (!controller.signal.aborted) setDevice(next)
@@ -469,7 +513,7 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
     } finally {
       if (!controller.signal.aborted) setDeviceLoading(false)
     }
-  }, [pile.id, timezone])
+  }, [pile.id, timezone, range])
 
   const loadPort = useCallback(
     async (portId: number) => {
@@ -483,7 +527,7 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
         const next = await historyApi.port(
           pile.id,
           portId,
-          { range: "7d", timezone },
+          { range, timezone },
           { signal: controller.signal }
         )
         if (!controller.signal.aborted) setPort(next)
@@ -494,30 +538,37 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
         if (!controller.signal.aborted) setPortLoading(false)
       }
     },
-    [pile.id, timezone]
+    [pile.id, timezone, range]
   )
 
-  const initialPortId = pile.ports[0]?.id ?? null
   useEffect(() => {
     if (!open) return
     let active = true
     queueMicrotask(() => {
       if (!active) return
       void loadDevice()
-      if (initialPortId !== null) void loadPort(initialPortId)
     })
     return () => {
       active = false
       deviceController.current?.abort()
+    }
+  }, [loadDevice, open])
+  useEffect(() => {
+    if (!open || selectedPort === null) return
+    let active = true
+    queueMicrotask(() => {
+      if (active) void loadPort(selectedPort)
+    })
+    return () => {
+      active = false
       portController.current?.abort()
     }
-  }, [initialPortId, loadDevice, loadPort, open])
+  }, [loadPort, open, selectedPort])
 
   function selectPort(value: string | number) {
     const portId = Number(value)
     if (!Number.isInteger(portId) || portId === selectedPort) return
     setSelectedPort(portId)
-    void loadPort(portId)
   }
 
   const busiest = device?.busiestHours[0]
@@ -526,8 +577,8 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
     pile.ports.map((item) => item.id)
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 overflow-hidden p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl data-[side=right]:lg:max-w-4xl">
+    <HistoryFrame inline={inline} open={open} onOpenChange={onOpenChange}>
+      {!inline && (
         <SheetHeader className="border-b px-4 py-4 pr-14 sm:px-6 sm:pr-14">
           <div className="flex items-start gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -536,7 +587,7 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
             <div className="min-w-0">
               <SheetTitle className="flex flex-wrap items-center gap-2 text-lg">
                 <span className="truncate">{pile.name}</span>
-                <Badge variant="outline">最近 7 天</Badge>
+                <Badge variant="outline">{rangeLabel}</Badge>
               </SheetTitle>
               <SheetDescription className="mt-1">
                 桩号 {pile.number || pile.id} · 按 {timezoneLabel}聚合
@@ -544,167 +595,181 @@ export function DeviceHistorySheet({ pile, open, onOpenChange }: Props) {
             </div>
           </div>
         </SheetHeader>
-
-        <div
-          data-slot="history-scroll"
-          className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
+      )}
+      <div className="wb-history-range-toolbar">
+        <span>{timezoneLabel} · 已观察的状态，不预测空位</span>
+        <Tabs
+          value={range}
+          onValueChange={(value) => setRange(value as HistoryRange)}
         >
-          {deviceLoading && !device ? (
-            <HistoryLoading />
-          ) : deviceError && !device ? (
-            <Alert variant="destructive">
-              <WifiOffIcon />
-              <AlertTitle>历史数据加载失败</AlertTitle>
-              <AlertDescription>{deviceError}</AlertDescription>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2 w-fit"
-                onClick={() => void loadDevice()}
-              >
-                <RefreshCwIcon data-icon="inline-start" />
-                重试
-              </Button>
+          <TabsList aria-label="历史时间范围">
+            <TabsTrigger value="24h">24 小时</TabsTrigger>
+            <TabsTrigger value="7d">7 天</TabsTrigger>
+            <TabsTrigger value="30d">30 天</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <div
+        data-slot="history-scroll"
+        className={
+          inline
+            ? "wb-history-body"
+            : "flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
+        }
+      >
+        {deviceLoading && !device ? (
+          <HistoryLoading />
+        ) : deviceError && !device ? (
+          <Alert variant="destructive">
+            <WifiOffIcon />
+            <AlertTitle>历史数据加载失败</AlertTitle>
+            <AlertDescription>{deviceError}</AlertDescription>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 w-fit"
+              onClick={() => void loadDevice()}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              重试
+            </Button>
+          </Alert>
+        ) : device ? (
+          <div className="flex flex-col gap-4">
+            <Alert>
+              <InfoIcon />
+              <AlertTitle>统计口径</AlertTitle>
+              <AlertDescription>{device.historyNotice}</AlertDescription>
             </Alert>
-          ) : device ? (
-            <div className="flex flex-col gap-4">
+
+            {device.metrics.sampleState === "no_data" && (
               <Alert>
-                <InfoIcon />
-                <AlertTitle>统计口径</AlertTitle>
-                <AlertDescription>{device.historyNotice}</AlertDescription>
+                <ActivityIcon />
+                <AlertTitle>历史数据正在积累</AlertTitle>
+                <AlertDescription>
+                  首次刷新只建立当前状态基线，之后端口状态发生变化才会形成趋势。
+                </AlertDescription>
               </Alert>
+            )}
 
-              {device.metrics.sampleState === "no_data" && (
-                <Alert>
-                  <ActivityIcon />
-                  <AlertTitle>历史数据正在积累</AlertTitle>
-                  <AlertDescription>
-                    首次刷新只建立当前状态基线，之后端口状态发生变化才会形成趋势。
-                  </AlertDescription>
-                </Alert>
-              )}
+            <section
+              aria-labelledby="history-summary-title"
+              className="wb-history-summary-section"
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h3 id="history-summary-title" className="font-medium">
+                  使用概览
+                </h3>
+                <SampleBadge state={device.metrics.sampleState} />
+              </div>
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <SummaryMetric
+                  label={`${rangeLabel}占用率`}
+                  value={formatPercent(device.metrics.occupancyPercent)}
+                  detail="仅统计空闲与充电中时段"
+                />
+                <SummaryMetric
+                  label="平均充电时长"
+                  value={formatDuration(device.metrics.averageSessionSeconds)}
+                  detail={`${device.metrics.completedSessions} 次完整会话`}
+                />
+                <SummaryMetric
+                  label="常见繁忙时段"
+                  value={formatHourInsight(busiest)}
+                  detail={
+                    busiest
+                      ? `平均占用 ${formatPercent(busiest.occupancyPercent)}`
+                      : "达到样本门槛后显示"
+                  }
+                />
+                <SummaryMetric
+                  label="通常较空闲"
+                  value={formatHourInsight(device.quietSuggestion)}
+                  detail={
+                    device.quietSuggestion
+                      ? `平均占用 ${formatPercent(device.quietSuggestion.occupancyPercent)}`
+                      : "达到样本门槛后显示"
+                  }
+                />
+              </div>
+            </section>
 
-              <section aria-labelledby="history-summary-title">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <h3 id="history-summary-title" className="font-medium">
-                    使用概览
-                  </h3>
-                  <SampleBadge state={device.metrics.sampleState} />
-                </div>
-                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-                  <SummaryMetric
-                    label="最近 7 天占用率"
-                    value={formatPercent(device.metrics.occupancyPercent)}
-                    detail="仅统计空闲与充电中时段"
-                  />
-                  <SummaryMetric
-                    label="平均充电时长"
-                    value={formatDuration(device.metrics.averageSessionSeconds)}
-                    detail={`${device.metrics.completedSessions} 次完整会话`}
-                  />
-                  <SummaryMetric
-                    label="常见繁忙时段"
-                    value={formatHourInsight(busiest)}
-                    detail={
-                      busiest
-                        ? `平均占用 ${formatPercent(busiest.occupancyPercent)}`
-                        : "达到样本门槛后显示"
-                    }
-                  />
-                  <SummaryMetric
-                    label="通常较空闲"
-                    value={formatHourInsight(device.quietSuggestion)}
-                    detail={
-                      device.quietSuggestion
-                        ? `平均占用 ${formatPercent(device.quietSuggestion.occupancyPercent)}`
-                        : "达到样本门槛后显示"
-                    }
-                  />
-                </div>
-              </section>
+            <DailyTrend data={device.daily} />
+            <HistoryHeatmap cells={device.heatmap} />
 
-              <DailyTrend data={device.daily} />
-              <HistoryHeatmap cells={device.heatmap} />
-
-              <Card className="shadow-none">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Clock3Icon
-                      className="size-4 text-primary"
-                      aria-hidden="true"
-                    />
-                    单端口历史
-                  </CardTitle>
-                  <CardDescription>
-                    使用方向键切换端口，查看最近状态变化和会话统计。
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {selectedPort !== null && portIds.length ? (
-                    <Tabs
-                      value={String(selectedPort)}
-                      onValueChange={selectPort}
-                    >
-                      <div className="overflow-x-auto pb-1">
-                        <TabsList
-                          activateOnFocus
-                          className="w-max min-w-full justify-start"
-                        >
-                          {portIds.map((portId) => (
-                            <TabsTrigger key={portId} value={String(portId)}>
-                              {String(portId).padStart(2, "0")} 号
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </div>
-                      <TabsContent
-                        value={String(selectedPort)}
-                        className="pt-3"
+            <Card className="shadow-none">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock3Icon
+                    className="size-4 text-primary"
+                    aria-hidden="true"
+                  />
+                  单端口历史
+                </CardTitle>
+                <CardDescription>
+                  使用方向键切换端口，查看最近状态变化和会话统计。
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedPort !== null && portIds.length ? (
+                  <Tabs value={String(selectedPort)} onValueChange={selectPort}>
+                    <div className="overflow-x-auto pb-1">
+                      <TabsList
+                        activateOnFocus
+                        className="w-max min-w-full justify-start"
                       >
-                        {portLoading ? (
-                          <div
-                            className="grid gap-2"
-                            aria-label="正在加载端口历史"
+                        {portIds.map((portId) => (
+                          <TabsTrigger key={portId} value={String(portId)}>
+                            {String(portId).padStart(2, "0")} 号
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </div>
+                    <TabsContent value={String(selectedPort)} className="pt-3">
+                      {portLoading ? (
+                        <div
+                          className="grid gap-2"
+                          aria-label="正在加载端口历史"
+                        >
+                          <Skeleton className="h-20 w-full" />
+                          <Skeleton className="h-16 w-full" />
+                          <Skeleton className="h-16 w-full" />
+                        </div>
+                      ) : portError ? (
+                        <Alert variant="destructive">
+                          <WifiOffIcon />
+                          <AlertTitle>端口历史加载失败</AlertTitle>
+                          <AlertDescription>{portError}</AlertDescription>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-2 w-fit"
+                            onClick={() => void loadPort(selectedPort)}
                           >
-                            <Skeleton className="h-20 w-full" />
-                            <Skeleton className="h-16 w-full" />
-                            <Skeleton className="h-16 w-full" />
-                          </div>
-                        ) : portError ? (
-                          <Alert variant="destructive">
-                            <WifiOffIcon />
-                            <AlertTitle>端口历史加载失败</AlertTitle>
-                            <AlertDescription>{portError}</AlertDescription>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-2 w-fit"
-                              onClick={() => void loadPort(selectedPort)}
-                            >
-                              <RefreshCwIcon data-icon="inline-start" />
-                              重试当前端口
-                            </Button>
-                          </Alert>
-                        ) : port ? (
-                          <PortHistoryDetail data={port} timezone={timezone} />
-                        ) : null}
-                      </TabsContent>
-                    </Tabs>
-                  ) : (
-                    <Alert>
-                      <SparklesIcon />
-                      <AlertTitle>暂无可查看端口</AlertTitle>
-                      <AlertDescription>
-                        设备产生端口历史后，可在这里查看状态时间线。
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          ) : null}
-        </div>
-      </SheetContent>
-    </Sheet>
+                            <RefreshCwIcon data-icon="inline-start" />
+                            重试当前端口
+                          </Button>
+                        </Alert>
+                      ) : port ? (
+                        <PortHistoryDetail data={port} timezone={timezone} />
+                      ) : null}
+                    </TabsContent>
+                  </Tabs>
+                ) : (
+                  <Alert>
+                    <SparklesIcon />
+                    <AlertTitle>暂无可查看端口</AlertTitle>
+                    <AlertDescription>
+                      设备产生端口历史后，可在这里查看状态时间线。
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
+      </div>
+    </HistoryFrame>
   )
 }

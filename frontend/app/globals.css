@@ -1,8 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./workbench.css";
 
 @custom-variant dark (&:is(.dark *));
+
+/* Keep normal scrolling, without rubber-banding the document at either edge. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
 
 /* 普通 @theme（非 inline）才会把变量写进 :root，var() 引用因此能在运行时解析。
    项目没有接入 next/font，字体栈直接在这里定型，并显式带上中文回退。 */
@@ -14,6 +21,8 @@
 }
 
 @theme inline {
+  --color-busy: var(--busy);
+  --color-busy-foreground: var(--busy-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
@@ -47,56 +56,88 @@
 
 :root {
   --app-header-height: 4rem;
-  /* 品牌色（电光青绿）：主按钮/焦点环/背景微染同一色相 */
-  --background: oklch(0.988 0.004 168);
-  --foreground: oklch(0.145 0 0);
+  /* Brand accents never double as operational status colors. */
+  --background: #fcfcfd;
+  --foreground: #24272e;
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: #24272e;
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.56 0.12 168);
-  --primary-foreground: oklch(0.985 0 0);
+  --popover-foreground: #24272e;
+  --primary: #b64b26;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.966 0.005 168);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.955 0.014 168);
-  --accent-foreground: oklch(0.28 0.045 168);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.006 168);
-  --input: oklch(0.92 0.006 168);
-  --ring: oklch(0.65 0.1 168);
-  /* 业务状态语义色：success=空闲/正常，warning=充电中/占用。 */
-  --success: oklch(0.627 0.194 149.214);
-  --success-foreground: oklch(0.266 0.065 152.934);
-  --warning: oklch(0.769 0.188 70.08);
-  --warning-foreground: oklch(0.279 0.077 45.635);
+  --muted: #f5f6f8;
+  --muted-foreground: #68717d;
+  --accent: #fbefe9;
+  --accent-foreground: #b64b26;
+  --destructive: #a53e3e;
+  --border: #e9ebef;
+  --input: #d9dde4;
+  --ring: #b64b26;
+  --success: #1f7055;
+  --success-foreground: #1f7055;
+  --busy: #3e639b;
+  --busy-foreground: #3e639b;
+  --warning: #ad802c;
+  --warning-foreground: #825d17;
+  --wb-bg: var(--background);
+  --wb-surface: var(--card);
+  --wb-soft: var(--muted);
+  --wb-subtle: #f8f9fa;
+  --wb-text: var(--foreground);
+  --wb-muted: var(--muted-foreground);
+  --wb-secondary: #565e6b;
+  --wb-line: var(--border);
+  --wb-line-strong: var(--input);
+  --wb-brand: var(--primary);
+  --wb-brand-hover: #a23f1e;
+  --wb-brand-soft: var(--accent);
+  --wb-green: var(--success);
+  --wb-green-soft: #edf7f2;
+  --wb-blue: var(--busy);
+  --wb-blue-soft: #edf2fa;
+  --wb-amber: var(--warning-foreground);
+  --wb-amber-soft: #fbf5e8;
+  --wb-red: var(--destructive);
+  --wb-red-soft: #fceeee;
+  --wb-shadow: 0 20px 70px #222b4321, 0 1px 4px #222b4312;
   --radius: 0.625rem;
 }
 
 .dark {
-  --background: oklch(0.148 0.008 168);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0.01 168);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0.01 168);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.74 0.13 168);
-  --primary-foreground: oklch(0.17 0.04 168);
+  --background: #191b20;
+  --foreground: #e9eaf0;
+  --card: #1e2026;
+  --card-foreground: #e9eaf0;
+  --popover: #1e2026;
+  --popover-foreground: #e9eaf0;
+  --primary: #f0926a;
+  --primary-foreground: #25190f;
   --secondary: oklch(0.269 0.008 168);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0.008 168);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.28 0.02 168);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.6 0.1 168);
-  --success: oklch(0.723 0.192 149.579);
-  --success-foreground: oklch(0.982 0.018 155.826);
-  --warning: oklch(0.769 0.188 70.08);
-  --warning-foreground: oklch(0.987 0.022 95.277);
+  --muted: #282b32;
+  --muted-foreground: #989dab;
+  --accent: #352922;
+  --accent-foreground: #f0926a;
+  --destructive: #ed9292;
+  --border: #30333b;
+  --input: #454b57;
+  --ring: #f0926a;
+  --success: #76c5a5;
+  --success-foreground: #76c5a5;
+  --busy: #8aaee8;
+  --busy-foreground: #8aaee8;
+  --warning: #d9b56e;
+  --warning-foreground: #d9b56e;
+  --wb-subtle: #202329;
+  --wb-secondary: #b9bec9;
+  --wb-brand-hover: #efa381;
+  --wb-green-soft: #23362e;
+  --wb-blue-soft: #273247;
+  --wb-amber-soft: #383122;
+  --wb-red-soft: #3a282c;
+  --wb-shadow: 0 24px 80px #0008, 0 1px 4px #0004;
 }
 
 @layer base {
@@ -112,6 +153,50 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+.workbench-band {
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--border) 88%, transparent);
+  border-radius: 1rem;
+  background: color-mix(in oklab, var(--card) 94%, var(--primary) 6%);
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--foreground) 4%, transparent),
+    0 14px 35px color-mix(in oklab, var(--foreground) 3%, transparent);
+}
+
+.workbench-band [data-slot="metric-card"] {
+  min-height: 6.4rem;
+}
+
+.workspace-index {
+  border-right: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  padding-right: 1rem;
+}
+
+.workspace-index button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.pile-card-focused > [data-slot="card"] {
+  border-color: color-mix(in oklab, var(--primary) 38%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 12%, transparent),
+    0 12px 30px color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+@media (max-width: 1023px) {
+  .workspace-index {
+    border-right: 0;
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .workbench-band {
+    border-radius: 0.85rem;
   }
 }
 

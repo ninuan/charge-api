@@ -271,7 +271,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取充电桩历史分析 */
+        /**
+         * 使用历史已下线
+         * @deprecated
+         */
         get: operations["getDeviceHistory"];
         put?: never;
         post?: never;
@@ -288,7 +291,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取单个充电口历史分析 */
+        /**
+         * 使用历史已下线
+         * @deprecated
+         */
         get: operations["getPortHistory"];
         put?: never;
         post?: never;
@@ -1857,23 +1863,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 设备维度的历史指标、每日趋势、热力图和端口摘要 */
-            200: {
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 使用历史已下线，错误码 HISTORY_REMOVED */
+            410: {
                 headers: {
-                    "Cache-Control": components["headers"]["PrivateNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeviceHistoryResponse"];
+                    "application/json": components["schemas"]["CodedErrorResponse"];
                 };
             };
-            400: components["responses"]["InvalidHistoryQuery"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["OrdinaryUserRequired"];
-            404: components["responses"]["HistoryNotFound"];
-            405: components["responses"]["MethodNotAllowed"];
-            422: components["responses"]["HistoryRangeTooLarge"];
-            503: components["responses"]["HistoryUnavailable"];
         };
     };
     getPortHistory: {
@@ -1895,23 +1896,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 单个端口的历史指标、每日趋势和最近状态时间线 */
-            200: {
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 使用历史已下线，错误码 HISTORY_REMOVED */
+            410: {
                 headers: {
-                    "Cache-Control": components["headers"]["PrivateNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortHistoryResponse"];
+                    "application/json": components["schemas"]["CodedErrorResponse"];
                 };
             };
-            400: components["responses"]["InvalidPortHistoryQuery"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["OrdinaryUserRequired"];
-            404: components["responses"]["HistoryNotFound"];
-            405: components["responses"]["MethodNotAllowed"];
-            422: components["responses"]["HistoryRangeTooLarge"];
-            503: components["responses"]["HistoryUnavailable"];
         };
     };
     getWatchOverview: {
