@@ -26,7 +26,7 @@ if [[ "$missing_host_output" != *"DEPLOY_HOST"* ]]; then
   exit 1
 fi
 
-dry_run_output="$(DEPLOY_HOST=root@example.invalid SKIP_CHECK=1 DEPLOY_BRANCH=main NPM_REGISTRY=https://registry.npmmirror.com "$DEPLOY_SCRIPT" --dry-run)"
+dry_run_output="$(DEPLOY_HOST=root@example.invalid SKIP_CHECK=1 DEPLOY_BRANCH=main NPM_REGISTRY=https://registry.npmmirror.com PNPM_FETCH_TIMEOUT=180000 PNPM_FETCH_RETRIES=8 PNPM_NETWORK_CONCURRENCY=4 "$DEPLOY_SCRIPT" --dry-run)"
 if [[ "$dry_run_output" != *"push origin main"* ]]; then
   echo "dry-run should print the local git push command"
   exit 1
@@ -57,7 +57,7 @@ if [[ "$dry_run_output" != *"npm_registry=https://registry.npmmirror.com"* ]] ||
   exit 1
 fi
 
-if [[ "$dry_run_output" != *"pnpm_fetch_timeout=120000"* ]] || [[ "$dry_run_output" != *"pnpm_fetch_retries=5"* ]] || [[ "$dry_run_output" != *"--fetch-timeout=\$pnpm_fetch_timeout"* ]] || [[ "$dry_run_output" != *"--fetch-retries=\$pnpm_fetch_retries"* ]]; then
+if [[ "$dry_run_output" != *"pnpm_fetch_timeout=180000"* ]] || [[ "$dry_run_output" != *"pnpm_fetch_retries=8"* ]] || [[ "$dry_run_output" != *"pnpm_network_concurrency=4"* ]] || [[ "$dry_run_output" != *"--fetch-timeout=\$pnpm_fetch_timeout"* ]] || [[ "$dry_run_output" != *"--fetch-retries=\$pnpm_fetch_retries"* ]] || [[ "$dry_run_output" != *"--network-concurrency=\$pnpm_network_concurrency"* ]]; then
   echo "dry-run should use resilient pnpm fetch settings"
   exit 1
 fi
