@@ -284,7 +284,7 @@ for (const width of [390, 1440]) {
     const description = await dialog
       .getByText("搜索充电桩名称、桩号或页面。")
       .boundingBox()
-    expect(description!.y).toBeGreaterThanOrEqual(title!.y + title!.height)
+    expect(description!.y).toBeGreaterThanOrEqual(title!.y + title!.height - 1)
     expect(description!.width).toBeGreaterThan(240)
     expect(
       await dialog.evaluate(

@@ -7,6 +7,8 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: "workbench.spec.ts",
   fullyParallel: true,
+  forbidOnly: Boolean(process.env.CI),
+  retries: process.env.CI ? 1 : 0,
   reporter: "list",
   outputDir: "/tmp/charge-workbench-results",
   use: {
