@@ -379,3 +379,237 @@ for (const width of [390, 1440]) {
     })
   })
 }
+
+async function mockBindingFlow(
+  page: Page,
+  data: DashboardSnapshot,
+  initiallyBound: boolean,
+  scanEnabled = true
+) {
+  await mockApi(page, data)
+  const flow = {
+    status: "pending",
+    bound: initiallyBound,
+    adds: 0,
+    confirms: 0,
+    creates: 0,
+    rejectAdd: false,
+    failBinding: false,
+  }
+  await page.route("**/api/session/yyb-binding", (route) =>
+    route.fulfill({
+      status: flow.failBinding ? 503 : 200,
+      json: { bound: flow.bound, scanEnabled },
+    })
+  )
+  await page.route("**/api/session/yyb-qr", (route) => {
+    flow.creates++
+    return route.fulfill({
+      json: {
+        sessionId: "browser-qr",
+        imageBase64:
+          "data:image/svg+xml;base64," +
+          Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="white"/><path d="M20 20h50v50H20zm110 0h50v50h-50zM20 130h50v50H20z" fill="black"/></svg>'
+          ).toString("base64"),
+      },
+    })
+  })
+  await page.route("**/api/session/yyb-qr/*/poll", (route) =>
+    route.fulfill({ json: { sessionId: "browser-qr", status: flow.status } })
+  )
+  await page.route("**/api/session/yyb-qr/*/confirm", (route) => {
+    flow.confirms++
+    flow.bound = true
+    return route.fulfill({
+      json: {
+        bound: true,
+        sessionId: "browser-qr",
+        cookieSynced: false,
+        syncState: "not_needed",
+      },
+    })
+  })
+  await page.route("**/api/piles", (route) => {
+    if (route.request().method() !== "POST")
+      return route.fulfill({ json: data })
+    flow.adds++
+    if (flow.rejectAdd)
+      return route.fulfill({
+        status: 409,
+        json: { code: "YYB_RESCAN_REQUIRED" },
+      })
+    const pile = {
+      ...data.piles[0],
+      ...route.request().postDataJSON(),
+      id: "2601201412385560002",
+    }
+    data.piles.push(pile)
+    return route.fulfill({ status: 201, json: pile })
+  })
+  return flow
+}
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`binding onboarding completes at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({
+      reducedMotion: "reduce",
+      colorScheme: width === 390 || width === 1440 ? "dark" : "light",
+    })
+    await page.addInitScript(
+      (theme) => localStorage.setItem("theme", theme),
+      width === 390 || width === 1440 ? "dark" : "light"
+    )
+    const flow = await mockBindingFlow(page, snapshot(), false)
+    await page.goto("/dashboard/")
+    await page
+      .getByRole("button", { name: "添加充电桩", exact: true })
+      .first()
+      .click()
+    const dialog = page.getByRole("dialog")
+    await expect(
+      dialog.getByRole("heading", { name: "添加前，先绑定微信" })
+    ).toBeVisible()
+    await expect(
+      dialog.getByRole("img", { name: "微信扫码登录二维码" })
+    ).toBeVisible()
+    const confirm = dialog.getByRole("button", {
+      name: "确认绑定",
+      exact: true,
+    })
+    await expect(confirm).toBeDisabled()
+    flow.status = "scanned"
+    await dialog.getByRole("button", { name: "检查扫码状态" }).click()
+    await expect(dialog.getByText("已扫码，请在微信中确认授权")).toBeVisible()
+    await expect(confirm).toBeDisabled()
+    flow.status = "authorized"
+    await dialog.getByRole("button", { name: "检查扫码状态" }).click()
+    await expect(confirm).toBeEnabled()
+    expect(
+      await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)
+    ).toBe(true)
+    await page.screenshot({
+      path: `/tmp/charge-binding-${width}.png`,
+      fullPage: true,
+    })
+    await confirm.focus()
+    await page.keyboard.press("Enter")
+    await expect(dialog.getByText("微信已绑定", { exact: true })).toBeVisible()
+    expect(flow.adds).toBe(0)
+    await dialog.getByRole("button", { name: "继续添加充电桩" }).click()
+    await expect(dialog.getByLabel("桩号", { exact: true })).toBeFocused()
+    await dialog.getByLabel("桩号", { exact: true }).fill("61034279")
+    await dialog.getByLabel("显示名称").fill("新绑定车棚")
+    await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page).toHaveURL(/pile=2601201412385560002/)
+    expect(flow.adds).toBe(1)
+    expect(flow.confirms).toBe(1)
+    expect(flow.creates).toBe(1)
+  })
+}
+
+test("rescan after add failure preserves the draft and never replays the add", async ({
+  page,
+}) => {
+  const flow = await mockBindingFlow(page, snapshot(), true)
+  flow.rejectAdd = true
+  await page.goto("/dashboard/")
+  await page
+    .getByRole("button", { name: "添加充电桩", exact: true })
+    .first()
+    .click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("桩号", { exact: true }).fill("61034279")
+  await dialog.getByLabel("显示名称").fill("保留名称")
+  await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
+  await dialog.getByRole("button", { name: "去绑定 / 重新扫码" }).click()
+  await expect(dialog.getByRole("img")).toBeVisible()
+  await dialog.getByRole("button", { name: "返回填写" }).click()
+  await expect(dialog.getByLabel("显示名称")).toHaveValue("保留名称")
+  await expect(
+    dialog.getByRole("button", { name: "确认添加", exact: true })
+  ).toBeDisabled()
+  await dialog.getByRole("button", { name: "去绑定 / 重新扫码" }).click()
+  await expect(dialog.getByRole("img")).toBeVisible()
+  flow.status = "authorized"
+  await dialog.getByRole("button", { name: "检查扫码状态" }).click()
+  await dialog.getByRole("button", { name: "确认绑定", exact: true }).click()
+  await expect(
+    dialog.getByRole("button", { name: "继续添加充电桩" })
+  ).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "返回填写" })).toHaveCount(0)
+  await dialog.getByRole("button", { name: "继续添加充电桩" }).click()
+  expect(flow.adds).toBe(1)
+  await expect(dialog.getByLabel("显示名称")).toHaveValue("保留名称")
+  flow.rejectAdd = false
+  await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(flow.adds).toBe(2)
+})
+
+test("binding check failure, offline and manual Cookie have actionable recovery", async ({
+  page,
+  context,
+}) => {
+  const flow = await mockBindingFlow(page, snapshot(), false, false)
+  flow.failBinding = true
+  await page.goto("/dashboard/")
+  const trigger = page
+    .getByRole("button", { name: "添加充电桩", exact: true })
+    .first()
+  await trigger.click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("button", { name: "重新检查" })).toBeVisible()
+  expect(flow.creates).toBe(0)
+  flow.failBinding = false
+  await dialog.getByRole("button", { name: "重新检查" }).click()
+  await expect(dialog.getByLabel("桩号", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "手动设置 Cookie" }).click()
+  await expect(dialog.getByLabel("手动更新 Cookie")).toBeVisible()
+  await context.setOffline(true)
+  await expect(
+    dialog.getByRole("button", { name: "确认添加", exact: true })
+  ).toBeDisabled()
+  await context.setOffline(false)
+  await page.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  expect(flow.creates).toBe(0)
+})
+
+test("account rebind polls a new QR even while the old binding exists", async ({
+  page,
+}) => {
+  const flow = await mockBindingFlow(page, snapshot(), true)
+  await page.goto("/account/?tab=connection&connect=1")
+  const dialog = page.getByRole("dialog")
+  await expect(
+    dialog.getByRole("heading", { name: "绑定平台微信" })
+  ).toBeVisible()
+  await dialog.getByRole("button", { name: "重新扫码绑定" }).click()
+  await expect(dialog.getByRole("img")).toBeVisible()
+  flow.status = "authorized"
+  await expect(
+    dialog.getByRole("button", { name: "确认绑定", exact: true })
+  ).toBeEnabled({ timeout: 10000 })
+  await dialog.getByRole("button", { name: "确认绑定", exact: true }).click()
+  await expect(dialog.getByText("微信已绑定", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "完成", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(flow.confirms).toBe(1)
+  expect(flow.adds).toBe(0)
+})
+
+test("empty-list add entry opens the same binding flow", async ({ page }) => {
+  const data = snapshot()
+  data.piles = []
+  const flow = await mockBindingFlow(page, data, false)
+  await page.goto("/dashboard/")
+  const list = page.getByRole("complementary", { name: "常用充电桩列表" })
+  await list.getByRole("button", { name: "添加充电桩", exact: true }).click()
+  await expect(page.getByRole("dialog").getByRole("img")).toBeVisible()
+  expect(flow.creates).toBe(1)
+  expect(flow.adds).toBe(0)
+})

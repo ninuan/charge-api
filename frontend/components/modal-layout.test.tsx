@@ -11,7 +11,9 @@ vi.mock("@/lib/auth-context", () => ({
     acknowledgeUsageGuide: vi.fn(),
   }),
 }))
-vi.mock("@/lib/dashboard-context", () => ({ useDashboard: () => ({ updateCookie: vi.fn() }) }))
+vi.mock("@/lib/dashboard-context", () => ({
+  useDashboard: () => ({ updateCookie: vi.fn() }),
+}))
 
 describe("dashboard modal layouts", () => {
   it("keeps the usage guide navigation visible while the guide body scrolls", async () => {
@@ -30,12 +32,16 @@ describe("dashboard modal layouts", () => {
     ).toBeInTheDocument()
   })
 
-  it("uses a wide QR-login dialog instead of the default narrow dialog", async () => {
+  it("keeps QR-login content scrollable on short screens", async () => {
     const user = userEvent.setup()
     render(<YybLoginDialog />)
 
     await user.click(screen.getByRole("button", { name: "扫码登录" }))
-    await waitFor(() => expect(screen.getByText("扫码登录远端账号")).toBeInTheDocument())
-    expect(screen.getByText("扫码登录远端账号").closest("[data-slot=dialog-content]")).toHaveClass("sm:max-w-none")
+    await waitFor(() =>
+      expect(screen.getByText("绑定平台微信")).toBeInTheDocument()
+    )
+    expect(
+      screen.getByText("绑定平台微信").closest("[data-slot=dialog-content]")
+    ).toHaveClass("overflow-y-auto", "sm:max-w-lg")
   })
 })

@@ -102,7 +102,7 @@ func TestHealthExposesReleaseVersion(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode health response: %v", err)
 	}
-	if payload["status"] != "ok" || payload["version"] != "1.5.2" {
+	if payload["status"] != "ok" || payload["version"] != "1.5.3" {
 		t.Fatalf("unexpected health response: %+v", payload)
 	}
 }
@@ -1267,6 +1267,7 @@ func TestYYBProxyFlowBindsCurrentUserAndSyncsCookie(t *testing.T) {
 		t.Fatalf("poll returned %d: %s", pollRec.Code, pollRec.Body.String())
 	}
 
+	server.rememberQR("sid-1", user.ID)
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr/sid-1/confirm", nil)
 	confirmReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
 	confirmRec := httptest.NewRecorder()
@@ -1314,6 +1315,7 @@ func TestYYBConfirmSyncsCookieWhenUserAlreadyHasDevice(t *testing.T) {
 	mux := http.NewServeMux()
 	server.Register(mux)
 
+	server.rememberQR("sid-1", user.ID)
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr/sid-1/confirm", nil)
 	confirmReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
 	confirmRec := httptest.NewRecorder()
@@ -1330,6 +1332,8 @@ func TestYYBConfirmSyncsCookieWhenUserAlreadyHasDevice(t *testing.T) {
 }
 
 type fakeAPIYYBClient struct {
+	pollStatus   string
+	confirmCalls int
 	code         string
 	getCodeRef   string
 	getCodeAppID string
@@ -1341,10 +1345,15 @@ func (f *fakeAPIYYBClient) CreateQR(ctx context.Context) (yyb.QRSession, error) 
 }
 
 func (f *fakeAPIYYBClient) PollQR(ctx context.Context, sessionID string) (yyb.QRPollResult, error) {
-	return yyb.QRPollResult{SessionID: sessionID, Status: "confirmed", Message: "ready"}, nil
+	status := f.pollStatus
+	if status == "" {
+		status = "confirmed"
+	}
+	return yyb.QRPollResult{SessionID: sessionID, Status: status, Message: "ready"}, nil
 }
 
 func (f *fakeAPIYYBClient) ConfirmQR(ctx context.Context, sessionID string) (yyb.YYBAccount, error) {
+	f.confirmCalls++
 	return yyb.YYBAccount{Ref: "ref-1", OpenID: "openid-1", Nickname: "Alice", Avatar: "https://avatar.example/a.png", Status: "alive"}, nil
 }
 
@@ -1359,13 +1368,14 @@ func (f *fakeAPIYYBClient) RefreshAccount(ctx context.Context, ref string) error
 func (f *fakeAPIYYBClient) Health(context.Context) error { return f.healthErr }
 
 type fakeAPIMoceleClient struct {
-	cookie   string
-	deviceID string
-	code     string
+	exchangeErr error
+	cookie      string
+	deviceID    string
+	code        string
 }
 
 func (f *fakeAPIMoceleClient) ExchangeCode(ctx context.Context, deviceID string, code string) (mocele.CookieResult, error) {
 	f.deviceID = deviceID
 	f.code = code
-	return mocele.CookieResult{Cookie: f.cookie, WXOpenID: "open", Info: "info"}, nil
+	return mocele.CookieResult{Cookie: f.cookie, WXOpenID: "open", Info: "info"}, f.exchangeErr
 }

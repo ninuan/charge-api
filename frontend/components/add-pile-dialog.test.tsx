@@ -1,10 +1,19 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AddPileDialog } from "@/components/add-pile-dialog"
 
 const addPile = vi.fn()
+const requestJSON = vi.fn()
+vi.mock("@/lib/http", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http")>()),
+  requestJSON: (...args: unknown[]) => requestJSON(...args),
+}))
+beforeEach(() => {
+  vi.clearAllMocks()
+  requestJSON.mockResolvedValue({ bound: true, scanEnabled: true })
+})
 
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => ({ currentUser: { deviceLimit: 10 } }),
@@ -21,9 +30,20 @@ describe("AddPileDialog", () => {
     render(<AddPileDialog />)
 
     await user.click(screen.getByRole("button", { name: "添加充电桩" }))
-    await user.type(screen.getByLabelText("桩号"), "invalid")
+    await user.type(await screen.findByLabelText("桩号"), "invalid")
     await user.click(screen.getByRole("button", { name: "确认添加" }))
 
-    expect(addPile).toHaveBeenCalledWith(expect.objectContaining({ number: "invalid" }))
+    expect(addPile).toHaveBeenCalledWith(
+      expect.objectContaining({ number: "invalid" })
+    )
   })
+})
+
+it("keeps the original add flow when an older backend omits scanEnabled", async () => {
+  requestJSON.mockResolvedValue({ bound: false })
+  const user = userEvent.setup()
+  render(<AddPileDialog />)
+  await user.click(screen.getByRole("button", { name: "添加充电桩" }))
+  expect(await screen.findByLabelText("桩号")).toBeVisible()
+  expect(screen.queryByAltText("微信扫码登录二维码")).not.toBeInTheDocument()
 })

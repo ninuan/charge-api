@@ -1,4 +1,10 @@
 const publicErrorMessages: Record<string, string> = {
+  YYB_BINDING_BUSY: "平台连接正在更新，请稍后重试。",
+  QR_SESSION_INVALID: "二维码会话已失效，请重新生成。",
+  QR_SESSION_UNAVAILABLE: "暂时无法创建扫码会话，请稍后重试。",
+  QR_NOT_AUTHORIZED: "请先在微信中确认授权。",
+  QR_CONFIRM_IN_PROGRESS: "正在确认绑定，请检查扫码状态。",
+  YYB_RESCAN_REQUIRED: "平台登录需要重新确认，请重新扫码绑定。",
   AUTH_INPUT_INVALID: "用户名或密码格式无效",
   AUTH_INVALID_CREDENTIALS: "用户名或密码错误",
   LOGIN_CAPTCHA_REQUIRED: "用户名或密码错误，请完成图片验证码后重试。",

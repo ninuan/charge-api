@@ -1,11 +1,13 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/yyb"
 )
 
 func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +75,10 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 			writePublicOperationError(w, http.StatusBadGateway, "create YYB QR", "二维码暂时无法生成，请稍后重试。", err)
 			return
 		}
+		if !qrSessionIDPattern.MatchString(qr.SessionID) || !s.rememberQR(qr.SessionID, user.ID) {
+			writeCodedError(w, http.StatusServiceUnavailable, "QR_SESSION_UNAVAILABLE", "暂时无法创建扫码会话，请稍后重试。")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"sessionId":   qr.SessionID,
 			"imageUrl":    qr.ImageURL,
@@ -91,10 +97,28 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID, action := parts[0], parts[1]
+	owned := s.findQR(sessionID, user.ID)
+	if owned == nil {
+		writeCodedError(w, http.StatusNotFound, "QR_SESSION_INVALID", "二维码会话已失效，请重新生成。")
+		return
+	}
 	switch action {
 	case "poll":
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
+			return
+		}
+		owned.mu.Lock()
+		if owned.result != nil {
+			result := owned.result
+			owned.mu.Unlock()
+			writeJSON(w, http.StatusOK, map[string]any{"sessionId": sessionID, "status": "saved", "binding": result})
+			return
+		}
+		busy := owned.confirming
+		owned.mu.Unlock()
+		if busy {
+			writeJSON(w, http.StatusOK, map[string]any{"sessionId": sessionID, "status": "confirming"})
 			return
 		}
 		result, err := s.yybClient.PollQR(r.Context(), sessionID)
@@ -113,6 +137,41 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
+		if !s.beginBindingChange(user.ID) {
+			writeCodedError(w, http.StatusConflict, "YYB_BINDING_BUSY", "平台连接正在更新，请稍后重试。")
+			return
+		}
+		defer s.endBindingChange(user.ID)
+		// A completed unbind/newer confirmation may have invalidated this QR
+		// between the initial ownership lookup and acquiring the mutation slot.
+		if s.findQR(sessionID, user.ID) != owned {
+			writeCodedError(w, http.StatusNotFound, "QR_SESSION_INVALID", "二维码会话已失效，请重新生成。")
+			return
+		}
+		owned.mu.Lock()
+		if owned.result != nil {
+			result := owned.result
+			owned.mu.Unlock()
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
+		if owned.confirming {
+			owned.mu.Unlock()
+			writeCodedError(w, http.StatusConflict, "QR_CONFIRM_IN_PROGRESS", "正在确认绑定，请检查扫码状态。")
+			return
+		}
+		owned.confirming = true
+		owned.mu.Unlock()
+		defer func() { owned.mu.Lock(); owned.confirming = false; owned.mu.Unlock() }()
+		status, err := s.yybClient.PollQR(r.Context(), sessionID)
+		if err != nil {
+			writePublicOperationError(w, http.StatusBadGateway, "check QR authorization", "暂时无法检查授权，请重试。", err)
+			return
+		}
+		if status.Status != "authorized" && status.Status != "confirmed" {
+			writeCodedError(w, http.StatusConflict, "QR_NOT_AUTHORIZED", "请先在微信中确认授权。")
+			return
+		}
 		account, err := s.yybClient.ConfirmQR(r.Context(), sessionID)
 		if err != nil {
 			s.recordDashboardDiagnostic(user, "scan_login", "qr_confirm_failed", "", appruntime.DiagnosticStatusCode(err))
@@ -124,25 +183,32 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 			writePublicOperationError(w, http.StatusInternalServerError, "save YYB binding", "扫码已确认，但暂时无法保存绑定状态，请稍后重试。", err)
 			return
 		}
-		payload, err := s.yybBindingStatusPayload(user.ID)
-		if err != nil {
-			writePublicOperationError(w, http.StatusInternalServerError, "load YYB binding", "扫码已确认，但暂时无法读取绑定状态，请稍后重试。", err)
-			return
+		s.invalidateUserQRs(user.ID, sessionID)
+		// 保存已经成功，之后的设备读取/凭据同步失败不能把结果变成“绑定失败”。
+		payload := map[string]any{
+			"bound": true, "scanEnabled": true, "sessionId": sessionID,
+			"openidSuffix": suffix(account.OpenID, 4), "nickname": account.Nickname,
+			"cookieSynced": false, "syncState": "not_needed",
+			"message": "微信已绑定，接下来添加你的常用充电桩。",
 		}
-		payload["cookieSynced"] = false
-		payload["message"] = "扫码登录已完成。添加充电桩后，系统会自动保持登录有效"
 		if deviceID, ok, err := s.manager.FirstDeviceID(user.ID); err != nil {
-			writePublicOperationError(w, http.StatusInternalServerError, "load first device", "扫码已确认，但暂时无法读取设备信息，请稍后重试。", err)
-			return
+			payload["syncState"] = "failed"
 		} else if ok {
 			if _, err := s.manager.SyncCookieFromYYB(user.ID, deviceID, s.yybClient, s.moceleClient); err == nil {
 				payload["cookieSynced"] = true
-				payload["message"] = "扫码登录已完成，登录信息已自动生效"
+				payload["syncState"] = "synced"
+				payload["message"] = "微信已绑定，平台连接已更新。"
 			} else {
 				s.recordDashboardDiagnostic(user, "sync_cookie", "credential_sync_failed", deviceID, appruntime.DiagnosticStatusCode(err))
-				payload["message"] = "扫码登录已完成，但登录信息暂未生效；请稍后刷新或重新添加充电桩"
+				payload["syncState"] = "failed"
 			}
 		}
+		if payload["syncState"] == "failed" {
+			payload["message"] = "微信已绑定，但平台连接暂未恢复。可稍后重试同步。"
+		}
+		owned.mu.Lock()
+		owned.result = payload
+		owned.mu.Unlock()
 		writeJSON(w, http.StatusOK, payload)
 	default:
 		s.recordDashboardDiagnostic(user, "scan_login", "qr_session_invalid", "", http.StatusNotFound)
@@ -174,9 +240,18 @@ func (s *Server) handleMoceleCookie(w http.ResponseWriter, r *http.Request) {
 		writeCodedError(w, http.StatusBadRequest, "DEVICE_ID_INVALID", "设备 ID 格式无效")
 		return
 	}
+	if !s.beginBindingChange(user.ID) {
+		writeCodedError(w, http.StatusConflict, "YYB_BINDING_BUSY", "平台连接正在更新，请稍后重试。")
+		return
+	}
+	defer s.endBindingChange(user.ID)
 	snapshot, err := s.manager.SyncCookieFromYYB(user.ID, req.DeviceID, s.yybClient, s.moceleClient)
 	if err != nil {
 		s.recordDashboardDiagnostic(user, "sync_cookie", "credential_sync_failed", req.DeviceID, appruntime.DiagnosticStatusCode(err))
+		if errors.Is(err, yyb.ErrAccountExpired) || errors.Is(err, yyb.ErrAccountUnknown) {
+			writeCodedError(w, http.StatusBadGateway, "YYB_RESCAN_REQUIRED", "扫码服务未能恢复登录状态，请重新扫码绑定后再同步。")
+			return
+		}
 		writePublicOperationError(w, http.StatusBadGateway, "sync YYB cookie", "暂时无法同步登录信息，请稍后重试。", err)
 		return
 	}
@@ -194,10 +269,16 @@ func (s *Server) handleYYBBinding(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		s.writeYYBBindingStatus(w, user.ID)
 	case http.MethodDelete:
+		if !s.beginBindingChange(user.ID) {
+			writeCodedError(w, http.StatusConflict, "YYB_BINDING_BUSY", "平台连接正在更新，请稍后重试。")
+			return
+		}
+		defer s.endBindingChange(user.ID)
 		if err := s.manager.ClearYYBBinding(user.ID); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "删除绑定状态失败"})
 			return
 		}
+		s.invalidateUserQRs(user.ID, "")
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		methodNotAllowed(w)
@@ -219,10 +300,11 @@ func (s *Server) yybBindingStatusPayload(userID string) (map[string]any, error) 
 		return nil, err
 	}
 	if binding == nil {
-		return map[string]any{"bound": false}, nil
+		return map[string]any{"bound": false, "scanEnabled": s.yybClient != nil && s.moceleClient != nil}, nil
 	}
 	payload := map[string]any{
 		"bound":        true,
+		"scanEnabled":  s.yybClient != nil && s.moceleClient != nil,
 		"openidSuffix": suffix(binding.OpenID, 4),
 		"nickname":     binding.Nickname,
 		"status":       binding.Status,

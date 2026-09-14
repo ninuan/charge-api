@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,9 +21,10 @@ type Config struct {
 }
 
 type Client struct {
-	baseURL string
-	signer  *securelink.Signer
-	http    *http.Client
+	baseURL  string
+	signer   *securelink.Signer
+	http     *http.Client
+	pollHTTP *http.Client
 }
 
 type QRSession struct {
@@ -92,10 +94,13 @@ func NewClient(cfg Config) (*Client, error) {
 		return nil, err
 	}
 	httpClient := cfg.HTTPClient
+	pollClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
+		// WeChat long-poll waits up to 35 seconds; ordinary API calls retain 10s.
+		pollClient = &http.Client{Timeout: 40 * time.Second}
 	}
-	return &Client{baseURL: strings.TrimRight(base.String(), "/"), signer: signer, http: httpClient}, nil
+	return &Client{baseURL: strings.TrimRight(base.String(), "/"), signer: signer, http: httpClient, pollHTTP: pollClient}, nil
 }
 
 func (c *Client) CreateQR(ctx context.Context) (QRSession, error) {
@@ -111,7 +116,9 @@ func (c *Client) CreateQR(ctx context.Context) (QRSession, error) {
 
 func (c *Client) PollQR(ctx context.Context, sessionID string) (QRPollResult, error) {
 	var out QRPollResult
-	if err := c.doJSON(ctx, http.MethodGet, "/qr/"+sessionID+"/poll", nil, &out); err != nil {
+	pollClient := *c
+	pollClient.http = c.pollHTTP
+	if err := pollClient.doJSON(ctx, http.MethodGet, "/qr/"+sessionID+"/poll", nil, &out); err != nil {
 		return QRPollResult{}, err
 	}
 	return out, nil
@@ -149,9 +156,27 @@ func (c *Client) GetCode(ctx context.Context, ref string, appID string) (string,
 	return code, nil
 }
 
+var ErrAccountExpired = errors.New("yyb account refresh returned expired; re-scan required")
+var ErrAccountUnknown = errors.New("yyb account refresh returned unknown; recovery credentials unavailable")
+var ErrAccountRefreshResponse = errors.New("yyb account refresh returned an invalid status")
+
 func (c *Client) RefreshAccount(ctx context.Context, ref string) error {
-	var out json.RawMessage
-	return c.doJSON(ctx, http.MethodPost, "/accounts/refresh", map[string]any{"ref": ref}, &out)
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/accounts/refresh", map[string]any{"ref": ref}, &out); err != nil {
+		return err
+	}
+	switch out.Status {
+	case "alive":
+		return nil
+	case "expired":
+		return ErrAccountExpired
+	case "unknown":
+		return ErrAccountUnknown
+	default:
+		return ErrAccountRefreshResponse
+	}
 }
 
 func (c *Client) Health(ctx context.Context) error {

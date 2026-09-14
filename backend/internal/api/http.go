@@ -50,6 +50,9 @@ type Server struct {
 	healthMu            sync.RWMutex
 	healthDegradations  map[string]string
 	streams             streamLimits
+	qrMu                sync.Mutex
+	bindingBusy         map[string]bool
+	qrSessions          map[string]*ownedQRSession
 }
 
 type captchaService interface {

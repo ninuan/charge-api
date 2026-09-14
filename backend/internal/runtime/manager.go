@@ -87,6 +87,7 @@ type Manager struct {
 type UserRuntime struct {
 	mu                  sync.Mutex
 	refreshMu           sync.Mutex
+	credentialMu        sync.Mutex // serializes binding replacement against in-flight recovery
 	store               *store.DashboardStore
 	client              *charger.Client
 	stats               model.TrafficStats

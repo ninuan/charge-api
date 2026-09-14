@@ -17,7 +17,7 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#功能概览">功能概览</a> ·
   <a href="docs/deployment.md">生产部署</a> ·
-  <a href="docs/openapi/charge-console-v1.5.2.yaml">OpenAPI</a> ·
+  <a href="docs/openapi/charge-console-v1.5.3.yaml">OpenAPI</a> ·
   <a href="CHANGELOG.md">更新日志</a>
 </p>
 
@@ -262,9 +262,9 @@ scripts/                   开发、检查、部署、备份与安全脚本
 ## 文档
 
 - [生产部署与运维指南](docs/deployment.md)
-- [v1.5.2 发布说明](RELEASE_NOTES.md)
+- [v1.5.3 发布说明](RELEASE_NOTES.md)
 - [更新日志](CHANGELOG.md)
-- [OpenAPI v1.5.2](docs/openapi/charge-console-v1.5.2.yaml)
+- [OpenAPI v1.5.3](docs/openapi/charge-console-v1.5.3.yaml)
 - [本地环境变量示例](examples/dev.env.example)
 
 ## 参与开发

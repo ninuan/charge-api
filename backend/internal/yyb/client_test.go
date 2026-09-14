@@ -1,12 +1,14 @@
 package yyb
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientHealth(t *testing.T) {
@@ -169,5 +171,61 @@ func jsonResponse(status int, body string) *http.Response {
 		StatusCode: status,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestRefreshAccountRequiresAliveStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       error
+	}{
+		{"alive", `{"status":"alive"}`, nil},
+		{"enveloped", `{"code":0,"data":{"status":"alive"}}`, nil},
+		{"expired", `{"status":"expired"}`, ErrAccountExpired},
+		{"unknown", `{"status":"unknown"}`, ErrAccountUnknown},
+		{"missing", `{}`, ErrAccountRefreshResponse},
+		{"empty", ``, ErrAccountRefreshResponse},
+		{"invalid", `{"status":"secret-login-buffer"}`, ErrAccountRefreshResponse},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := NewClient(Config{BaseURL: "http://127.0.0.1:8000", APISecret: []byte("secret"), HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) { return jsonResponse(200, tc.body), nil })}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = client.RefreshAccount(t.Context(), "private-ref")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
+			}
+			if err != nil && (strings.Contains(err.Error(), "secret-login-buffer") || strings.Contains(err.Error(), "private-ref")) {
+				t.Fatal("unsafe error")
+			}
+		})
+	}
+}
+
+func TestPollSupportsSidecarLongPollingAndCallerCancellation(t *testing.T) {
+	client, err := NewClient(Config{BaseURL: "http://127.0.0.1:8000", APISecret: []byte("secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.pollHTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		if !ok || time.Until(deadline) < 35*time.Second {
+			t.Fatal("long-poll cut short")
+		}
+		return jsonResponse(200, `{"code":0,"data":{"session_id":"sid","status":"authorized"}}`), nil
+	})
+	result, err := client.PollQR(t.Context(), "sid")
+	if err != nil || result.Status != "authorized" {
+		t.Fatalf("%+v %v", result, err)
+	}
+	if client.http.Timeout != 10*time.Second {
+		t.Fatal("ordinary request timeout changed")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	client.pollHTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) { return nil, r.Context().Err() })
+	if _, err := client.PollQR(ctx, "sid"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
 	}
 }

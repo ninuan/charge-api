@@ -7,6 +7,7 @@ import (
 
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
+	"charge-dashboard/internal/yyb"
 )
 
 func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +79,10 @@ func (s *Server) recordDashboardDiagnostic(user model.CurrentUser, operation, co
 }
 
 func writeAddPileError(w http.ResponseWriter, err error) {
+	if errors.Is(err, yyb.ErrAccountExpired) || errors.Is(err, yyb.ErrAccountUnknown) {
+		writeCodedError(w, http.StatusConflict, "YYB_RESCAN_REQUIRED", "平台登录需要重新确认，请重新扫码绑定。")
+		return
+	}
 	if errors.Is(err, appruntime.ErrYYBBindingRequired) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"code":  "YYB_BINDING_REQUIRED",

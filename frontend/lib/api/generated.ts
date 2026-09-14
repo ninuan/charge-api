@@ -304,6 +304,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session/yyb-binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取当前用户的脱敏绑定与扫码能力，不刷新设备 */
+        get: operations["getYybBinding"];
+        put?: never;
+        post?: never;
+        /** 解除当前用户绑定并使其短期扫码会话失效（同账户连接操作进行中返回 409 YYB_BINDING_BUSY） */
+        delete: operations["deleteYybBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session/yyb-qr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 创建归属当前用户的短期扫码会话 */
+        post: operations["createYybQr"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session/yyb-qr/{sessionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 校验归属和授权后保存绑定，同会话完成后重试返回原结果 */
+        post: operations["confirmYybQr"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session/yyb-qr/{sessionId}/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        /** 串行查询扫码状态及本站确认结果 */
+        get: operations["pollYybQr"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/watch-overview": {
         parameters: {
             query?: never;
@@ -868,6 +941,40 @@ export interface components {
             systemFailures24Hours: number;
             uncertainDeliveries: number;
         };
+        YybBinding: {
+            bound: boolean;
+            /** Format: date-time */
+            boundAt?: string;
+            cookieSynced?: boolean;
+            /** Format: date-time */
+            lastCheckedAt?: string;
+            message?: string;
+            nickname?: string;
+            openidSuffix?: string;
+            /** @description YYB 与 Mocele 已配置；旧接口可能缺少此字段 */
+            scanEnabled?: boolean;
+            /** @description 仅确认结果包含，用于证明本次二维码的绑定已保存；不得用旧 bound=true 推断新会话成功 */
+            sessionId?: string;
+            status?: string;
+            /**
+             * @description 无设备无需同步、同步成功、绑定已保存但同步失败
+             * @enum {string}
+             */
+            syncState?: "not_needed" | "synced" | "failed";
+        };
+        YybQr: {
+            imageBase64?: string;
+            imageUrl?: string;
+            sessionId: string;
+            status?: string;
+        };
+        YybQrPoll: {
+            binding?: components["schemas"]["YybBinding"];
+            message?: string;
+            sessionId: string;
+            /** @description pending/scanned/authorized/confirmed/expired/cancelled/unknown 为上游状态；confirming/saved 为本站状态。未知状态不得启用确认。 */
+            status: string;
+        };
     };
     responses: {
         /** @description 当前账户不是管理员 */
@@ -1299,6 +1406,9 @@ export type WxPusherChannelUpdateRequest = components['schemas']['WxPusherChanne
 export type WxPusherErrorCode = components['schemas']['WxPusherErrorCode'];
 export type WxPusherEventType = components['schemas']['WxPusherEventType'];
 export type WxPusherOperationsStatus = components['schemas']['WxPusherOperationsStatus'];
+export type YybBinding = components['schemas']['YybBinding'];
+export type YybQr = components['schemas']['YybQr'];
+export type YybQrPoll = components['schemas']['YybQrPoll'];
 export type ResponseAdminRequired = components['responses']['AdminRequired'];
 export type ResponseAdminTrendsUnavailable = components['responses']['AdminTrendsUnavailable'];
 export type ResponseHistoryNotFound = components['responses']['HistoryNotFound'];
@@ -1907,6 +2017,162 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CodedErrorResponse"];
                 };
+            };
+        };
+    };
+    getYybBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description scanEnabled 仅表示 YYB 与 Mocele 均已配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YybBinding"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    deleteYybBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已解除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    createYybQr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端重启或 30 分钟后需重新生成；不保存绑定 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YybQr"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description 未配置扫码或暂时无法创建会话 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    confirmYybQr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定已保存；凭据同步失败也保留 bound=true，用 syncState=failed 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YybBinding"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description 会话不属于当前用户或已失效，QR_SESSION_INVALID */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description QR_NOT_AUTHORIZED、QR_CONFIRM_IN_PROGRESS 或 YYB_BINDING_BUSY；进行中的操作应查询同会话状态，不盲目重试 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 绑定未保存成功；可重新检查后重试 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 暂时无法确认扫码授权 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    pollYybQr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description authorized/confirmed 仍需用户确认；saved 才表示本站已保存，附带同会话 binding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YybQrPoll"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description 会话不属于当前用户或已失效，QR_SESSION_INVALID */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 暂时无法读取扫码状态，不代表授权失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

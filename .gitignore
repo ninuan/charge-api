@@ -53,3 +53,9 @@ docs/openapi/*
 .worktrees/
 ROADMAP.md
 VERSION_*_PLAN.md
+# Versioned 1.5.3 contract and implementation acceptance
+!docs/openapi/charge-console-v1.5.3.yaml
+!docs/plans/
+docs/plans/*
+!docs/plans/2026-09-13-v1.5.3-binding-onboarding.md
+!docs/plans/2026-09-13-v1.5.3-binding-acceptance.md

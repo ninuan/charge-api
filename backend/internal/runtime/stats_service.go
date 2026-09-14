@@ -360,7 +360,7 @@ func isActionableDiagnostic(diagnostic model.RecoveryDiagnostic) bool {
 		"add_pile_failed", "pile_update_failed", "pile_delete_failed", "refresh_failed", "cookie_required", "cookie_too_large",
 		"cookie_update_failed", "qr_create_failed", "qr_poll_failed", "qr_confirm_failed", "qr_session_invalid",
 		"scan_service_unavailable", "binding_save_failed", "credential_sync_failed", "device_id_invalid", "auth_rate_limited",
-		"recovery_unavailable", "binding_missing", "yyb_get_code_failed", "yyb_account_refresh_failed", "yyb_get_code_retry_failed",
+		"recovery_unavailable", "binding_missing", "yyb_get_code_failed", "yyb_account_refresh_failed", "yyb_account_refresh_expired", "yyb_account_refresh_unknown", "yyb_get_code_retry_failed",
 		"mocele_autologin_missing_info", "mocele_autologin_missing_wxopenid", "mocele_autologin_failed", "new_cookie_validation_failed", "recovery_failed":
 		return true
 	default:

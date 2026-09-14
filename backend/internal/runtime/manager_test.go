@@ -1081,7 +1081,7 @@ func TestSyncCookieFromYYBRefreshesThenRetriesGetCode(t *testing.T) {
 	}
 }
 
-func TestSyncCookieFromYYBMarksBindingExpiredWhenRefreshRetryFails(t *testing.T) {
+func TestSyncCookieFromYYBDoesNotInferExpiryFromGenericRetryFailure(t *testing.T) {
 	manager := testYYBManager(t)
 	if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "ref-1", OpenID: "openid-1"}); err != nil {
 		t.Fatalf("SaveYYBBinding: %v", err)
@@ -1100,7 +1100,7 @@ func TestSyncCookieFromYYBMarksBindingExpiredWhenRefreshRetryFails(t *testing.T)
 		t.Fatalf("mocele should not be called")
 	}
 	binding, _ := manager.YYBBinding("user-1")
-	if binding == nil || binding.Status != "expired" || binding.LastError == "" || binding.LastCheckedAt == nil {
+	if binding == nil || binding.Status != "alive" || binding.LastError == "" || binding.LastCheckedAt == nil {
 		t.Fatalf("binding after failure = %#v", binding)
 	}
 }
@@ -1390,6 +1390,7 @@ func testYYBManager(t *testing.T) *Manager {
 }
 
 type fakeYYBClient struct {
+	refreshError error
 	codes        []string
 	errors       []error
 	getCodeCalls []string
@@ -1413,7 +1414,7 @@ func (f *fakeYYBClient) GetCode(ctx context.Context, ref string, appID string) (
 
 func (f *fakeYYBClient) RefreshAccount(ctx context.Context, ref string) error {
 	f.refreshCalls++
-	return nil
+	return f.refreshError
 }
 
 type fakeMoceleClient struct {
@@ -1446,5 +1447,125 @@ func TestFirstDeviceIDReturnsUserDevice(t *testing.T) {
 	}
 	if !ok || id != "device-1" {
 		t.Fatalf("FirstDeviceID = %q %v", id, ok)
+	}
+}
+
+func TestSyncCookieStopsAfterUnsuccessfulAccountRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		cause              error
+		status, diagnostic string
+	}{
+		{"expired", yyb.ErrAccountExpired, "expired", "yyb_account_refresh_expired"},
+		{"unknown", yyb.ErrAccountUnknown, "alive", "yyb_account_refresh_unknown"},
+		{"network", errors.New("upstream temporarily unavailable"), "alive", "yyb_account_refresh_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := testYYBManager(t)
+			if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "private-ref", OpenID: "private-openid"}); err != nil {
+				t.Fatal(err)
+			}
+			client := &fakeYYBClient{errors: []error{errors.New("get code failed")}, refreshError: tc.cause}
+			mocele := &fakeMoceleClient{}
+			_, err := manager.SyncCookieFromYYB("user-1", "device-1", client, mocele)
+			if !errors.Is(err, tc.cause) {
+				t.Fatalf("error = %v", err)
+			}
+			if client.refreshCalls != 1 || len(client.getCodeCalls) != 1 || mocele.calls != 0 {
+				t.Fatal("failed refresh must stop retry and cookie exchange")
+			}
+			binding, _ := manager.YYBBinding("user-1")
+			if binding.Status != tc.status || binding.LastError == "" {
+				t.Fatalf("binding status = %s", binding.Status)
+			}
+			diagnostics, err := manager.RecoveryDiagnostics("user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertDiagnosticCodes(t, diagnostics, "yyb_get_code_failed", tc.diagnostic)
+			assertDiagnosticsDoNotLeak(t, diagnostics, "private-ref", "private-openid")
+		})
+	}
+}
+
+type blockedRecoveryClient struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockedRecoveryClient) GetCode(ctx context.Context, ref, appID string) (string, error) {
+	close(c.entered)
+	select {
+	case <-c.release:
+		return "", errors.New("old credential failed")
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+func (c *blockedRecoveryClient) RefreshAccount(context.Context, string) error {
+	return yyb.ErrAccountExpired
+}
+
+func TestInFlightRecoveryCannotOverwriteReplacementOrResurrectUnboundAccount(t *testing.T) {
+	for _, unbind := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unbind=%v", unbind), func(t *testing.T) {
+			manager := testYYBManager(t)
+			if _, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "old", OpenID: "old-open"}); err != nil {
+				t.Fatal(err)
+			}
+			client := &blockedRecoveryClient{entered: make(chan struct{}), release: make(chan struct{})}
+			defer close(client.release)
+			recovered := make(chan error, 1)
+			go func() {
+				_, err := manager.SyncCookieFromYYB("user-1", "device-1", client, &fakeMoceleClient{})
+				recovered <- err
+			}()
+			select {
+			case <-client.entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("recovery did not start")
+			}
+			changed := make(chan error, 1)
+			go func() {
+				if unbind {
+					changed <- manager.ClearYYBBinding("user-1")
+				} else {
+					_, err := manager.SaveYYBBinding("user-1", yyb.YYBAccount{Ref: "new", OpenID: "new-open"})
+					changed <- err
+				}
+			}()
+			select {
+			case err := <-changed:
+				t.Fatalf("replacement raced unfinished recovery: %v", err)
+			case <-time.After(30 * time.Millisecond):
+			}
+			client.release <- struct{}{}
+			select {
+			case err := <-recovered:
+				if !errors.Is(err, yyb.ErrAccountExpired) {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("recovery stuck")
+			}
+			select {
+			case err := <-changed:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("replacement stuck")
+			}
+			binding, err := manager.YYBBinding("user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if unbind && binding != nil {
+				t.Fatal("old recovery resurrected binding")
+			}
+			if !unbind && (binding == nil || binding.Ref != "new" || binding.Status != "alive") {
+				t.Fatalf("old recovery replaced new binding: %+v", binding)
+			}
+		})
 	}
 }

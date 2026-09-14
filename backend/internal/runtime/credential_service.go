@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,6 +40,13 @@ func (m *Manager) ClearYYBBinding(userID string) error {
 }
 
 func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return model.DashboardSnapshot{}, err
+	}
+	runtime.credentialMu.Lock()
+	defer runtime.credentialMu.Unlock()
+
 	binding, err := m.YYBBinding(userID)
 	if err != nil {
 		return model.DashboardSnapshot{}, err
@@ -52,16 +60,27 @@ func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YY
 	if err != nil {
 		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_get_code_failed", deviceID, err))
 		if refreshErr := yybClient.RefreshAccount(ctx, binding.Ref); refreshErr != nil {
-			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_account_refresh_failed", deviceID, refreshErr))
+			code := "yyb_account_refresh_failed"
+			if errors.Is(refreshErr, yyb.ErrAccountExpired) {
+				code = "yyb_account_refresh_expired"
+			}
+			if errors.Is(refreshErr, yyb.ErrAccountUnknown) {
+				code = "yyb_account_refresh_unknown"
+			}
+			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError(code, deviceID, refreshErr))
 			err = fmt.Errorf("get code failed: %v; refresh failed: %w", err, refreshErr)
-			m.markYYBBindingExpired(userID, binding, err)
+			if errors.Is(refreshErr, yyb.ErrAccountExpired) {
+				m.markYYBBindingExpired(userID, binding, err)
+			} else {
+				m.markYYBBindingError(userID, binding, err)
+			}
 			return model.DashboardSnapshot{}, err
 		}
 		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("yyb_account_refresh_succeeded", deviceID, 0))
 		code, err = yybClient.GetCode(ctx, binding.Ref, moceleAppID)
 		if err != nil {
 			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_get_code_retry_failed", deviceID, err))
-			m.markYYBBindingExpired(userID, binding, err)
+			m.markYYBBindingError(userID, binding, err)
 			return model.DashboardSnapshot{}, err
 		}
 	}
@@ -77,7 +96,7 @@ func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YY
 	binding.Status = "alive"
 	binding.LastError = ""
 	binding.LastCheckedAt = &now
-	if err := m.SetYYBBinding(userID, binding); err != nil {
+	if err := m.setYYBBinding(userID, binding); err != nil {
 		return model.DashboardSnapshot{}, err
 	}
 	snapshot, err := m.UpdateCookie(userID, cookieResult.Cookie)
@@ -100,7 +119,7 @@ func (m *Manager) markYYBBindingError(userID string, binding *model.YYBBinding, 
 	if cause != nil {
 		binding.LastError = cause.Error()
 	}
-	_ = m.SetYYBBinding(userID, binding)
+	_ = m.setYYBBinding(userID, binding)
 }
 
 func (m *Manager) YYBBinding(userID string) (*model.YYBBinding, error) {
@@ -114,6 +133,17 @@ func (m *Manager) YYBBinding(userID string) (*model.YYBBinding, error) {
 }
 
 func (m *Manager) SetYYBBinding(userID string, binding *model.YYBBinding) error {
+	runtime, err := m.runtimeFor(userID)
+	if err != nil {
+		return err
+	}
+	runtime.credentialMu.Lock()
+	defer runtime.credentialMu.Unlock()
+	return m.setYYBBinding(userID, binding)
+}
+
+// Caller holds credentialMu, including when persisting recovery diagnostics.
+func (m *Manager) setYYBBinding(userID string, binding *model.YYBBinding) error {
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
 		return err
@@ -233,6 +263,8 @@ func recoveryDiagnosticMessage(code string) string {
 		"binding_missing":                   "无法同步凭据：尚未完成扫码登录绑定",
 		"yyb_get_code_failed":               "扫码服务未能生成临时登录凭据",
 		"yyb_account_refresh_failed":        "扫码服务刷新已绑定账号失败",
+		"yyb_account_refresh_expired":       "扫码服务未能恢复登录状态，请重新扫码；失败原因需检查扫码服务",
+		"yyb_account_refresh_unknown":       "扫码服务缺少账号恢复信息，请重新扫码",
 		"yyb_account_refresh_succeeded":     "扫码服务已刷新已绑定账号",
 		"yyb_get_code_retry_failed":         "刷新账号后仍无法生成临时登录凭据",
 		"yyb_get_code_succeeded":            "扫码服务已生成临时登录凭据",
