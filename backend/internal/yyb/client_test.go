@@ -203,6 +203,51 @@ func TestRefreshAccountRequiresAliveStatus(t *testing.T) {
 	}
 }
 
+func TestPollNormalizesSidecarSessionContract(t *testing.T) {
+	for _, status := range []string{"pending", "scanned", "authorized", "confirmed", "expired", "cancelled", "unknown"} {
+		for _, wrapped := range []bool{false, true} {
+			for _, id := range []string{"", "sid", "different-session"} {
+				name := status + "/direct/" + id
+				if wrapped {
+					name = status + "/envelope/" + id
+				}
+				t.Run(name, func(t *testing.T) {
+					payload := map[string]any{"status": status, "errcode": 408}
+					if id != "" {
+						payload["session_id"] = id
+					}
+					if wrapped {
+						payload = map[string]any{"code": 0, "data": payload}
+					}
+					body, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					client, err := NewClient(Config{BaseURL: "http://127.0.0.1:8000", APISecret: []byte("secret"), HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+						if r.Method != http.MethodGet || r.URL.Path != "/qr/sid/poll" {
+							t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+						}
+						return jsonResponse(200, string(body)), nil
+					})}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, err := client.PollQR(t.Context(), "sid")
+					if id == "different-session" {
+						if err == nil || result != (QRPollResult{}) {
+							t.Fatalf("conflicting session accepted: %+v %v", result, err)
+						}
+						return
+					}
+					if err != nil || result.SessionID != "sid" || result.Status != status {
+						t.Fatalf("result: %+v %v", result, err)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestPollSupportsSidecarLongPollingAndCallerCancellation(t *testing.T) {
 	client, err := NewClient(Config{BaseURL: "http://127.0.0.1:8000", APISecret: []byte("secret")})
 	if err != nil {

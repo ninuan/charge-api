@@ -393,6 +393,7 @@ async function mockBindingFlow(
     adds: 0,
     confirms: 0,
     creates: 0,
+    polls: 0,
     rejectAdd: false,
     failBinding: false,
   }
@@ -415,9 +416,10 @@ async function mockBindingFlow(
       },
     })
   })
-  await page.route("**/api/session/yyb-qr/*/poll", (route) =>
-    route.fulfill({ json: { sessionId: "browser-qr", status: flow.status } })
-  )
+  await page.route("**/api/session/yyb-qr/*/poll", (route) => {
+    flow.polls++
+    return route.fulfill({ json: { sessionId: "browser-qr", status: flow.status } })
+  })
   await page.route("**/api/session/yyb-qr/*/confirm", (route) => {
     flow.confirms++
     flow.bound = true
@@ -449,6 +451,28 @@ async function mockBindingFlow(
   })
   return flow
 }
+
+test("automatic checks preserve the QR until delayed phone confirmation", async ({ page }) => {
+  const flow = await mockBindingFlow(page, snapshot(), false)
+  await page.goto("/dashboard/")
+  await page.getByRole("button", { name: "添加充电桩", exact: true }).first().click()
+  const dialog = page.getByRole("dialog")
+  const confirm = dialog.getByRole("button", { name: "确认绑定", exact: true })
+  // Let multiple real automatic timer cycles finish before authorizing on the phone.
+  await expect.poll(() => flow.polls, { timeout: 15000 }).toBeGreaterThanOrEqual(2)
+  await expect(confirm).toBeDisabled()
+  flow.status = "scanned"
+  await expect(dialog.getByText("已扫码，请在微信中确认授权")).toBeVisible({ timeout: 10000 })
+  await expect(confirm).toBeDisabled()
+  flow.status = "authorized"
+  await dialog.getByRole("button", { name: "检查扫码状态" }).click()
+  await expect(confirm).toBeEnabled()
+  await expect(dialog.getByText("扫码会话不匹配，请重新检查。")).toHaveCount(0)
+  await confirm.click()
+  await expect(dialog.getByText("微信已绑定", { exact: true })).toBeVisible()
+  expect(flow.creates).toBe(1)
+  expect(flow.confirms).toBe(1)
+})
 
 for (const width of [320, 390, 768, 1440]) {
   test(`binding onboarding completes at ${width}px`, async ({ page }) => {

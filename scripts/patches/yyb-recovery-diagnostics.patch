@@ -1,0 +1,196 @@
+--- a/internal/httpapi/app.go
++++ b/internal/httpapi/app.go
+@@ -584,16 +584,20 @@
+ 
+ func (a *App) refreshLiveness(ctx context.Context, acc *store.WechatAccount) string {
+ 	if acc.Credentials == nil {
++		logRecoveryFailure("load_credentials", errors.New("missing credentials"))
+ 		_ = a.db.SetAccountStatus(ctx, acc.ID, "unknown")
+ 		return "unknown"
+ 	}
+ 	creds := protocol.CredentialsFromMap(acc.Credentials)
+ 	result, err := a.qr.RefreshLoginBuffer(ctx, creds)
+ 	if err != nil {
++		logRecoveryFailure("refresh_login_buffer", err)
+ 		_ = a.db.SetAccountStatus(ctx, acc.ID, "expired")
+ 		return "expired"
+ 	}
+-	_ = a.db.SetAccountCredential(ctx, acc.ID, result.LoginBuffer, result.Credentials.ToMap())
++	if err := a.db.SetAccountCredential(ctx, acc.ID, result.LoginBuffer, result.Credentials.ToMap()); err != nil {
++		logRecoveryFailure("persist_credentials", err)
++	}
+ 	_ = a.db.SetAccountStatus(ctx, acc.ID, "alive")
+ 	if avatar := a.resolveAvatar(ctx, acc.OpenID, acc.UserInfo); avatar != "" {
+ 		_ = a.db.SetAccountProfile(ctx, acc.ID, acc.Nickname, &avatar, acc.UserInfo)
+--- /dev/null
++++ b/internal/httpapi/recovery_diagnostics.go
+@@ -0,0 +1,72 @@
++package httpapi
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"log"
++	"net"
++	"regexp"
++	"strings"
++)
++
++var recoveryCodePattern = regexp.MustCompile(`(?:refresh|login_buffer) failed: code=(-?[0-9]{1,12})\b`)
++var recoveryHTTPPattern = regexp.MustCompile(`\bHTTP ([0-9]{3})\b`)
++
++// Never log the error itself: upstream bodies and URLs can carry credentials.
++// Only fixed labels and bounded numeric status fields leave this function.
++func recoveryFailureSummary(stage string, err error) string {
++	switch stage {
++	case "load_credentials", "refresh_login_buffer", "persist_credentials":
++	default:
++		stage = "unknown"
++	}
++	text := err.Error()
++	if strings.HasPrefix(text, "refresh_credentials:") {
++		stage = "refresh_credentials"
++	}
++	if strings.HasPrefix(text, "fetch_login_buffer:") {
++		stage = "fetch_login_buffer"
++	}
++	kind, code, httpStatus := "other", "none", "none"
++	switch {
++	case stage == "persist_credentials":
++		kind = "storage"
++	case strings.Contains(text, "missing refresh token"):
++		kind = "missing_refresh_token"
++	case stage == "load_credentials":
++		kind = "missing_credentials"
++	case errors.Is(err, context.Canceled):
++		kind = "cancelled"
++	case errors.Is(err, context.DeadlineExceeded):
++		kind = "timeout"
++	default:
++		var netErr net.Error
++		if errors.As(err, &netErr) {
++			if netErr.Timeout() {
++				kind = "timeout"
++			} else {
++				kind = "network"
++			}
++		}
++	}
++	if m := recoveryCodePattern.FindStringSubmatch(text); len(m) > 1 {
++		code = m[1]
++		kind = "upstream_rejected"
++	}
++	if m := recoveryHTTPPattern.FindStringSubmatch(text); len(m) > 1 {
++		httpStatus = m[1]
++		kind = "http_error"
++	}
++	if strings.Contains(text, "decode JSON") {
++		kind = "invalid_response"
++	}
++	if strings.Contains(text, "response missing access_token") || strings.Contains(text, "login_buffer response is empty") {
++		kind = "incomplete_response"
++	}
++	return fmt.Sprintf("yyb_recovery stage=%s kind=%s upstream_code=%s http_status=%s", stage, kind, code, httpStatus)
++}
++
++func logRecoveryFailure(stage string, err error) {
++	log.Print(recoveryFailureSummary(stage, err))
++}
+--- /dev/null
++++ b/internal/httpapi/recovery_diagnostics_test.go
+@@ -0,0 +1,33 @@
++package httpapi
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"strings"
++	"testing"
++)
++
++func TestRecoveryDiagnosticsRevealStageWithoutCredentials(t *testing.T) {
++	for _, tc := range []struct {
++		stage string
++		err   error
++		want  string
++	}{
++		{"refresh_login_buffer", errors.New("refresh_credentials: refresh failed: code=40101 msg=SECRET_TOKEN"), "stage=refresh_credentials kind=upstream_rejected upstream_code=40101"},
++		{"refresh_login_buffer", errors.New("fetch_login_buffer: HTTP 503: SECRET_BODY"), "stage=fetch_login_buffer kind=http_error upstream_code=none http_status=503"},
++		{"refresh_login_buffer", fmt.Errorf("refresh_credentials: %w", context.DeadlineExceeded), "kind=timeout"},
++		{"refresh_login_buffer", errors.New("refresh_credentials: missing refresh token"), "kind=missing_refresh_token"},
++		{"refresh_login_buffer", errors.New("fetch_login_buffer: decode JSON: SECRET_BODY"), "kind=invalid_response"},
++		{"persist_credentials", errors.New("SECRET_DATABASE"), "stage=persist_credentials kind=storage"},
++		{"SECRET_STAGE", errors.New("SECRET_ERROR"), "stage=unknown kind=other"},
++	} {
++		got := recoveryFailureSummary(tc.stage, tc.err)
++		if !strings.Contains(got, tc.want) {
++			t.Errorf("got %q want %q", got, tc.want)
++		}
++		if strings.Contains(got, "SECRET") {
++			t.Fatalf("sensitive material escaped: %s", got)
++		}
++	}
++}
+--- a/internal/protocol/loginbuffer.go
++++ b/internal/protocol/loginbuffer.go
+@@ -160,11 +160,11 @@
+ func (c *LoginBufferClient) RefreshLoginBuffer(ctx context.Context, creds LoginBufferCredentials) (LoginBufferResult, error) {
+ 	refreshed, err := c.RefreshCredentials(ctx, creds)
+ 	if err != nil {
+-		return LoginBufferResult{}, err
++		return LoginBufferResult{}, fmt.Errorf("refresh_credentials: %w", err)
+ 	}
+ 	lb, err := c.FetchLoginBuffer(ctx, refreshed)
+ 	if err != nil {
+-		return LoginBufferResult{}, err
++		return LoginBufferResult{}, fmt.Errorf("fetch_login_buffer: %w", err)
+ 	}
+ 	return LoginBufferResult{LoginBuffer: lb, Credentials: refreshed, Refreshed: true}, nil
+ }
+--- /dev/null
++++ b/internal/protocol/loginbuffer_diagnostics_test.go
+@@ -0,0 +1,42 @@
++package protocol
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++)
++
++type diagnosticTransport func(*http.Request) (*http.Response, error)
++
++func (f diagnosticTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
++
++func TestRefreshFailureIdentifiesTheFailingStage(t *testing.T) {
++	for _, stage := range []string{"refresh_credentials", "fetch_login_buffer"} {
++		t.Run(stage, func(t *testing.T) {
++			c := NewLoginBufferClient(time.Second)
++			calls := 0
++			c.httpClient.Transport = diagnosticTransport(func(r *http.Request) (*http.Response, error) {
++				calls++
++				status, body := 503, "PRIVATE_BODY"
++				if stage == "fetch_login_buffer" && calls == 1 {
++					status, body = 200, `{"code":0,"user_info":{"access_token":"PRIVATE_ACCESS","refresh_token":"PRIVATE_REFRESH","expires_in":7200}}`
++				}
++				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
++			})
++			_, err := c.RefreshLoginBuffer(context.Background(), LoginBufferCredentials{OpenID: "PRIVATE_OPENID", RefreshToken: "OLD_REFRESH"})
++			if err == nil || !strings.HasPrefix(err.Error(), stage+":") {
++				t.Fatalf("wrong stage: %v", err)
++			}
++			expected := 1
++			if stage == "fetch_login_buffer" {
++				expected = 2
++			}
++			if calls != expected {
++				t.Fatalf("requests=%d", calls)
++			}
++		})
++	}
++}

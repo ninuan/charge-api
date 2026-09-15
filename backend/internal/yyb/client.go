@@ -121,6 +121,12 @@ func (c *Client) PollQR(ctx context.Context, sessionID string) (QRPollResult, er
 	if err := pollClient.doJSON(ctx, http.MethodGet, "/qr/"+sessionID+"/poll", nil, &out); err != nil {
 		return QRPollResult{}, err
 	}
+	// The sidecar's PollResult omits session_id. The request already identifies
+	// the session; still reject an explicitly conflicting ID from other versions.
+	if out.SessionID != "" && out.SessionID != sessionID {
+		return QRPollResult{}, errors.New("yyb poll response session mismatch")
+	}
+	out.SessionID = sessionID
 	return out, nil
 }
 

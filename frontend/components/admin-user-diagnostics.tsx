@@ -31,6 +31,8 @@ const actionableCodes = new Set([
   "binding_missing",
   "yyb_get_code_failed",
   "yyb_account_refresh_failed",
+  "yyb_account_refresh_expired",
+  "yyb_account_refresh_unknown",
   "yyb_get_code_retry_failed",
   "mocele_autologin_missing_info",
   "mocele_autologin_missing_wxopenid",
