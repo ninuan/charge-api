@@ -27,6 +27,7 @@ import {
   useState,
 } from "react"
 import type { Pile, Port } from "@/lib/types"
+import { AnnouncementStrip } from "@/components/announcement-strip"
 import { AppShell } from "@/components/app-shell"
 import { AddPileDialog } from "@/components/add-pile-dialog"
 import { UsageGuideDialog } from "@/components/usage-guide-dialog"
@@ -103,8 +104,8 @@ function WorkbenchContent() {
     fetchSnapshot,
   } = useDashboard()
   const { initialLoading, error, retry } = useDashboardSession()
-  const { rules } = useWatch()
-  const { unreadCount } = useNotifications()
+  const { rules, loaded: watchLoaded } = useWatch()
+  const { unreadCount, loaded: notificationsLoaded } = useNotifications()
   const online = useOnline()
   const [refreshing, setRefreshing] = useState(false)
   const [ordering, setOrdering] = useState(false)
@@ -248,7 +249,10 @@ function WorkbenchContent() {
               : "看看常去的地方，或在有空闲时提醒我。"
       }
       actions={actions}
-      counts={{ reminders: activeRules.length, notifications: unreadCount }}
+      counts={{
+        reminders: watchLoaded ? activeRules.length : undefined,
+        notifications: notificationsLoaded ? unreadCount : undefined,
+      }}
       searchItems={searchItems}
       guideAction={
         <UsageGuideDialog
@@ -257,6 +261,7 @@ function WorkbenchContent() {
         />
       }
     >
+      <AnnouncementStrip />
       {!!refreshError && (
         <div className="wb-state-banner wb-banner-warning" role="alert">
           <WifiOffIcon size={17} />
@@ -598,7 +603,7 @@ function PileDetail({
   activeReminder: boolean
 }) {
   const { deletePile, updatePile, fetchSnapshot } = useDashboard()
-  const { load: loadWatch } = useWatch()
+  const { load: loadWatch, loaded: watchLoaded, error: watchError } = useWatch()
   const online = useOnline()
   const [modal, setModal] = useState<"edit" | "remove" | null>(null)
   const [saving, setSaving] = useState(false)
@@ -737,13 +742,27 @@ function PileDetail({
         <div className="wb-availability-action">
           <WorkbenchButton
             variant={count.idle && !activeReminder ? "outline" : "default"}
-            disabled={!online || unknown}
+            disabled={!online || unknown || !watchLoaded || !!watchError}
             onClick={onRemind}
           >
             <BellIcon size={16} />
             {activeReminder ? "管理这次提醒" : "有空闲时提醒我"}
           </WorkbenchButton>
-          <span>找到空闲后通知一次，不预留空位</span>
+          {!watchLoaded || watchError ? (
+            <span>
+              {watchError || "正在读取提醒状态…"}
+              {watchError && (
+                <button
+                  className="underline"
+                  onClick={() => void loadWatch().catch(() => undefined)}
+                >
+                  重试
+                </button>
+              )}
+            </span>
+          ) : (
+            <span>找到空闲后通知一次，不预留空位</span>
+          )}
         </div>
       </div>
       <section className="wb-tab-content">

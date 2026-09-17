@@ -88,6 +88,8 @@ async function mockApi(page: Page, data: DashboardSnapshot, failFirst = false) {
           usageGuideAckAt: data.updatedAt,
         },
       })
+    if (path === "/api/announcements/summary") return route.fulfill({ json: {item:null,unreadCount:0,serverNow:new Date().toISOString(),nextBoundary:null} })
+    if (path === "/api/notification-preferences") return route.fulfill({ json: {browserEnabled:false,quietHoursEnabled:false,quietStartMinute:0,quietEndMinute:0,timezone:"Asia/Shanghai"} })
     if (path === "/api/watch-rules") return route.fulfill({ json: [] })
     if (path === "/api/watch-overview")
       return route.fulfill({
@@ -636,4 +638,96 @@ test("empty-list add entry opens the same binding flow", async ({ page }) => {
   await expect(page.getByRole("dialog").getByRole("img")).toBeVisible()
   expect(flow.creates).toBe(1)
   expect(flow.adds).toBe(0)
+})
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`announcements acknowledge, revisit and retain important summaries at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width,height:900})
+    await page.addInitScript((theme) => localStorage.setItem("theme", theme), width === 768 || width === 1440 ? "dark" : "light")
+    await page.emulateMedia({reducedMotion:"reduce"})
+    await mockApi(page,snapshot())
+    const item = { id:"notice-1",title:"充电服务维护安排",body:"周五夜间维护，请提前安排。",level:"normal",status:"active",startAt:"2026-09-16T01:00:00Z",endAt:null,version:1,reminderVersion:1,acknowledged:false,createdAt:"2026-09-16T01:00:00Z",updatedAt:"2026-09-16T01:00:00Z" }
+    await page.route("**/api/announcements**",route=>{
+      const path = new URL(route.request().url()).pathname
+      if(path.endsWith("/summary"))return route.fulfill({json:{item:item.level==="important"||!item.acknowledged?{...item,body:undefined}:null,unreadCount:item.acknowledged?0:1,serverNow:new Date().toISOString(),nextBoundary:null}})
+      if(path.endsWith("/acknowledge")){item.acknowledged=true;return route.fulfill({json:{ok:true}})}
+      if(path.endsWith("notice-1"))return route.fulfill({json:item})
+      return route.fulfill({json:{items:[item],total:1,page:1}})
+    })
+    await page.goto("/dashboard/?q=北门")
+    const strip=page.getByRole("region",{name:"公告",exact:true})
+    await expect(strip.getByText(item.title)).toBeVisible()
+    await strip.getByRole("button",{name:"查看",exact:true}).click()
+    const dialog=page.getByRole("dialog")
+    await expect(dialog.getByText(item.body)).toBeVisible()
+    if (width >= 768) expect((await dialog.getByRole("heading", {name:item.title}).boundingBox())!.y).toBeLessThan(180)
+    await page.screenshot({path:`/tmp/charge-announcement-detail-${width}.png`,fullPage:true})
+    await dialog.getByRole("button",{name:"我知道了"}).click()
+    await expect(dialog.getByRole("button",{name:"已确认"})).toBeDisabled()
+    await page.keyboard.press("Escape")
+    await expect(strip.getByText(item.title)).toHaveCount(0)
+    await expect(strip.getByRole("button", {name:"全部公告", exact:true})).toBeFocused()
+    await page.reload()
+    await expect(strip.getByText("暂无待确认公告")).toBeVisible()
+    item.level="important"
+    await page.reload()
+    await expect(strip.getByText(item.title)).toBeVisible()
+    await expect(strip.getByText(/已确认/)).toBeVisible()
+    await strip.getByRole("button",{name:"查看",exact:true}).click()
+    await expect(dialog.getByText(item.body)).toBeVisible()
+    await page.goBack()
+    await expect(dialog).toHaveCount(0)
+    await expect(page).toHaveURL(/q=/)
+    await page.screenshot({path:`/tmp/charge-announcements-${width}.png`,fullPage:true})
+    expect(await page.locator("body").evaluate(el=>el.scrollWidth<=window.innerWidth)).toBe(true)
+  })
+}
+
+test("announcement outage does not block piles",async({page})=>{
+  await mockApi(page,snapshot())
+  await page.route("**/api/announcements/summary",route=>route.fulfill({status:503,json:{error:"公告暂时不可用"}}))
+  await page.goto("/dashboard/")
+  await expect(page.getByText("公告暂时无法加载")).toBeVisible()
+  await expect(page.getByRole("button",{name:"刷新状态",exact:true})).toBeEnabled()
+  await expect(page.getByRole("heading",{name:"北门车棚"})).toBeVisible()
+})
+
+test("administrator creates, previews, publishes and withdraws announcements",async({page})=>{
+ await mockApi(page,snapshot())
+ await page.route("**/api/auth/me",route=>route.fulfill({json:{id:"admin",username:"admin",role:"admin",enabled:true}}))
+ let item:Record<string,unknown>|null=null
+ await page.route("**/api/admin/announcements**",route=>{
+  const path=new URL(route.request().url()).pathname,method=route.request().method()
+  if(method==="GET")return route.fulfill({json:path.endsWith("/a1")?item:{items:item?[item]:[],total:item?1:0,page:1}})
+  if(path.endsWith("/publish")){item={...item,status:"active",version:2};return route.fulfill({json:item})}
+  if(path.endsWith("/withdraw")){item={...item,status:"withdrawn",version:3};return route.fulfill({json:item})}
+  item={...route.request().postDataJSON(),id:"a1",status:"draft",version:1,reminderVersion:1,acknowledged:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};return route.fulfill({json:item})
+ })
+ await page.goto("/admin/?tab=announcements")
+ await page.getByRole("button",{name:"新建公告",exact:true}).click()
+ await page.getByLabel("标题",{exact:true}).fill("夜间维护")
+ await page.getByLabel("正文",{exact:true}).fill("请提前安排充电。")
+ await page.getByRole("button",{name:"预览",exact:true}).click()
+ await expect(page.getByRole("dialog").getByText("请提前安排充电。")).toBeVisible()
+ await page.keyboard.press("Escape")
+ await page.getByRole("button",{name:"保存草稿",exact:true}).click()
+ await page.getByRole("button",{name:"发布已保存草稿"}).click()
+ await page.getByRole("dialog").getByRole("button",{name:"确认",exact:true}).click()
+ await page.getByRole("button",{name:"撤下",exact:true}).click()
+ await page.getByRole("dialog").getByRole("button",{name:"确认",exact:true}).click()
+ await expect(page.getByRole("button",{name:"复制为新草稿"})).toBeVisible()
+})
+
+
+test("slow auxiliary requests do not hold the main workspace",async({page})=>{
+ await mockApi(page,snapshot())
+ let release!:()=>void
+ const held = new Promise<void>(resolve=>{release=resolve})
+ await page.route("**/api/notifications",async route=>{await held;await route.fulfill({json:{items:[],unreadCount:0}})})
+ await page.route("**/api/watch-rules",async route=>{await held;await route.fulfill({json:[]})})
+ await page.goto("/dashboard/?pile=2601201412385560001")
+ await expect(page.getByRole("button",{name:"刷新状态",exact:true})).toBeEnabled()
+ await expect(page.getByRole("button",{name:"有空闲时提醒我",exact:true})).toBeDisabled()
+ release()
+ await expect(page.getByRole("button",{name:"有空闲时提醒我",exact:true})).toBeEnabled()
 })

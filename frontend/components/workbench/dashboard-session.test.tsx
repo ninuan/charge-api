@@ -52,6 +52,17 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 describe("dashboard session boundary", () => {
+  it("does not wait for pending auxiliary requests before enabling the workspace", async () => {
+    mocks.watch.mockReturnValue(new Promise(() => {}))
+    mocks.notices.mockReturnValue(new Promise(() => {}))
+    render(
+      <DashboardSession>
+        <Child />
+      </DashboardSession>
+    )
+    await screen.findByText("已准备好")
+    expect(mocks.connect).toHaveBeenCalledTimes(1)
+  })
   it("authorizes before loading personal resources and keeps SSE until unmount", async () => {
     const { unmount } = render(
       <DashboardSession>

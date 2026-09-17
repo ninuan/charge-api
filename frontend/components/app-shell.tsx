@@ -72,6 +72,7 @@ export type WorkbenchSection =
   | "settings"
   | "invites"
   | "audit"
+  | "announcements"
 export type WorkbenchSearchItem = {
   title: string
   description: string
@@ -200,6 +201,12 @@ export function AppShell({
           href: "/admin?tab=invites",
           label: "邀请注册",
           icon: KeyRoundIcon,
+        },
+        {
+          id: "announcements",
+          href: "/admin?tab=announcements",
+          label: "公告管理",
+          icon: ClipboardListIcon,
         },
         {
           id: "audit",

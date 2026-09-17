@@ -1,4 +1,8 @@
 const publicErrorMessages: Record<string, string> = {
+  ANNOUNCEMENT_CONFLICT: "公告已更新或状态已变化，请重新加载后操作。",
+  ANNOUNCEMENT_NOT_FOUND: "公告不存在、已撤下或当前不可操作。",
+  ANNOUNCEMENT_INVALID: "请检查公告内容、链接和有效时间。",
+  ANNOUNCEMENT_UNAVAILABLE: "公告暂时不可用，请稍后重试。",
   YYB_BINDING_BUSY: "平台连接正在更新，请稍后重试。",
   QR_SESSION_INVALID: "二维码会话已失效，请重新生成。",
   QR_SESSION_UNAVAILABLE: "暂时无法创建扫码会话，请稍后重试。",

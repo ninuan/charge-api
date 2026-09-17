@@ -29,6 +29,13 @@ import {
   WorkbenchLoading,
 } from "@/components/workbench/surfaces"
 
+const Announcements = dynamic(
+  () =>
+    import("@/components/admin-announcements").then(
+      (m) => m.AdminAnnouncements
+    ),
+  { ssr: false }
+)
 const loading = () => <WorkbenchLoading />
 const AdminOverview = dynamic(
   () =>
@@ -86,6 +93,7 @@ const pages = {
   operations: ["系统运行", "服务、提醒调度、消息投递与数据保存情况。"],
   settings: ["系统策略", "控制注册范围、远端访问频率与数据保留。"],
   invites: ["邀请注册", "创建并分享有效邀请码，管理可注册的范围。"],
+  announcements: ["公告管理", "发布消息，安排有效时间并管理提醒。"],
   audit: ["操作记录", "管理操作留下记录，重要变化有据可查。"],
 } as const
 type Tab = keyof typeof pages
@@ -257,6 +265,8 @@ function AdminContent() {
             <Operations />
           ) : tab === "settings" ? (
             <Policies />
+          ) : tab === "announcements" ? (
+            <Announcements />
           ) : tab === "invites" ? (
             <Invites />
           ) : (

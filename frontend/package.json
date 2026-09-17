@@ -1,20 +1,20 @@
 {
   "name": "next-app",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "build:static": "next build && rsync -a --delete out/ dist/",
-    "check:api": "openapi-typescript ../docs/openapi/charge-console-v1.5.3.yaml -o lib/api/generated.ts --root-types --root-types-no-schema-prefix --alphabetize --check",
+    "check:api": "openapi-typescript ../docs/openapi/charge-console-v1.5.4.yaml -o lib/api/generated.ts --root-types --root-types-no-schema-prefix --alphabetize --check",
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test --config playwright.workbench.config.ts",
     "test:watch": "vitest",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "generate:api": "openapi-typescript ../docs/openapi/charge-console-v1.5.3.yaml -o lib/api/generated.ts --root-types --root-types-no-schema-prefix --alphabetize",
+    "generate:api": "openapi-typescript ../docs/openapi/charge-console-v1.5.4.yaml -o lib/api/generated.ts --root-types --root-types-no-schema-prefix --alphabetize",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

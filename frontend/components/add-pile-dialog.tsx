@@ -2,8 +2,9 @@
 
 import { LoaderCircleIcon, PlusIcon, ServerCogIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { YybBindingFlow, type YybBinding } from "@/components/yyb-binding-flow"
-import { ManualCookieForm } from "@/components/manual-cookie-form"
+import dynamic from "next/dynamic"
+import type { YybBinding } from "@/components/yyb-binding-flow"
+
 import { requestJSON, RequestError } from "@/lib/http"
 import { useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
@@ -29,6 +30,16 @@ import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
 import { useDashboard } from "@/lib/dashboard-context"
 import type { Pile } from "@/lib/types"
+
+const YybBindingFlow = dynamic(
+  () => import("@/components/yyb-binding-flow").then((m) => m.YybBindingFlow),
+  { ssr: false, loading: () => <p role="status">正在打开绑定…</p> }
+)
+const ManualCookieForm = dynamic(
+  () =>
+    import("@/components/manual-cookie-form").then((m) => m.ManualCookieForm),
+  { ssr: false, loading: () => <p role="status">正在打开凭据表单…</p> }
+)
 
 export function AddPileDialog({
   onAdded,

@@ -8,6 +8,30 @@ describe("requestJSON", () => {
     vi.useRealTimers()
   })
 
+  it("shows a safe announcement conflict reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              code: "ANNOUNCEMENT_CONFLICT",
+              error: "private database details",
+            }),
+            { status: 409 }
+          )
+        )
+    )
+    await expect(
+      requestJSON(
+        "/api/announcements/one/acknowledge",
+        { method: "POST" },
+        "失败"
+      )
+    ).rejects.toThrow("公告已更新或状态已变化，请重新加载后操作。")
+  })
+
   it("sends credentialed requests without exposing a server error", async () => {
     const fetchMock = vi
       .fn()
@@ -36,17 +60,15 @@ describe("requestJSON", () => {
   it("shows an allowlisted business reason without trusting the server error text", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              code: "PILE_NUMBER_INVALID",
-              error: "dial internal-yyb:8443 with token=secret",
-            }),
-            { status: 400 }
-          )
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "PILE_NUMBER_INVALID",
+            error: "dial internal-yyb:8443 with token=secret",
+          }),
+          { status: 400 }
         )
+      )
     )
 
     await expect(
@@ -61,17 +83,15 @@ describe("requestJSON", () => {
   it("shows an allowlisted login reason even when the API uses 401", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              code: "AUTH_INVALID_CREDENTIALS",
-              error: "database user record mismatch",
-            }),
-            { status: 401 }
-          )
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "AUTH_INVALID_CREDENTIALS",
+            error: "database user record mismatch",
+          }),
+          { status: 401 }
         )
+      )
     )
 
     await expect(
@@ -91,7 +111,9 @@ describe("requestJSON", () => {
         (_path: string, init: RequestInit) =>
           new Promise((_resolve, reject) => {
             init.signal?.addEventListener("abort", () =>
-              reject(new DOMException("The operation was aborted.", "AbortError"))
+              reject(
+                new DOMException("The operation was aborted.", "AbortError")
+              )
             )
           })
       )
@@ -112,7 +134,9 @@ describe("requestJSON", () => {
         (_path: string, init: RequestInit) =>
           new Promise((resolve, reject) => {
             init.signal?.addEventListener("abort", () =>
-              reject(new DOMException("The operation was aborted.", "AbortError"))
+              reject(
+                new DOMException("The operation was aborted.", "AbortError")
+              )
             )
             setTimeout(
               () =>

@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 12
+const schemaVersion = 13
 
 type Store struct {
 	db     *sql.DB
@@ -398,6 +398,9 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := s.migrateSchemaV12(); err != nil {
+		return err
+	}
+	if err := s.ensureAnnouncements(); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(

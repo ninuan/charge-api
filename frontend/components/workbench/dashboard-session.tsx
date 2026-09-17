@@ -57,11 +57,11 @@ export function DashboardSession({ children }: { children: ReactNode }) {
         return
       }
       setAuthorized(true)
-      const [snapshotResult] = await Promise.allSettled([
-        fetchSnapshot(),
-        loadWatch(),
-        loadNotifications(),
-      ])
+      // Auxiliary panels own their loading/error states; they must not hold
+      // the pile workspace or its stream behind a slow notification request.
+      void loadWatch().catch(() => undefined)
+      void loadNotifications().catch(() => undefined)
+      const [snapshotResult] = await Promise.allSettled([fetchSnapshot()])
       if (current !== version.current) return
       if (snapshotResult.status === "rejected")
         setError(
