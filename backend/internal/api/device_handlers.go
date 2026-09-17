@@ -79,6 +79,10 @@ func (s *Server) recordDashboardDiagnostic(user model.CurrentUser, operation, co
 }
 
 func writeAddPileError(w http.ResponseWriter, err error) {
+	if errors.Is(err, yyb.ErrAccountRecoveryFailed) {
+		writeCodedError(w, http.StatusBadGateway, "YYB_RECOVERY_FAILED", "已保留平台绑定，登录状态暂时无法恢复，请稍后重试。")
+		return
+	}
 	if errors.Is(err, yyb.ErrAccountExpired) || errors.Is(err, yyb.ErrAccountUnknown) {
 		writeCodedError(w, http.StatusConflict, "YYB_RESCAN_REQUIRED", "平台登录需要重新确认，请重新扫码绑定。")
 		return

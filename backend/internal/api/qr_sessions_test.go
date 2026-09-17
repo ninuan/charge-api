@@ -114,7 +114,7 @@ func TestQRRegistryExpiryAndDuplicateOwnership(t *testing.T) {
 }
 
 func TestAddPileRescanErrorsAreSpecific(t *testing.T) {
-	for _, err := range []error{yyb.ErrAccountExpired, yyb.ErrAccountUnknown, errors.New("upstream unavailable")} {
+	for _, err := range []error{yyb.ErrAccountExpired, yyb.ErrAccountUnknown, yyb.ErrAccountRecoveryFailed, errors.New("upstream unavailable")} {
 		rec := httptest.NewRecorder()
 		writeAddPileError(rec, err)
 		needsScan := errors.Is(err, yyb.ErrAccountExpired) || errors.Is(err, yyb.ErrAccountUnknown)

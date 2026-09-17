@@ -536,6 +536,23 @@ for (const width of [320, 390, 768, 1440]) {
   })
 }
 
+for (const status of ["expired", "unknown"]) {
+  test(`saved binding with ${status} status can add without creating another QR`, async ({ page }) => {
+    const flow = await mockBindingFlow(page, snapshot(), true)
+    await page.route("**/api/session/yyb-binding", (route) =>
+      route.fulfill({ json: { bound: true, scanEnabled: true, status } })
+    )
+    await page.goto("/dashboard/")
+    await page.getByRole("button", { name: "添加充电桩", exact: true }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByLabel("桩号", { exact: true }).fill("61034279")
+    await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+    expect(flow.adds).toBe(1)
+    expect(flow.creates).toBe(0)
+  })
+}
+
 test("rescan after add failure preserves the draft and never replays the add", async ({
   page,
 }) => {

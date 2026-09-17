@@ -183,6 +183,7 @@ func TestRefreshAccountRequiresAliveStatus(t *testing.T) {
 		{"enveloped", `{"code":0,"data":{"status":"alive"}}`, nil},
 		{"expired", `{"status":"expired"}`, ErrAccountExpired},
 		{"unknown", `{"status":"unknown"}`, ErrAccountUnknown},
+		{"recoverable", `{"status":"recovery_failed"}`, ErrAccountRecoveryFailed},
 		{"missing", `{}`, ErrAccountRefreshResponse},
 		{"empty", ``, ErrAccountRefreshResponse},
 		{"invalid", `{"status":"secret-login-buffer"}`, ErrAccountRefreshResponse},

@@ -248,6 +248,10 @@ func (s *Server) handleMoceleCookie(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.manager.SyncCookieFromYYB(user.ID, req.DeviceID, s.yybClient, s.moceleClient)
 	if err != nil {
 		s.recordDashboardDiagnostic(user, "sync_cookie", "credential_sync_failed", req.DeviceID, appruntime.DiagnosticStatusCode(err))
+		if errors.Is(err, yyb.ErrAccountRecoveryFailed) {
+			writeCodedError(w, http.StatusBadGateway, "YYB_RECOVERY_FAILED", "已保留平台绑定，登录状态暂时无法恢复，请稍后重试。")
+			return
+		}
 		if errors.Is(err, yyb.ErrAccountExpired) || errors.Is(err, yyb.ErrAccountUnknown) {
 			writeCodedError(w, http.StatusBadGateway, "YYB_RESCAN_REQUIRED", "扫码服务未能恢复登录状态，请重新扫码绑定后再同步。")
 			return

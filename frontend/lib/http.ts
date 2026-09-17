@@ -1,4 +1,5 @@
 const publicErrorMessages: Record<string, string> = {
+  YYB_RECOVERY_FAILED: "已保留平台绑定，登录状态暂时无法恢复，请稍后重试。",
   ANNOUNCEMENT_CONFLICT: "公告已更新或状态已变化，请重新加载后操作。",
   ANNOUNCEMENT_NOT_FOUND: "公告不存在、已撤下或当前不可操作。",
   ANNOUNCEMENT_INVALID: "请检查公告内容、链接和有效时间。",

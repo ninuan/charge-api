@@ -164,6 +164,7 @@ func (c *Client) GetCode(ctx context.Context, ref string, appID string) (string,
 
 var ErrAccountExpired = errors.New("yyb account refresh returned expired; re-scan required")
 var ErrAccountUnknown = errors.New("yyb account refresh returned unknown; recovery credentials unavailable")
+var ErrAccountRecoveryFailed = errors.New("yyb account recovery failed; binding retained")
 var ErrAccountRefreshResponse = errors.New("yyb account refresh returned an invalid status")
 
 func (c *Client) RefreshAccount(ctx context.Context, ref string) error {
@@ -180,6 +181,8 @@ func (c *Client) RefreshAccount(ctx context.Context, ref string) error {
 		return ErrAccountExpired
 	case "unknown":
 		return ErrAccountUnknown
+	case "recovery_failed":
+		return ErrAccountRecoveryFailed
 	default:
 		return ErrAccountRefreshResponse
 	}

@@ -55,6 +55,7 @@ export function AddPileDialog({
   )
   const [binding, setBinding] = useState<YybBinding | null>(null)
   const [bindingRequired, setBindingRequired] = useState(false)
+  const [rescanRequired, setRescanRequired] = useState(false)
   const [error, setError] = useState("")
   const [retry, setRetry] = useState(0)
   const [manual, setManual] = useState(false)
@@ -70,11 +71,12 @@ export function AddPileDialog({
     )
       .then((next) => {
         if (controller.signal.aborted) return
-        const required =
-          next.scanEnabled === true &&
-          (!next.bound || ["expired", "unknown"].includes(next.status ?? ""))
+        // The cached recovery status does not tell us whether the current
+        // charging credential still works. Let the add endpoint verify it.
+        const required = next.scanEnabled === true && !next.bound
         setBinding(next)
         setBindingRequired(required)
+        setRescanRequired(false)
         setStep(required ? "binding" : "form")
         setError("")
       })
@@ -152,8 +154,10 @@ export function AddPileDialog({
         ["YYB_BINDING_REQUIRED", "YYB_RESCAN_REQUIRED"].includes(
           reason.code ?? ""
         )
-      )
+      ) {
         setBindingRequired(true)
+        setRescanRequired(reason.code === "YYB_RESCAN_REQUIRED")
+      }
     } finally {
       submitLock.current = false
       setSubmitting(false)
@@ -174,7 +178,11 @@ export function AddPileDialog({
         <DialogHeader className="pr-7">
           <DialogTitle className="flex items-center gap-2">
             <ServerCogIcon className="size-5" />
-            {step === "binding" ? "添加前，先绑定微信" : "添加充电桩"}
+            {step === "binding"
+              ? rescanRequired
+                ? "重新授权充电平台"
+                : "添加前，先绑定微信"
+              : "添加充电桩"}
           </DialogTitle>
           <DialogDescription>
             当前账户最多添加 {currentUser?.deviceLimit ?? 10}{" "}
@@ -183,9 +191,11 @@ export function AddPileDialog({
         </DialogHeader>
         {binding?.scanEnabled && (
           <p className="text-xs text-muted-foreground">
-            {bindingRequired
-              ? "1. 绑定微信 → 2. 添加充电桩"
-              : "1. 微信已连接 → 2. 添加充电桩"}
+            {rescanRequired
+              ? "平台登录已失效，需要重新扫码授权。"
+              : bindingRequired
+                ? "1. 绑定微信 → 2. 添加充电桩"
+                : "已保存平台绑定，添加时会验证登录状态。"}
           </p>
         )}
         {!online && (
@@ -220,6 +230,7 @@ export function AddPileDialog({
               onContinue={(next) => {
                 setBinding(next)
                 setBindingRequired(false)
+                setRescanRequired(false)
                 setError("")
                 setStep("form")
               }}
@@ -235,7 +246,11 @@ export function AddPileDialog({
             )}
             {bindingRequired && (
               <div className="space-y-2 border-b pb-4">
-                <p>添加前需要先完成微信绑定。</p>
+                <p>
+                  {rescanRequired
+                    ? "平台登录无法自动恢复，请重新扫码授权后继续添加。"
+                    : "添加前需要先完成微信绑定。"}
+                </p>
                 <Button disabled={!online} onClick={() => setStep("binding")}>
                   去绑定 / 重新扫码
                 </Button>

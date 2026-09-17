@@ -72,6 +72,9 @@ func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YY
 			if errors.Is(refreshErr, yyb.ErrAccountExpired) {
 				m.markYYBBindingExpired(userID, binding, err)
 			} else {
+				if errors.Is(refreshErr, yyb.ErrAccountRecoveryFailed) {
+					binding.Status = "recovery_failed"
+				}
 				m.markYYBBindingError(userID, binding, err)
 			}
 			return model.DashboardSnapshot{}, err

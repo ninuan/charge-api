@@ -1458,6 +1458,7 @@ func TestSyncCookieStopsAfterUnsuccessfulAccountRefresh(t *testing.T) {
 	}{
 		{"expired", yyb.ErrAccountExpired, "expired", "yyb_account_refresh_expired"},
 		{"unknown", yyb.ErrAccountUnknown, "alive", "yyb_account_refresh_unknown"},
+		{"recoverable", yyb.ErrAccountRecoveryFailed, "recovery_failed", "yyb_account_refresh_failed"},
 		{"network", errors.New("upstream temporarily unavailable"), "alive", "yyb_account_refresh_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1466,6 +1467,13 @@ func TestSyncCookieStopsAfterUnsuccessfulAccountRefresh(t *testing.T) {
 				t.Fatal(err)
 			}
 			client := &fakeYYBClient{errors: []error{errors.New("get code failed")}, refreshError: tc.cause}
+			if errors.Is(tc.cause, yyb.ErrAccountRecoveryFailed) {
+				binding, _ := manager.YYBBinding("user-1")
+				binding.Status = "expired"
+				if err := manager.SetYYBBinding("user-1", binding); err != nil {
+					t.Fatal(err)
+				}
+			}
 			mocele := &fakeMoceleClient{}
 			_, err := manager.SyncCookieFromYYB("user-1", "device-1", client, mocele)
 			if !errors.Is(err, tc.cause) {
