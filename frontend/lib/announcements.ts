@@ -8,7 +8,15 @@ export type {
 export const announcementRequest = <T>(
   path: string,
   init: Parameters<typeof requestJSON>[1] = {}
-) => requestJSON<T>(path, init, "公告暂时无法加载，请重试。")
+) => {
+  const headers = new Headers(init.headers)
+  if (init.body != null) headers.set("Content-Type", "application/json")
+  return requestJSON<T>(
+    path,
+    { ...init, headers },
+    "公告暂时无法加载，请重试。"
+  )
+}
 export const announcementDate = (value: string) =>
   new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",

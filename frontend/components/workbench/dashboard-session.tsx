@@ -59,9 +59,10 @@ export function DashboardSession({ children }: { children: ReactNode }) {
       setAuthorized(true)
       // Auxiliary panels own their loading/error states; they must not hold
       // the pile workspace or its stream behind a slow notification request.
+      const snapshotPending = Promise.allSettled([fetchSnapshot()])
       void loadWatch().catch(() => undefined)
       void loadNotifications().catch(() => undefined)
-      const [snapshotResult] = await Promise.allSettled([fetchSnapshot()])
+      const [snapshotResult] = await snapshotPending
       if (current !== version.current) return
       if (snapshotResult.status === "rejected")
         setError(
@@ -92,8 +93,12 @@ export function DashboardSession({ children }: { children: ReactNode }) {
     version.current += 1
   }, [])
   useEffect(() => {
-    void initialLoad.current()
+    let active = true
+    queueMicrotask(() => {
+      if (active) void initialLoad.current()
+    })
     return () => {
+      active = false
       invalidate()
       disconnectStream()
     }

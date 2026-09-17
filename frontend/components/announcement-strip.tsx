@@ -27,13 +27,16 @@ function UserAnnouncements() {
   const [summary, setSummary] = useState<AnnouncementSummary | null>(null)
   const [error, setError] = useState("")
   const operation = useRef<AbortController | null>(null),
-    last = useRef(0)
+    last = useRef(0),
+    boundary = useRef(Number.POSITIVE_INFINITY)
   const open = params.get("announcement")
   const load = useCallback(async (force = false) => {
     if (
       !navigator.onLine ||
       (!force && operation.current) ||
-      (!force && Date.now() - last.current < 60000)
+      (!force &&
+        Date.now() < boundary.current &&
+        Date.now() - last.current < 60000)
     )
       return
     // An acknowledgement must supersede a refresh that started before it.
@@ -47,6 +50,13 @@ function UserAnnouncements() {
         { signal: controller.signal }
       )
       if (!controller.signal.aborted) {
+        boundary.current = data.nextBoundary
+          ? Date.now() +
+            Math.max(
+              0,
+              Date.parse(data.nextBoundary) - Date.parse(data.serverNow)
+            )
+          : Number.POSITIVE_INFINITY
         setSummary(data)
         setError("")
       }

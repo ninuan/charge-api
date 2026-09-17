@@ -525,7 +525,7 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
         </Alert>
       ) : null}
       <Card>
-        <CardHeader>
+        <CardHeader className="wb-channel-header">
           <div className="flex min-w-0 gap-3">
             <LeadingIcon
               icon={MessageCircleIcon}
@@ -548,20 +548,12 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
           </div>
           <CardAction>
             {channel.bound ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConfirmUnbind(true)}
-              >
+              <Button variant="outline" onClick={() => setConfirmUnbind(true)}>
                 <UnlinkIcon data-icon="inline-start" />
                 解除绑定
               </Button>
             ) : (
-              <Button
-                size="sm"
-                disabled={binding}
-                onClick={() => void beginBinding()}
-              >
+              <Button disabled={binding} onClick={() => void beginBinding()}>
                 {binding ? (
                   <LoaderCircleIcon
                     data-icon="inline-start"

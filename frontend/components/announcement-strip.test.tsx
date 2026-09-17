@@ -41,7 +41,11 @@ beforeEach(() => {
   mocks.request.mockReset()
   mocks.user = { id: "one" }
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 it("confirmation supersedes an older in-flight summary", async () => {
   let resolveOld!: (value: typeof unread) => void
   let oldSignal: AbortSignal | undefined
@@ -80,4 +84,34 @@ it("switching accounts discards the previous account's summary request", async (
   await screen.findByText("暂无待确认公告")
   await act(async () => resolveOld(unread))
   expect(screen.queryByText("维护公告")).not.toBeInTheDocument()
+})
+
+it("refreshes an elapsed server boundary on foreground return within the throttle window", async () => {
+  vi.useFakeTimers()
+  const now = new Date("2026-09-17T00:00:00Z")
+  vi.setSystemTime(now)
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("hidden")
+  mocks.request
+    .mockResolvedValueOnce({
+      ...empty,
+      serverNow: now.toISOString(),
+      nextBoundary: new Date(+now + 10000).toISOString(),
+    })
+    .mockResolvedValue(unread)
+  await act(async () => {
+    render(<AnnouncementStrip />)
+  })
+  expect(mocks.request).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15000)
+  })
+  expect(mocks.request).toHaveBeenCalledTimes(1)
+  visibility.mockReturnValue("visible")
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"))
+  })
+  expect(mocks.request).toHaveBeenCalledTimes(2)
+  expect(screen.getByText("维护公告")).toBeInTheDocument()
 })

@@ -118,7 +118,11 @@ export function AccountSecurityPanel() {
                   onChange={(event) => setNewPassword(event.target.value)}
                 />
               </Field>
-              <Button className="w-full" type="submit" disabled={saving}>
+              <Button
+                className="wb-form-submit"
+                type="submit"
+                disabled={saving}
+              >
                 {saving && (
                   <LoaderCircleIcon className="motion-safe:animate-spin" />
                 )}
@@ -164,7 +168,7 @@ export function AccountSecurityPanel() {
             )}
           </div>
           <Button
-            className="mt-4 w-full"
+            className="wb-form-submit mt-4"
             variant="outline"
             onClick={() => void logoutOthers()}
           >

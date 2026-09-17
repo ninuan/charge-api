@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -304,4 +305,31 @@ describe("AuthForm", () => {
     await screen.findByLabelText("用户名")
     expect(screen.queryByLabelText("邀请码（选填）")).not.toBeInTheDocument()
   })
+})
+
+it("loads security config once during StrictMode initialization", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(JSON.stringify({ loginCaptchaEnabled: false }), {
+        status: 200,
+      })
+    )
+  vi.stubGlobal("fetch", fetchMock)
+  try {
+    render(
+      <StrictMode>
+        <AuthProvider>
+          <AuthForm mode="login" onSuccess={() => {}} />
+        </AuthProvider>
+      </StrictMode>
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "登录" })).toBeEnabled()
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  } finally {
+    cleanup()
+    vi.unstubAllGlobals()
+  }
 })

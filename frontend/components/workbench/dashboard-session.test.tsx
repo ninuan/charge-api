@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DashboardSession, useDashboardSession } from "./dashboard-session"
@@ -108,4 +109,22 @@ describe("dashboard session boundary", () => {
     )
     await screen.findByText("snapshot unavailable")
   })
+})
+
+it("starts one initialization under StrictMode and prioritizes the snapshot", async () => {
+  render(
+    <StrictMode>
+      <DashboardSession>
+        <Child />
+      </DashboardSession>
+    </StrictMode>
+  )
+  await screen.findByText("已准备好")
+  expect(mocks.snapshot).toHaveBeenCalledTimes(1)
+  expect(mocks.watch).toHaveBeenCalledTimes(1)
+  expect(mocks.notices).toHaveBeenCalledTimes(1)
+  expect(mocks.snapshot.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.watch.mock.invocationCallOrder[0]
+  )
+  expect(mocks.connect).toHaveBeenCalledTimes(1)
 })

@@ -186,18 +186,16 @@ export function BrowserNotificationSetting() {
 
   if (browserPermission === "default")
     return (
-      <Alert className={`${browserSettingLayout} pr-28`}>
+      <Alert className="wb-browser-notification">
         <LeadingIcon icon={BellIcon} className="bg-primary/10 text-primary" />
-        <AlertTitle>网页开着时提醒我</AlertTitle>
-        <AlertDescription>
-          只要此网页保持打开，就会弹出空闲口和账户异常提醒。
-        </AlertDescription>
-        <div className="absolute top-2 right-2">
-          <Button
-            size="sm"
-            disabled={pending}
-            onClick={() => void requestPermission()}
-          >
+        <div className="wb-browser-notification-copy">
+          <AlertTitle>网页开着时提醒我</AlertTitle>
+          <AlertDescription>
+            只要此网页保持打开，就会弹出空闲口和账户异常提醒。
+          </AlertDescription>
+        </div>
+        <div className="wb-browser-notification-action">
+          <Button disabled={pending} onClick={() => void requestPermission()}>
             {pending ? (
               <LoaderCircleIcon className="motion-safe:animate-spin" />
             ) : null}

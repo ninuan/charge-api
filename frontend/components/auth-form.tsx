@@ -104,7 +104,13 @@ export function AuthForm({
   )
 
   useEffect(() => {
-    void loadConfig()
+    let active = true
+    queueMicrotask(() => {
+      if (active) void loadConfig()
+    })
+    return () => {
+      active = false
+    }
   }, [loadConfig])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -251,11 +257,12 @@ export function AuthForm({
               className="pr-11"
             />
             <Button
-              className="absolute top-1/2 right-1 -translate-y-1/2"
+              className="absolute inset-y-0 right-1 my-auto active:not-aria-[haspopup]:translate-y-0"
               type="button"
               variant="ghost"
               size="icon-sm"
               aria-label={showPassword ? "隐藏密码" : "显示密码"}
+              aria-pressed={showPassword}
               onClick={() => setShowPassword((value) => !value)}
             >
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}

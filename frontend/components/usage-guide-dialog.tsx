@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react"
 import { notify } from "@/lib/feedback"
 
 import { useCloseAppShellMenu } from "@/components/app-shell"
-import { Button } from "@/components/ui/button"
+import { WorkbenchButton as Button } from "@/components/workbench/surfaces"
 import {
   Dialog,
   DialogContent,

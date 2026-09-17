@@ -189,7 +189,7 @@ export function QuietHoursForm({
             />
           </Field>
         </FieldGroup>
-        <Button type="submit" disabled={saving}>
+        <Button className="wb-form-submit" type="submit" disabled={saving}>
           {saving ? (
             <LoaderCircleIcon
               data-icon="inline-start"

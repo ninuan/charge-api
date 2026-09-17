@@ -648,6 +648,8 @@ for (const width of [320, 390, 768, 1440]) {
     await mockApi(page,snapshot())
     const item = { id:"notice-1",title:"充电服务维护安排",body:"周五夜间维护，请提前安排。",level:"normal",status:"active",startAt:"2026-09-16T01:00:00Z",endAt:null,version:1,reminderVersion:1,acknowledged:false,createdAt:"2026-09-16T01:00:00Z",updatedAt:"2026-09-16T01:00:00Z" }
     await page.route("**/api/announcements**",route=>{
+      if (route.request().method() !== "GET" && route.request().headers()["content-type"] !== "application/json") return route.fulfill({status:415,json:{error:"content type must be application/json"}})
+
       const path = new URL(route.request().url()).pathname
       if(path.endsWith("/summary"))return route.fulfill({json:{item:item.level==="important"||!item.acknowledged?{...item,body:undefined}:null,unreadCount:item.acknowledged?0:1,serverNow:new Date().toISOString(),nextBoundary:null}})
       if(path.endsWith("/acknowledge")){item.acknowledged=true;return route.fulfill({json:{ok:true}})}
@@ -697,6 +699,8 @@ test("administrator creates, previews, publishes and withdraws announcements",as
  await page.route("**/api/auth/me",route=>route.fulfill({json:{id:"admin",username:"admin",role:"admin",enabled:true}}))
  let item:Record<string,unknown>|null=null
  await page.route("**/api/admin/announcements**",route=>{
+      if (route.request().method() !== "GET" && route.request().headers()["content-type"] !== "application/json") return route.fulfill({status:415,json:{error:"content type must be application/json"}})
+
   const path=new URL(route.request().url()).pathname,method=route.request().method()
   if(method==="GET")return route.fulfill({json:path.endsWith("/a1")?item:{items:item?[item]:[],total:item?1:0,page:1}})
   if(path.endsWith("/publish")){item={...item,status:"active",version:2};return route.fulfill({json:item})}
@@ -731,3 +735,139 @@ test("slow auxiliary requests do not hold the main workspace",async({page})=>{
  release()
  await expect(page.getByRole("button",{name:"有空闲时提醒我",exact:true})).toBeEnabled()
 })
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`workspace actions and inline logout remain aligned at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockApi(page, snapshot())
+    await page.goto("/dashboard/")
+    const refresh = page.getByRole("button", { name: "刷新状态", exact: true })
+    const add = page.getByRole("button", { name: "添加充电桩", exact: true })
+    await expect(refresh).toBeEnabled()
+    const refreshBox = await refresh.boundingBox()
+    const addBox = await add.boundingBox()
+    expect(refreshBox).not.toBeNull()
+    expect(addBox).not.toBeNull()
+    expect(Math.abs(refreshBox!.height - addBox!.height)).toBeLessThan(1)
+    expect(Math.abs(refreshBox!.y - addBox!.y)).toBeLessThan(1)
+    if (width < 761) {
+      expect(refreshBox!.height).toBeGreaterThanOrEqual(44)
+      expect(Math.abs(refreshBox!.width - addBox!.width)).toBeLessThan(1)
+    }
+    expect(await refresh.evaluate(e => getComputedStyle(e).fontSize)).toBe(
+      await add.evaluate(e => getComputedStyle(e).fontSize)
+    )
+    await page.screenshot({ path: `/tmp/charge-actions-${width}.png`, fullPage: true })
+    await page.goto("/account/?tab=appearance")
+    const logout = page.getByRole("button", { name: "退出登录", exact: true })
+    await expect(logout).toBeVisible()
+    const profile = page.locator(".wb-profile-line")
+    await expect(profile.getByRole("button", { name: "退出登录", exact: true })).toBeVisible()
+    const profileBox = await profile.boundingBox()
+    const logoutBox = await logout.boundingBox()
+    expect(logoutBox!.y).toBeGreaterThanOrEqual(profileBox!.y)
+    expect(logoutBox!.y + logoutBox!.height).toBeLessThanOrEqual(profileBox!.y + profileBox!.height)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: `/tmp/charge-profile-${width}.png`, fullPage: true })
+    await logout.click()
+    await expect(page.getByRole("dialog", { name: "退出当前账户？" })).toBeVisible()
+    await page.getByRole("button", { name: "取消", exact: true }).click()
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(logout).toBeFocused()
+  })
+}
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`notification actions follow content flow at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockApi(page, snapshot())
+    await page.addInitScript(() => {
+      Object.defineProperty(Notification, "permission", { configurable: true, get: () => "default" })
+    })
+    await page.route("**/api/notification-channels/wxpusher", route => route.fulfill({ json: {
+      configured: true, bound: false, enabled: false, eventTypes: [],
+    } }))
+    await page.goto("/account/?tab=notifications")
+    const allow = page.getByRole("button", { name: "允许通知", exact: true })
+    const qr = page.getByRole("button", { name: "获取二维码", exact: true })
+    await expect(allow).toBeVisible()
+    await expect(qr).toBeVisible()
+    if (width === 390) await page.getByRole("button", { name: "切换到深色模式" }).click()
+    const allowBox = (await allow.boundingBox())!
+    const qrBox = (await qr.boundingBox())!
+    const panel = (await page.locator(".wb-browser-notification").boundingBox())!
+    const copy = (await page.locator(".wb-browser-notification-copy").boundingBox())!
+    expect(allowBox.height).toBe(width <= 760 ? 44 : 35)
+    expect(qrBox.height).toBe(allowBox.height)
+    expect(await allow.evaluate(e => getComputedStyle(e).fontSize)).toBe(await qr.evaluate(e => getComputedStyle(e).fontSize))
+    expect(allowBox.x).toBeGreaterThan(panel.x)
+    expect(allowBox.x + allowBox.width).toBeLessThan(panel.x + panel.width)
+    if (width <= 760) {
+      expect(allowBox.y).toBeGreaterThanOrEqual(copy.y + copy.height)
+    } else {
+      expect(Math.abs(allowBox.y + allowBox.height / 2 - panel.y - panel.height / 2)).toBeLessThan(2)
+      expect(Math.abs(allowBox.x + allowBox.width - qrBox.x - qrBox.width)).toBeLessThan(2)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await allow.focus()
+    await expect(allow).toBeFocused()
+    await page.screenshot({ path: `/tmp/charge-notification-actions-${width}.png`, fullPage: true })
+  })
+}
+
+for (const width of [320, 1440]) {
+  test(`administrator invite dialog keeps actions inside at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockApi(page, snapshot())
+    await page.route("**/api/auth/me", route => route.fulfill({ json: { id: "admin", username: "admin", role: "admin", enabled: true } }))
+    await page.route("**/api/admin/invites**", route => route.fulfill({ json: { items: [], total: 0, page: 1, pageSize: 20 } }))
+    await page.goto("/admin/?tab=invites")
+    await page.getByRole("button", { name: "创建邀请码", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "创建邀请码" })
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel("到期时间（本地时间）").fill("2027-01-01T12:00")
+    expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true)
+    const heights = await dialog.locator('button[data-ui-size="default"]').evaluateAll(es => es.map(e => parseFloat(getComputedStyle(e).height)))
+    expect(heights).toEqual([width === 320 ? 44 : 35, width === 320 ? 44 : 35])
+    await dialog.getByRole("button", { name: "取消", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  })
+}
+
+for (const mode of ["login", "register"]) {
+  for (const width of [320, 390, 1440]) {
+    test(`${mode} password toggle stays inside the field while pressed at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      let submissions = 0
+      await page.route("**/api/auth/**", route => {
+        if (route.request().method() === "POST") submissions++
+        return route.fulfill({ json: { registrationOpen: true, loginCaptchaEnabled: false, registerCaptchaEnabled: false } })
+      })
+      await page.goto(`/${mode}/`)
+      const input = page.getByLabel("密码", { exact: true })
+      await input.fill("layout-test-password")
+      const eye = page.getByRole("button", { name: "显示密码", exact: true })
+      await expect(eye).toBeVisible()
+      const before = (await eye.boundingBox())!
+      await eye.hover()
+      await page.mouse.down()
+      await eye.evaluate(async element => {
+        await new Promise(requestAnimationFrame)
+        await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {})))
+      })
+      await expect.poll(async () => {
+        const button = (await eye.boundingBox())!
+        const field = (await input.boundingBox())!
+        return button.y >= field.y - 1 && button.y + button.height <= field.y + field.height + 1 && Math.abs(button.y - before.y) <= 1
+      }).toBe(true)
+      await page.mouse.up()
+      await expect(input).toHaveAttribute("type", "text")
+      await expect(input).toHaveValue("layout-test-password")
+      const hide = page.getByRole("button", { name: "隐藏密码", exact: true })
+      await hide.focus()
+      await page.keyboard.press("Space")
+      await expect(input).toHaveAttribute("type", "password")
+      expect(submissions).toBe(0)
+    })
+  }
+}

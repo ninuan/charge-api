@@ -363,6 +363,8 @@ export function AdminAnnouncements() {
                         if (lock.current) return
                         lock.current = true
                         setBusy(true)
+                        setError("")
+                        const current = epoch.current
                         try {
                           const times = blank()
                           const result =
@@ -382,9 +384,12 @@ export function AdminAnnouncements() {
                                 }),
                               }
                             )
-                          navigate(result.id)
+                          if (current === epoch.current) navigate(result.id)
                         } catch (e) {
-                          setError(e instanceof Error ? e.message : "复制失败")
+                          if (current === epoch.current)
+                            setError(
+                              e instanceof Error ? e.message : "复制失败"
+                            )
                         } finally {
                           lock.current = false
                           setBusy(false)

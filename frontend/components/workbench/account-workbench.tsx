@@ -134,7 +134,7 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
           <span className="wb-avatar wb-avatar-large">
             {currentUser?.username.slice(0, 1).toUpperCase()}
           </span>
-          <div>
+          <div className="wb-profile-identity">
             <h2>{currentUser?.username}</h2>
             <p>
               {admin ? "管理员" : "个人账户"} ·{" "}
@@ -145,8 +145,8 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
             <ShieldCheckIcon size={12} />
             独立账户
           </StatusPill>
+          <AccountLogout />
         </div>
-        <AccountLogout />
         <nav
           className="wb-section-tabs wb-account-tabs"
           aria-label="账户设置分类"
