@@ -91,4 +91,20 @@ dev_stop_groups() {
     [[ -n "$pid" ]] || continue
     kill -KILL -- "-$pid" 2>/dev/null || true
   done
+  # Reap direct children so zombies do not keep the process group alive, then
+  # wait briefly for asynchronous SIGKILL delivery and kernel reaping of any
+  # reparented descendants.
+  for pid in "$@"; do
+    [[ -n "$pid" ]] || continue
+    wait "$pid" 2>/dev/null || true
+  done
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    alive=false
+    for pid in "$@"; do
+      [[ -n "$pid" ]] || continue
+      if kill -0 -- "-$pid" 2>/dev/null; then alive=true; fi
+    done
+    $alive || return 0
+    sleep 0.1
+  done
 }
