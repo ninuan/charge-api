@@ -167,13 +167,15 @@ test("mobile selection, browser back and search preserve the list flow", async (
   await mockApi(page, snapshot())
   await page.goto("/dashboard/")
   await page.getByRole("button", { name: "查看 北门车棚" }).click()
+  const detail = page.getByRole("article", { name: "充电桩详情" })
+  await expect(detail).toBeVisible()
   await expect(
-    page.getByRole("button", { name: "1 号充电口，空闲", exact: true })
+    detail.getByRole("button", { name: "1 号充电口，空闲", exact: true })
   ).toBeVisible()
-  await page
+  await detail
     .getByRole("button", { name: "1 号充电口，空闲", exact: true })
     .click()
-  await expect(page.getByRole("region", { name: "1 号口详情" })).toBeVisible()
+  await expect(detail.getByRole("region", { name: "1 号口详情" })).toBeVisible()
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth
@@ -185,8 +187,9 @@ test("mobile selection, browser back and search preserve the list flow", async (
     fullPage: true,
   })
   await page.goBack()
-  await expect(page.getByRole("region", { name: "1 号口详情" })).toHaveCount(0)
-  await page.getByRole("button", { name: "常用充电桩", exact: true }).click()
+  await expect(detail.getByRole("region", { name: "1 号口详情" })).toHaveCount(0)
+  await detail.getByRole("button", { name: "常用充电桩", exact: true }).click()
+  await expect(detail).toHaveCount(0)
   await page
     .getByRole("textbox", { name: "搜索充电桩", exact: true })
     .fill("不存在")

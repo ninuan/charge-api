@@ -582,6 +582,7 @@ function WorkbenchContent() {
           <div
             className="wb-station-grid"
             aria-hidden={Boolean(selectedId) || undefined}
+            inert={Boolean(selectedId) || undefined}
           >
             {entries.map(({ pile }) => {
               const count = portCounts(pile)
