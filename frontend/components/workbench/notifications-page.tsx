@@ -163,6 +163,9 @@ function NotificationsContent() {
           ? `${unreadCount} 条未读。空闲消息和需要处理的事情，都在这里。`
           : "空闲消息与需要处理的事情，都在这里。"
       }
+      narrow
+      backHref="/dashboard"
+      backLabel="返回常用充电桩"
       actions={
         <>
           <WorkbenchButton
@@ -185,13 +188,15 @@ function NotificationsContent() {
         </>
       }
     >
-      <div className="wb-standard-page">
-        <div className="wb-page-rule">
-          <div className="wb-section-tabs">
+      <div className="wb-standard-page wb-notifications-page">
+        <div className="wb-canvas-ribbon">
+          <div className="wb-seg-rail" role="group" aria-label="筛选通知">
             {filters.map(([value, label]) => (
               <button
-                aria-pressed={status === value}
                 key={value}
+                type="button"
+                className={`wb-seg-btn ${status === value ? "wb-seg-active" : ""}`}
+                aria-pressed={status === value}
                 onClick={() =>
                   updatePageQuery({
                     status: value === "all" ? null : value,
@@ -199,21 +204,23 @@ function NotificationsContent() {
                   })
                 }
               >
-                {label}
+                <span>{label}</span>
                 {value === "unread" && !!unreadCount && (
-                  <span>{unreadCount}</span>
+                  <span className="wb-seg-cnt">{unreadCount}</span>
                 )}
               </button>
             ))}
           </div>
-          <WorkbenchSearch
-            label="搜索通知"
-            placeholder="搜索已加载的通知"
-            value={query}
-            onChange={(value) =>
-              updatePageQuery({ q: value, notice: null }, true)
-            }
-          />
+          <div className="wb-ribbon-right">
+            <WorkbenchSearch
+              label="搜索通知"
+              placeholder="搜索已加载的通知"
+              value={query}
+              onChange={(value) =>
+                updatePageQuery({ q: value, notice: null }, true)
+              }
+            />
+          </div>
         </div>
         {selected ? (
           <section className="wb-notice-detail">

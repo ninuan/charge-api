@@ -24,29 +24,20 @@ export function AppearanceSettings() {
         title="界面外观"
         description="选择适合当前环境的显示模式，设置保存在当前浏览器。"
       />
-      <div className="wb-theme-options">
+      <div className="wb-theme-tiles">
         {modes.map(({ value, label, aria, icon: Icon }) => (
           <button
             key={value}
+            type="button"
+            className={`wb-theme-tile ${theme === value ? "wb-theme-tile-active" : ""}`}
             aria-label={aria}
             aria-pressed={theme === value}
             onClick={() => setTheme(value)}
           >
-            <span
-              className={`wb-theme-sample wb-sample-${value}`}
-              aria-hidden="true"
-            >
-              <i />
-              <span>
-                <b />
-                <b />
-                <b />
-              </span>
-            </span>
-            <span>
-              <Icon size={16} />
+            <Icon size={18} strokeWidth={1.75} />
+            <span className="wb-theme-tile-label">
               {label}
-              {theme === value && <CheckIcon size={15} />}
+              {theme === value && <CheckIcon size={14} />}
             </span>
           </button>
         ))}

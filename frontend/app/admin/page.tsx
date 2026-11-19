@@ -2,6 +2,7 @@
 
 import { PlusIcon, RefreshCwIcon } from "lucide-react"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { AppShell, type WorkbenchSection } from "@/components/app-shell"
@@ -97,6 +98,45 @@ const pages = {
   audit: ["操作记录", "管理操作留下记录，重要变化有据可查。"],
 } as const
 type Tab = keyof typeof pages
+
+type AdminDomain = {
+  id: "duty" | "people" | "system"
+  label: string
+  defaultTab: Tab
+  tabs: readonly { id: Tab; label: string; href: string }[]
+}
+
+const ADMIN_DOMAINS: readonly AdminDomain[] = [
+  {
+    id: "duty",
+    label: "值守中心",
+    defaultTab: "overview",
+    tabs: [
+      { id: "overview", label: "运行概览", href: "/admin" },
+      { id: "incidents", label: "异常处理", href: "/admin?tab=incidents" },
+    ],
+  },
+  {
+    id: "people",
+    label: "用户与公告",
+    defaultTab: "users",
+    tabs: [
+      { id: "users", label: "用户", href: "/admin?tab=users" },
+      { id: "announcements", label: "公告管理", href: "/admin?tab=announcements" },
+    ],
+  },
+  {
+    id: "system",
+    label: "系统与合规",
+    defaultTab: "operations",
+    tabs: [
+      { id: "operations", label: "系统运行", href: "/admin?tab=operations" },
+      { id: "settings", label: "系统策略", href: "/admin?tab=settings" },
+      { id: "invites", label: "邀请注册", href: "/admin?tab=invites" },
+      { id: "audit", label: "操作记录", href: "/admin?tab=audit" },
+    ],
+  },
+] as const
 export default function AdminPage() {
   return (
     <Suspense fallback={<WorkbenchLoading />}>
@@ -210,6 +250,11 @@ function AdminContent() {
     router.push(
       `/admin?tab=users&user=${encodeURIComponent(id)}&section=diagnostics`
     )
+  const activeDomain =
+    ADMIN_DOMAINS.find((domain) =>
+      domain.tabs.some((item) => item.id === tab)
+    ) ?? ADMIN_DOMAINS[0]
+
   return (
     <AppShell
       title={pages[tab][0]}
@@ -240,7 +285,46 @@ function AdminContent() {
         </>
       }
     >
-      <div className="wb-standard-page">
+      <div className="wb-standard-page wb-admin-page">
+        <nav className="wb-admin-studio-bar" aria-label="管理工作区分区">
+          <div
+            className="wb-seg-rail"
+            role="group"
+            aria-label={`${activeDomain.label}视图`}
+          >
+            {activeDomain.tabs.map((item) => (
+              <Link
+                key={item.id}
+                href={item.href}
+                className={`wb-seg-btn ${tab === item.id ? "wb-seg-active" : ""}`}
+                aria-current={tab === item.id ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+          <div className="wb-admin-domain-pills" aria-label="快速切换管理域">
+            {ADMIN_DOMAINS.map((domain) => {
+              const selectedDomain = domain.id === activeDomain.id
+              const href =
+                domain.defaultTab === "overview"
+                  ? "/admin"
+                  : `/admin?tab=${domain.defaultTab}`
+              return (
+                <Link
+                  key={domain.id}
+                  href={href}
+                  className={`wb-admin-subtab ${
+                    selectedDomain ? "wb-admin-subtab-active" : ""
+                  }`}
+                >
+                  {domain.label}
+                </Link>
+              )
+            })}
+          </div>
+        </nav>
+
         {(tab === "overview" || tab === "operations") && (
           <div className="wb-admin-healthline">
             <AdminHealthStatus

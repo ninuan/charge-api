@@ -5,15 +5,24 @@ import { UsageGuideDialog } from "@/components/usage-guide-dialog"
 import { useDashboard } from "@/lib/dashboard-context"
 import { useWatch } from "@/lib/watch-context"
 import { useNotifications } from "@/lib/notification-context"
+import { useOnline } from "@/lib/browser-state"
 import { dashboardHref } from "@/lib/workbench"
 
 export function UserWorkbenchShell(props: ComponentProps<typeof AppShell>) {
-  const { snapshot } = useDashboard(),
+  const { snapshot, streamState } = useDashboard(),
     { rules } = useWatch(),
-    { unreadCount } = useNotifications()
+    { unreadCount } = useNotifications(),
+    online = useOnline()
   return (
     <AppShell
       {...props}
+      connectionState={
+        !online
+          ? "offline"
+          : streamState === "error"
+            ? "reconnecting"
+            : "connected"
+      }
       counts={{
         reminders: rules.filter(
           (rule) =>
@@ -26,7 +35,7 @@ export function UserWorkbenchShell(props: ComponentProps<typeof AppShell>) {
         description: `${pile.number} · ${pile.address}`,
         href: dashboardHref(pile.id),
       }))}
-      guideAction={<UsageGuideDialog />}
+      guideAction={<UsageGuideDialog compact />}
     />
   )
 }

@@ -45,17 +45,44 @@ export function WorkbenchButton({
   )
 }
 
+export function PulseDot({
+  tone = "idle",
+  pulse = false,
+}: {
+  tone?: "idle" | "busy" | "brand" | "warning" | "danger" | "offline"
+  pulse?: boolean
+}) {
+  return (
+    <span className={`wb-pulse-dot wb-pulse-${tone}`} aria-hidden="true">
+      {pulse && <span className="wb-pulse-wave" />}
+      <span className="wb-pulse-core" />
+    </span>
+  )
+}
+
 export function StatusPill({
   children,
   tone = "neutral",
+  pulse = false,
 }: {
   children: ReactNode
   tone?:
-    "neutral" | "idle" | "busy" | "offline" | "warning" | "danger" | "brand"
+    | "neutral"
+    | "idle"
+    | "busy"
+    | "offline"
+    | "warning"
+    | "danger"
+    | "brand"
+  pulse?: boolean
 }) {
   return (
     <span className={`wb-badge wb-tone-${tone}`}>
-      <i className="wb-dot" aria-hidden="true" />
+      {pulse && tone !== "neutral" ? (
+        <PulseDot tone={tone} pulse />
+      ) : (
+        <i className="wb-dot" aria-hidden="true" />
+      )}
       {children}
     </span>
   )
@@ -66,11 +93,13 @@ export function WorkbenchSearch({
   onChange,
   label = "搜索充电桩",
   placeholder = "名称、位置、桩号或口号",
+  shortcut,
 }: {
   value: string
   onChange: (value: string) => void
   label?: string
   placeholder?: string
+  shortcut?: string
 }) {
   return (
     <div className="wb-search-field">
@@ -82,7 +111,7 @@ export function WorkbenchSearch({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
-      {value && (
+      {value ? (
         <button
           type="button"
           aria-label="清除搜索"
@@ -90,7 +119,11 @@ export function WorkbenchSearch({
         >
           <XIcon size={14} />
         </button>
-      )}
+      ) : shortcut ? (
+        <kbd className="wb-search-kbd" aria-hidden="true">
+          {shortcut}
+        </kbd>
+      ) : null}
     </div>
   )
 }
@@ -117,6 +150,37 @@ export function WorkbenchEmpty({
       <p>{description}</p>
       {action}
     </section>
+  )
+}
+
+export function StationSkeletonGrid({
+  count = 4,
+  label = "正在读取充电桩",
+}: {
+  count?: number
+  label?: string
+}) {
+  return (
+    <div className="wb-station-grid" role="status" aria-label={label}>
+      {Array.from({ length: count }, (_, idx) => (
+        <div key={idx} className="wb-station-card wb-skeleton-card">
+          <div className="wb-skel-head">
+            <Skeleton className="h-4 w-32 rounded-md" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-44 rounded-md" />
+          <div className="wb-skel-bay">
+            {[0, 1, 2, 3, 4].map((j) => (
+              <Skeleton key={j} className="h-12 w-full rounded-lg" />
+            ))}
+          </div>
+          <div className="wb-skel-foot">
+            <Skeleton className="h-3.5 w-28 rounded-md" />
+            <Skeleton className="h-3.5 w-16 rounded-md" />
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 

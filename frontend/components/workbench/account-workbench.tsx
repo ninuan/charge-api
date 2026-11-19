@@ -128,6 +128,9 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
       title="账户与设置"
       activeSection="account"
       description="管理连接、接收方式和你的使用习惯。"
+      narrow
+      backHref={admin ? "/admin" : "/dashboard"}
+      backLabel={admin ? "返回管理工作区" : "返回常用充电桩"}
     >
       <div className="wb-standard-page wb-account-page">
         <div className="wb-profile-line">
@@ -135,25 +138,29 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
             {currentUser?.username.slice(0, 1).toUpperCase()}
           </span>
           <div className="wb-profile-identity">
-            <h2>{currentUser?.username}</h2>
+            <div className="wb-profile-title-row">
+              <h2>{currentUser?.username}</h2>
+              <StatusPill tone="idle">
+                <ShieldCheckIcon size={12} />
+                独立账户
+              </StatusPill>
+            </div>
             <p>
               {admin ? "管理员" : "个人账户"} ·{" "}
               {currentUser?.enabled ? "账户已启用" : "账户状态需确认"}
             </p>
           </div>
-          <StatusPill>
-            <ShieldCheckIcon size={12} />
-            独立账户
-          </StatusPill>
           <AccountLogout />
         </div>
         <nav
-          className="wb-section-tabs wb-account-tabs"
+          className="wb-seg-rail wb-account-seg"
           aria-label="账户设置分类"
         >
           {tabs.map(([value, label]) => (
             <button
               key={value}
+              type="button"
+              className={`wb-seg-btn ${tab === value ? "wb-seg-active" : ""}`}
               aria-current={tab === value ? "page" : undefined}
               aria-pressed={tab === value}
               onClick={() => updatePageQuery({ tab: value, connect: null })}
@@ -350,69 +357,71 @@ function PlatformConnection() {
           )}
         </>
       )}
-      <div className="wb-setting-row">
-        <div>
-          <h3>自动恢复登录</h3>
-          <p>已绑定微信时，凭据过期会尝试恢复；仍未成功时再提醒你。</p>
-        </div>
-        <span className="wb-small wb-muted">
-          {binding?.bound ? "已具备恢复条件" : "绑定后可用"}
-        </span>
-      </div>
-      <div className="wb-setting-row">
-        <div>
-          <h3>手动同步凭据</h3>
-          <p>
-            {snapshot.piles.length
-              ? "使用当前已绑定账户，重新获取访问凭据。"
-              : "添加一台充电桩后才能同步设备访问凭据。"}
-          </p>
-        </div>
-        <WorkbenchButton
-          variant="outline"
-          busy={pending}
-          disabled={!online || !binding?.bound || !snapshot.piles.length}
-          onClick={() => void sync()}
-        >
-          <RefreshCwIcon size={15} />
-          同步一次
-        </WorkbenchButton>
-      </div>
-      <div className="wb-setting-row">
-        <div>
-          <h3>手动更新 Cookie</h3>
-          <p>未部署扫码服务时，也可以手动更新你有权使用的访问凭据。</p>
-        </div>
-        <WorkbenchButton
-          variant="ghost"
-          disabled={!online}
-          onClick={() => {
-            setFormError("")
-            setCookieOpen(true)
-          }}
-        >
-          手动更新
-          <ArrowRightIcon size={14} />
-        </WorkbenchButton>
-      </div>
-      {binding?.bound && (
+      <div className="wb-grouped-list">
         <div className="wb-setting-row">
           <div>
-            <h3>解除平台绑定</h3>
-            <p>停止使用当前扫码绑定，不移除常用桩与已有通知。</p>
+            <h3>自动恢复登录</h3>
+            <p>已绑定微信时，凭据过期会尝试恢复；仍未成功时再提醒你。</p>
+          </div>
+          <span className="wb-small wb-muted">
+            {binding?.bound ? "已具备恢复条件" : "绑定后可用"}
+          </span>
+        </div>
+        <div className="wb-setting-row">
+          <div>
+            <h3>手动同步凭据</h3>
+            <p>
+              {snapshot.piles.length
+                ? "使用当前已绑定账户，重新获取访问凭据。"
+                : "添加一台充电桩后才能同步设备访问凭据。"}
+            </p>
+          </div>
+          <WorkbenchButton
+            variant="outline"
+            busy={pending}
+            disabled={!online || !binding?.bound || !snapshot.piles.length}
+            onClick={() => void sync()}
+          >
+            <RefreshCwIcon size={15} />
+            同步一次
+          </WorkbenchButton>
+        </div>
+        <div className="wb-setting-row">
+          <div>
+            <h3>手动更新 Cookie</h3>
+            <p>未部署扫码服务时，也可以手动更新你有权使用的访问凭据。</p>
           </div>
           <WorkbenchButton
             variant="ghost"
             disabled={!online}
             onClick={() => {
               setFormError("")
-              setUnlinkOpen(true)
+              setCookieOpen(true)
             }}
           >
-            解除绑定
+            手动更新
+            <ArrowRightIcon size={14} />
           </WorkbenchButton>
         </div>
-      )}
+        {binding?.bound && (
+          <div className="wb-setting-row">
+            <div>
+              <h3>解除平台绑定</h3>
+              <p>停止使用当前扫码绑定，不移除常用桩与已有通知。</p>
+            </div>
+            <WorkbenchButton
+              variant="ghost"
+              disabled={!online}
+              onClick={() => {
+                setFormError("")
+                setUnlinkOpen(true)
+              }}
+            >
+              解除绑定
+            </WorkbenchButton>
+          </div>
+        )}
+      </div>
       <div className="wb-settings-note">
         <ShieldCheckIcon size={17} />
         <p>访问凭据只提交到当前服务，不在页面上回显。请勿公开或分享 Cookie。</p>

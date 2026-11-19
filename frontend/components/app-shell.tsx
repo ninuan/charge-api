@@ -2,14 +2,16 @@
 
 import {
   ActivityIcon,
+  ArrowLeftIcon,
   ArrowRightIcon,
   BellIcon,
-  BookOpenIcon,
+  BellRingIcon,
   ChevronRightIcon,
   ClipboardListIcon,
   CommandIcon,
   InboxIcon,
   KeyRoundIcon,
+  MegaphoneIcon,
   MenuIcon,
   PlugZapIcon,
   SearchIcon,
@@ -50,7 +52,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Brand } from "@/components/workbench/brand"
-import { WorkbenchButton } from "@/components/workbench/surfaces"
+import { PulseDot, WorkbenchButton } from "@/components/workbench/surfaces"
 import { useAuth } from "@/lib/auth-context"
 import { useOnline } from "@/lib/browser-state"
 import { sessionExpiredEvent } from "@/lib/http"
@@ -73,11 +75,13 @@ export type WorkbenchSection =
   | "invites"
   | "audit"
   | "announcements"
+
 export type WorkbenchSearchItem = {
   title: string
   description: string
   href: string
 }
+
 type NavItem = {
   id: WorkbenchSection
   href: string
@@ -96,6 +100,11 @@ export function AppShell({
   counts = {},
   searchItems = [],
   guideAction,
+  hidePageHeader = false,
+  narrow = false,
+  backHref,
+  backLabel = "返回常用充电桩",
+  connectionState,
 }: {
   compact?: boolean
   title: string
@@ -107,6 +116,11 @@ export function AppShell({
   counts?: { reminders?: number; notifications?: number; incidents?: number }
   searchItems?: WorkbenchSearchItem[]
   guideAction?: ReactNode
+  hidePageHeader?: boolean
+  narrow?: boolean
+  backHref?: string
+  backLabel?: string
+  connectionState?: "connected" | "reconnecting" | "offline"
 }) {
   const router = useRouter()
   const { currentUser, isAdmin, ready, clearSession } = useAuth()
@@ -117,6 +131,7 @@ export function AppShell({
   const [searchIndex, setSearchIndex] = useState(0)
   const searchRef = useRef<HTMLInputElement>(null)
   const closeMenu = useCallback(() => setMenuOpen(false), [])
+
   useEffect(() => {
     const expired = () => {
       clearSession()
@@ -125,6 +140,7 @@ export function AppShell({
     window.addEventListener(sessionExpiredEvent, expired)
     return () => window.removeEventListener(sessionExpiredEvent, expired)
   }, [clearSession, router])
+
   const active =
     activeSection ??
     (
@@ -138,6 +154,7 @@ export function AppShell({
       } as Record<string, WorkbenchSection>
     )[title] ??
     (isAdmin ? "overview" : "piles")
+
   const primary: NavItem[] = isAdmin
     ? [
         {
@@ -158,6 +175,12 @@ export function AppShell({
           href: "/admin?tab=users",
           label: "用户",
           icon: UsersIcon,
+        },
+        {
+          id: "announcements",
+          href: "/admin?tab=announcements",
+          label: "公告管理",
+          icon: MegaphoneIcon,
         },
       ]
     : [
@@ -182,6 +205,7 @@ export function AppShell({
           count: counts.notifications,
         },
       ]
+
   const secondary: NavItem[] = isAdmin
     ? [
         {
@@ -203,12 +227,6 @@ export function AppShell({
           icon: KeyRoundIcon,
         },
         {
-          id: "announcements",
-          href: "/admin?tab=announcements",
-          label: "公告管理",
-          icon: ClipboardListIcon,
-        },
-        {
           id: "audit",
           href: "/admin?tab=audit",
           label: "操作记录",
@@ -223,6 +241,7 @@ export function AppShell({
           icon: Settings2Icon,
         },
       ]
+
   const pages = [
     ...primary,
     ...secondary,
@@ -233,6 +252,7 @@ export function AppShell({
       icon: Settings2Icon,
     },
   ]
+
   const candidates = [
     ...searchItems,
     ...pages
@@ -246,6 +266,7 @@ export function AppShell({
         href: item.href,
       })),
   ]
+
   const results = [
     ...candidates
       .filter((item) =>
@@ -264,6 +285,7 @@ export function AppShell({
         ]
       : []),
   ]
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -275,7 +297,7 @@ export function AppShell({
     return () => window.removeEventListener("keydown", handler)
   }, [])
 
-  const links = (items: NavItem[]) =>
+  const renderDrawerLinks = (items: NavItem[]) =>
     items.map(({ id, href, label, icon: Icon, count }) => (
       <Link
         key={id}
@@ -285,39 +307,34 @@ export function AppShell({
         aria-current={active === id ? "page" : undefined}
         onClick={closeMenu}
       >
-        <Icon size={18} strokeWidth={1.8} />
+        <Icon size={16} strokeWidth={1.75} />
         <span>{label}</span>
         {!!count && (
           <span className="wb-nav-count">{count > 99 ? "99+" : count}</span>
         )}
       </Link>
     ))
+
   const identity = !ready ? (
     <div
       data-testid="identity-skeleton"
       className="wb-identity-loading"
       aria-label="正在加载账户信息"
     >
-      <Skeleton className="size-8 rounded-full" />
-      <Skeleton className="h-5 w-20" />
+      <Skeleton className="size-7 rounded-lg" />
     </div>
   ) : (
     <Link
       href={isAdmin ? "/account?tab=security" : "/account"}
       aria-label="进入账户中心"
-      className="wb-sidebar-user"
+      title={currentUser?.username || "账户中心"}
+      className={`wb-avatar-link ${active === "account" ? "wb-avatar-link-active" : ""}`}
       onClick={closeMenu}
     >
-      <span className="wb-avatar">
-        {currentUser?.username.slice(0, 1).toUpperCase()}
-      </span>
-      <span>
-        <strong>{currentUser?.username}</strong>
-        <small>{isAdmin ? "管理员" : "普通用户"}</small>
-      </span>
-      <ChevronRightIcon size={15} />
+      {currentUser?.username.slice(0, 1).toUpperCase() || "U"}
     </Link>
   )
+
   function choose(item: WorkbenchSearchItem) {
     setSearchOpen(false)
     setQuery("")
@@ -337,149 +354,277 @@ export function AppShell({
         >
           跳到主要内容
         </a>
-        <div className="wb-app-shell">
-          <aside className="wb-sidebar" aria-label="工作台导航">
-            <Link
-              className="wb-home"
-              href={isAdmin ? "/admin" : "/dashboard"}
-              aria-label="返回工作区首页"
-            >
-              <Brand />
-            </Link>
-            <div className="wb-workspace-label">
-              <span className="wb-workspace-dot" />
-              {isAdmin ? "管理工作区" : "我的充电空间"}
-            </div>
-            <nav aria-label="主导航">
-              <div className="wb-nav-group-label">
-                {isAdmin ? "工作区" : "日常使用"}
-              </div>
-              {links(primary)}
-              <div className="wb-nav-group-label wb-nav-second">
-                {isAdmin ? "系统管理" : "偏好与连接"}
-              </div>
-              {links(secondary)}
-            </nav>
-            <div className="wb-sidebar-spacer" />
-            <div className="wb-sidebar-help">
-              {guideAction || (
+
+        <div className="wb-spatial-shell">
+          {/* MINIMAL FLOATING 52px TOPBAR (Zero Heavy Sidebar) */}
+          <header data-slot="app-header" className="wb-header">
+            <div className="wb-header-inner">
+              <div className="wb-header-left">
+                <div className="wb-mobile-menu-trigger">
+                  <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+                    <SheetTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="wb-header-icon-btn"
+                          aria-label="打开菜单"
+                        />
+                      }
+                    >
+                      <MenuIcon size={17} strokeWidth={1.75} />
+                    </SheetTrigger>
+                    <SheetContent
+                      side="left"
+                      className="wb-theme workbench-drawer w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto"
+                    >
+                      <SheetTitle>账户与操作</SheetTitle>
+                      <nav aria-label="移动导航" className="mt-5">
+                        {renderDrawerLinks(primary)}
+                        <div className="wb-nav-group-label wb-nav-second">
+                          {isAdmin ? "系统管理" : "偏好与连接"}
+                        </div>
+                        {renderDrawerLinks(secondary)}
+                      </nav>
+                      <div className="wb-menu-account">
+                        {ready && (
+                          <p>
+                            {currentUser?.username} ·{" "}
+                            {isAdmin ? "管理员" : "普通用户"}
+                          </p>
+                        )}
+                        <Link href="/account?tab=security" onClick={closeMenu}>
+                          账户安全
+                          <ChevronRightIcon size={14} />
+                        </Link>
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                </div>
+
                 <Link
-                  href={
-                    isAdmin ? "/account?tab=security" : "/dashboard?guide=1"
+                  className="wb-home"
+                  href={isAdmin ? "/admin" : "/dashboard"}
+                  aria-label="返回工作区首页"
+                >
+                  <Brand />
+                </Link>
+
+                {isAdmin ? (
+                  <>
+                    <span className="wb-space-chip">管理工作区</span>
+                    <nav className="wb-top-nav" aria-label="主导航">
+                      {[
+                        {
+                          href: "/admin",
+                          label: "运行概览",
+                          icon: ActivityIcon,
+                          isCurrent:
+                            active === "overview" || active === "incidents",
+                          count: counts.incidents,
+                        },
+                        {
+                          href: "/admin?tab=users",
+                          label: "用户与公告",
+                          icon: UsersIcon,
+                          isCurrent:
+                            active === "users" || active === "announcements",
+                        },
+                        {
+                          href: "/admin?tab=operations",
+                          label: "系统与合规",
+                          icon: SlidersHorizontalIcon,
+                          isCurrent:
+                            active === "operations" ||
+                            active === "settings" ||
+                            active === "invites" ||
+                            active === "audit",
+                        },
+                      ].map(({ href, label, icon: Icon, isCurrent, count }) => (
+                        <Link
+                          key={href}
+                          href={href}
+                          className={`wb-top-nav-link ${
+                            isCurrent ? "wb-top-nav-active" : ""
+                          }`}
+                          aria-label={count ? `${label}，${count} 项` : label}
+                          aria-current={isCurrent ? "page" : undefined}
+                        >
+                          <Icon size={14} strokeWidth={1.75} aria-hidden="true" />
+                          <span>{label}</span>
+                          {!!count && (
+                            <span className="wb-top-nav-badge">
+                              {count > 99 ? "99+" : count}
+                            </span>
+                          )}
+                        </Link>
+                      ))}
+                    </nav>
+                  </>
+                ) : (
+                  <Link
+                    href="/account?tab=connection"
+                    className="wb-conn-chip"
+                    title="查看平台连接状态"
+                  >
+                    <PulseDot
+                      tone={
+                        !online || connectionState === "offline"
+                          ? "offline"
+                          : connectionState === "reconnecting"
+                            ? "warning"
+                            : "idle"
+                      }
+                      pulse={online && connectionState !== "offline" && connectionState !== "reconnecting"}
+                    />
+                    <span>
+                      {!online || connectionState === "offline"
+                        ? "离线"
+                        : connectionState === "reconnecting"
+                          ? "重连中"
+                          : "已连接"}
+                    </span>
+                  </Link>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="wb-global-search"
+                aria-label="打开快速搜索"
+                onClick={() => setSearchOpen(true)}
+              >
+                <SearchIcon size={14} strokeWidth={1.75} aria-hidden="true" />
+                <span>
+                  {isAdmin ? "搜索用户、公告或设置" : "快速定位充电桩或操作"}
+                </span>
+                <kbd>
+                  <CommandIcon size={10} />K
+                </kbd>
+              </button>
+
+              <div className="wb-header-right">
+                {!isAdmin && (
+                  <nav className="wb-header-icon-nav" aria-label="主导航">
+                    {counts.reminders ? (
+                      <Link
+                        href="/dashboard/reminders"
+                        className={`wb-watch-pill ${
+                          active === "reminders" ? "wb-watch-pill-active" : ""
+                        }`}
+                        aria-label={`空闲提醒，${counts.reminders} 项`}
+                        aria-current={
+                          active === "reminders" ? "page" : undefined
+                        }
+                      >
+                        <BellRingIcon size={14} strokeWidth={1.85} />
+                        <span>守候 {counts.reminders}</span>
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/dashboard/reminders"
+                        className={`wb-header-icon-link ${
+                          active === "reminders"
+                            ? "wb-header-icon-link-active"
+                            : ""
+                        }`}
+                        aria-label="空闲提醒"
+                        title="空闲提醒"
+                        aria-current={
+                          active === "reminders" ? "page" : undefined
+                        }
+                      >
+                        <BellIcon size={16} strokeWidth={1.8} />
+                      </Link>
+                    )}
+
+                    <Link
+                      href="/dashboard/notifications"
+                      className={`wb-header-icon-link ${
+                        active === "notifications"
+                          ? "wb-header-icon-link-active"
+                          : ""
+                      }`}
+                      aria-label={
+                        counts.notifications
+                          ? `通知，${counts.notifications} 项`
+                          : "通知"
+                      }
+                      title="消息与通知"
+                      aria-current={
+                        active === "notifications" ? "page" : undefined
+                      }
+                    >
+                      <InboxIcon size={16} strokeWidth={1.8} />
+                      {!!counts.notifications && (
+                        <span className="wb-icon-badge">
+                          {counts.notifications > 99
+                            ? "99+"
+                            : counts.notifications}
+                        </span>
+                      )}
+                    </Link>
+                  </nav>
+                )}
+
+                {notificationAction}
+                {guideAction && (
+                  <div className="wb-header-guide">{guideAction}</div>
+                )}
+                <ThemeToggle />
+                {identity}
+              </div>
+            </div>
+          </header>
+
+          {/* CONTEXTUAL GLOBAL BANNERS */}
+          <GlobalFeedbackBanner />
+          {!online && (
+            <div role="status" className="wb-global-strip wb-strip-offline">
+              <div className="wb-global-strip-inner">
+                <WifiOffIcon size={15} />
+                <span>
+                  <strong>当前离线</strong> —
+                  保留最近读取的内容，联网后再刷新或保存。
+                </span>
+              </div>
+            </div>
+          )}
+          {currentUser?.mustChangePassword && (
+            <div role="status" className="wb-global-strip wb-strip-warning">
+              <div className="wb-global-strip-inner">
+                <KeyRoundIcon size={15} />
+                <span>
+                  <strong>当前使用的是管理员生成的临时密码</strong> —
+                  请修改为只有你本人知道的新密码。
+                </span>
+                <WorkbenchButton
+                  variant="outline"
+                  onClick={() =>
+                    router.push("/account?tab=security#change-password")
                   }
                 >
-                  <BookOpenIcon size={16} />
-                  {isAdmin ? "账户安全" : "使用说明"}
-                  <ArrowRightIcon size={13} />
-                </Link>
-              )}
+                  修改密码
+                </WorkbenchButton>
+              </div>
             </div>
-            {identity}
-          </aside>
-          <div className="wb-app-main">
-            <header data-slot="app-header" className="wb-topbar">
-              <div className="wb-mobile-header">
-                <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-                  <SheetTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="打开菜单"
-                      />
-                    }
-                  >
-                    <MenuIcon />
-                  </SheetTrigger>
-                  <SheetContent
-                    side="left"
-                    className="wb-theme workbench-drawer w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto"
-                  >
-                    <SheetTitle>账户与操作</SheetTitle>
-                    <nav aria-label="移动导航" className="mt-6">
-                      {links(primary)}
-                      <div className="wb-nav-group-label wb-nav-second">
-                        {isAdmin ? "系统管理" : "偏好与连接"}
-                      </div>
-                      {links(secondary)}
-                    </nav>
-                    <div className="wb-menu-account">
-                      {ready && (
-                        <p>
-                          {currentUser?.username} ·{" "}
-                          {isAdmin ? "管理员" : "普通用户"}
-                        </p>
-                      )}
-                      <Link href="/account?tab=security" onClick={closeMenu}>
-                        账户安全
-                        <ChevronRightIcon size={14} />
-                      </Link>
-                    </div>
-                  </SheetContent>
-                </Sheet>
-                <Link
-                  href={isAdmin ? "/admin" : "/dashboard"}
-                  aria-label="工作区首页"
-                >
-                  <Brand small />
+          )}
+
+          {/* MAIN CENTERED WORKSPACE CANVAS */}
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className={`wb-stage ${narrow ? "wb-stage-narrow" : ""}`}
+          >
+            {backHref && (
+              <div className="wb-back-bar">
+                <Link href={backHref} className="wb-stage-back-link">
+                  <ArrowLeftIcon size={14} />
+                  {backLabel}
                 </Link>
               </div>
-              <div className="wb-breadcrumb">
-                <span>{isAdmin ? "管理工作区" : "我的空间"}</span>
-                <ChevronRightIcon size={12} />
-                <strong>{title}</strong>
-              </div>
-              <div className="wb-topbar-actions">
-                <button
-                  className="wb-global-search"
-                  aria-label="打开快速搜索"
-                  onClick={() => setSearchOpen(true)}
-                >
-                  <SearchIcon size={15} />
-                  <span>{isAdmin ? "搜索用户或页面" : "搜索充电桩或页面"}</span>
-                  <kbd>
-                    <CommandIcon size={10} />K
-                  </kbd>
-                </button>
-                {notificationAction}
-                <span className="wb-topbar-divider" />
-                <ThemeToggle />
-              </div>
-            </header>
-            <main id="main-content" tabIndex={-1} className="wb-main-content">
-              <GlobalFeedbackBanner />
-              {!online && (
-                <div
-                  role="status"
-                  className="wb-state-banner wb-banner-offline"
-                >
-                  <WifiOffIcon size={17} />
-                  <div>
-                    <strong>当前离线</strong>
-                    <span>保留最近读取的内容，联网后再刷新或保存。</span>
-                  </div>
-                </div>
-              )}
-              {currentUser?.mustChangePassword && (
-                <div
-                  className="wb-state-banner wb-banner-warning"
-                  role="status"
-                >
-                  <KeyRoundIcon size={18} />
-                  <div>
-                    <strong>当前使用的是管理员生成的临时密码</strong>
-                    <span>请修改为只有你本人知道的新密码。</span>
-                  </div>
-                  <WorkbenchButton
-                    variant="outline"
-                    onClick={() =>
-                      router.push("/account?tab=security#change-password")
-                    }
-                  >
-                    修改密码
-                  </WorkbenchButton>
-                </div>
-              )}
+            )}
+            {!hidePageHeader && (
               <header className="wb-page-heading">
                 <div>
                   <h1>{title}</h1>
@@ -487,39 +632,16 @@ export function AppShell({
                 </div>
                 {actions && <div className="wb-heading-actions">{actions}</div>}
               </header>
-              {children}
-            </main>
-            <footer className="wb-app-footer">
-              <span>
-                Charge Console<span>让等待少一点。</span>
-              </span>
-            </footer>
-          </div>
-          <nav className="wb-mobile-bottom" aria-label="常用页面">
-            {[
-              ...primary,
-              {
-                id: "account" as const,
-                href: isAdmin ? "/account?tab=security" : "/account",
-                label: "我的",
-                icon: Settings2Icon,
-              },
-            ].map(({ id, href, label, icon: Icon, count }) => (
-              <Link
-                key={id}
-                href={href}
-                aria-label={label}
-                aria-current={active === id ? "page" : undefined}
-              >
-                <span>
-                  <Icon size={20} />
-                  {!!count && <i>{count > 99 ? "99+" : count}</i>}
-                </span>
-                <span>{label}</span>
-              </Link>
-            ))}
-          </nav>
+            )}
+            {children}
+          </main>
+
+          <footer className="wb-app-footer">
+            <span>Charge Console · 常用充电桩状态与空闲提醒</span>
+          </footer>
         </div>
+
+        {/* COMMAND PALETTE (⌘K) */}
         <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
           <DialogContent
             className="wb-theme wb-dialog wb-dialog-wide wb-search-dialog"
@@ -533,7 +655,7 @@ export function AppShell({
             </DialogHeader>
             <div className="wb-command">
               <div className="wb-command-input">
-                <SearchIcon size={18} />
+                <SearchIcon size={16} />
                 <Input
                   ref={searchRef}
                   className="wb-input"
@@ -589,7 +711,7 @@ export function AppShell({
                         {item.title}
                         <small>{item.description}</small>
                       </span>
-                      <ArrowRightIcon size={15} />
+                      <ArrowRightIcon size={14} />
                     </button>
                   ))
                 ) : (

@@ -141,6 +141,9 @@ function RemindersContent() {
       title="空闲提醒"
       activeSection="reminders"
       description="不用一直刷新。等到有空闲口，告诉你一声。"
+      narrow
+      backHref="/dashboard"
+      backLabel="返回常用充电桩"
       actions={
         <>
           <WorkbenchButton
@@ -161,7 +164,47 @@ function RemindersContent() {
         </>
       }
     >
-      <div className="wb-standard-page">
+      <div className="wb-standard-page wb-reminders-page">
+        {overview && (
+          <div className="wb-quota-ribbon">
+            <div>
+              <span>守候中</span>
+              <strong className="wb-mono">
+                {overview.reminderPileCount} / {overview.reminderPileLimit} 台
+              </strong>
+            </div>
+            <div>
+              <span>今日检查</span>
+              <strong className="wb-mono">
+                {overview.dailyQuotaUsed} / {overview.dailyQuotaLimit} 次
+              </strong>
+            </div>
+            <div>
+              <span>检查频率</span>
+              <strong className="wb-mono">
+                每 {overview.refreshIntervalMinutes} 分钟
+              </strong>
+            </div>
+            {overview.scheduledPowerOffEnabled && (
+              <div>
+                <span>计划断电</span>
+                <strong className="wb-mono">
+                  {formatPowerWindow(
+                    overview.scheduledPowerOffStartMinute,
+                    overview.scheduledPowerOffEndMinute
+                  )}
+                </strong>
+              </div>
+            )}
+            <Link
+              className="wb-text-link wb-quota-link"
+              href="/account?tab=notifications"
+            >
+              管理通知设置
+              <ArrowRightIcon size={13} />
+            </Link>
+          </div>
+        )}
         {overview &&
           (!overview.backgroundRemindersEnabled ||
             !overview.accountRefreshEnabled) && (
@@ -177,27 +220,35 @@ function RemindersContent() {
               </div>
             </div>
           )}
-        <div className="wb-page-rule">
-          <div className="wb-section-tabs">
+        <div className="wb-canvas-ribbon">
+          <div className="wb-seg-rail" role="group" aria-label="切换提醒状态">
             <button
+              type="button"
+              className={`wb-seg-btn ${tab === "active" ? "wb-seg-active" : ""}`}
               aria-pressed={tab === "active"}
               onClick={() => updatePageQuery({ view: null })}
             >
-              正在等待 <span>{active.length}</span>
+              <span>正在等待</span>
+              <span className="wb-seg-cnt">{active.length}</span>
             </button>
             <button
+              type="button"
+              className={`wb-seg-btn ${tab === "ended" ? "wb-seg-active" : ""}`}
               aria-pressed={tab === "ended"}
               onClick={() => updatePageQuery({ view: "ended" })}
             >
-              已结束 <span>{completed.length}</span>
+              <span>已结束</span>
+              <span className="wb-seg-cnt">{completed.length}</span>
             </button>
           </div>
-          <WorkbenchSearch
-            value={query}
-            onChange={(value) => updatePageQuery({ q: value }, true)}
-            label="搜索提醒"
-            placeholder="搜索充电桩或桩号"
-          />
+          <div className="wb-ribbon-right">
+            <WorkbenchSearch
+              value={query}
+              onChange={(value) => updatePageQuery({ q: value }, true)}
+              label="搜索提醒"
+              placeholder="搜索充电桩或桩号"
+            />
+          </div>
         </div>
         {pileFilter && (
           <div className="wb-selected-scope">
@@ -262,7 +313,10 @@ function RemindersContent() {
                 isActive =
                   rule.mode === "temporary" && rule.enabled && !rule.completedAt
               return (
-                <article className="wb-watch-row" key={rule.id}>
+                <article
+                  className={`wb-watch-row ${isActive ? "wb-watch-row-active" : ""}`}
+                  key={rule.id}
+                >
                   <span
                     className={`wb-watch-icon ${isActive ? "wb-watch-icon-active" : ""}`}
                   >
@@ -281,6 +335,7 @@ function RemindersContent() {
                         <ChevronRightIcon size={14} />
                       </Link>
                       <StatusPill
+                        pulse={isActive}
                         tone={
                           isActive
                             ? "brand"
@@ -388,35 +443,9 @@ function RemindersContent() {
                 <p>
                   站内通知与可选接收方式
                   <br />
-                  <Link
-                    className="wb-text-link"
-                    href="/account?tab=notifications"
-                  >
-                    管理通知设置
-                    <ArrowRightIcon size={13} />
-                  </Link>
+                  <span>支持浏览器提醒与微信推送</span>
                 </p>
               </div>
-            </div>
-            <div className="wb-quota-line">
-              <span>
-                正在关注 {overview.reminderPileCount} /{" "}
-                {overview.reminderPileLimit} 台
-              </span>
-              <span>
-                今日检查 {overview.dailyQuotaUsed} / {overview.dailyQuotaLimit}{" "}
-                次
-              </span>
-              {overview.scheduledPowerOffEnabled && (
-                <span>
-                  计划断电{" "}
-                  {formatPowerWindow(
-                    overview.scheduledPowerOffStartMinute,
-                    overview.scheduledPowerOffEndMinute
-                  )}{" "}
-                  · {overview.scheduledPowerOffTimezone}
-                </span>
-              )}
             </div>
           </section>
         )}

@@ -103,23 +103,18 @@ function UserAnnouncements() {
     return () => clearTimeout(timer)
   }, [summary, load])
   const item = summary?.item
+  const urgent = Boolean(item?.level === "important" && !item.acknowledged && !error)
   return (
     <>
       <section
         aria-label="公告"
-        className="flex h-16 min-w-0 items-center gap-3 border-y border-border py-2 text-sm"
+        className={`wb-ann-bar ${urgent ? "wb-ann-urgent" : ""}`}
       >
-        <span
-          className={
-            item?.level === "important"
-              ? "shrink-0 font-semibold text-primary"
-              : "shrink-0 text-muted-foreground"
-          }
-        >
+        <span className="wb-ann-tag">
           {item?.level === "important" ? "重要公告" : "公告"}
         </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate">
+        <div className="wb-ann-text">
+          <p className="wb-ann-headline">
             {!online
               ? "离线，公告可能已更新"
               : error ||
@@ -127,7 +122,7 @@ function UserAnnouncements() {
                 (summary ? "暂无待确认公告" : "正在读取公告…")}
           </p>
           {item && (
-            <span className="block truncate text-xs text-muted-foreground">
+            <span className="wb-ann-meta">
               {item.acknowledged
                 ? "已确认"
                 : `${summary?.unreadCount} 条待确认`}{" "}
@@ -138,26 +133,35 @@ function UserAnnouncements() {
             </span>
           )}
         </div>
-        {error ? (
-          <WorkbenchButton disabled={!online} onClick={() => void load(true)}>
-            重试
-          </WorkbenchButton>
-        ) : (
-          item && (
+        <div className="wb-ann-ops">
+          {error ? (
             <WorkbenchButton
-              onClick={() => updatePageQuery({ announcement: item.id })}
+              size="sm"
+              variant="outline"
+              disabled={!online}
+              onClick={() => void load(true)}
             >
-              查看
+              重试
             </WorkbenchButton>
-          )
-        )}
-        <button
-          data-announcement-list-trigger
-          className="shrink-0 text-muted-foreground underline underline-offset-4"
-          onClick={() => updatePageQuery({ announcement: "all" })}
-        >
-          全部公告
-        </button>
+          ) : (
+            item && (
+              <WorkbenchButton
+                size="sm"
+                variant={urgent ? "default" : "outline"}
+                onClick={() => updatePageQuery({ announcement: item.id })}
+              >
+                查看
+              </WorkbenchButton>
+            )
+          )}
+          <button
+            data-announcement-list-trigger
+            className="wb-ann-all"
+            onClick={() => updatePageQuery({ announcement: "all" })}
+          >
+            全部公告
+          </button>
+        </div>
       </section>
       {open && (
         <Details

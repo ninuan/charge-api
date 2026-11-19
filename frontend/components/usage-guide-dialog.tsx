@@ -112,7 +112,8 @@ const steps = [
 
 export function UsageGuideDialog({
   initialOpen = false,
-}: { initialOpen?: boolean } = {}) {
+  compact = false,
+}: { initialOpen?: boolean; compact?: boolean } = {}) {
   const { currentUser, acknowledgeUsageGuide } = useAuth()
   const closeAppShellMenu = useCloseAppShellMenu()
   const [open, setOpen] = useState(initialOpen)
@@ -192,10 +193,22 @@ export function UsageGuideDialog({
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" onClick={openReference}>
-            <BookOpenCheckIcon />
-            使用说明
-          </Button>
+          compact ? (
+            <button
+              type="button"
+              className="wb-header-icon-link wb-guide-header-btn"
+              aria-label="使用说明"
+              title="使用说明"
+              onClick={openReference}
+            >
+              <BookOpenCheckIcon size={16} strokeWidth={1.8} />
+            </button>
+          ) : (
+            <Button variant="outline" onClick={openReference}>
+              <BookOpenCheckIcon />
+              使用说明
+            </Button>
+          )
         }
       />
       <DialogContent
