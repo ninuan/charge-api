@@ -1,64 +1,66 @@
-<h1 align="center">Charge Console</h1>
+<div align="center">
 
-<p align="center">
-  轻量、自托管的充电桩状态看板，把常用充电桩状态和空闲提醒集中到一个页面。
-</p>
+# Charge Console
 
-<p align="center">
+**下楼之前，先看清哪儿有空口。**
+
+轻量、自托管的充电桩实时看板与空闲提醒系统，将常去的充电车棚固定在一张清晰画布中。
+
+<p>
   <a href="https://github.com/ninuan/charge-api/actions/workflows/ci.yml"><img src="https://github.com/ninuan/charge-api/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/ninuan/charge-api/releases"><img src="https://img.shields.io/github/v/release/ninuan/charge-api" alt="Release"></a>
   <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25">
   <img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5">
+  <img src="https://img.shields.io/badge/SQLite-Embedded-003B57?logo=sqlite&logoColor=white" alt="SQLite">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
 </p>
 
-<p align="center">
+<p>
+  <a href="#为什么做-charge-console">特性</a> ·
+  <a href="#界面预览">界面预览</a> ·
   <a href="#快速开始">快速开始</a> ·
-  <a href="#功能概览">功能概览</a> ·
-  <a href="docs/deployment.md">生产部署</a> ·
-  <a href="docs/openapi/charge-console-v1.5.3.yaml">OpenAPI</a> ·
+  <a href="#架构与安全">架构与安全</a> ·
+  <a href="#生产部署">生产部署</a> ·
+  <a href="docs/openapi/charge-console-v1.5.4.yaml">OpenAPI</a> ·
   <a href="CHANGELOG.md">更新日志</a>
 </p>
 
-![Charge Console 充电桩看板](.github/assets/dashboard.webp)
+<br />
 
-Charge Console 适合个人或小范围内部使用。它将常看的充电桩固定在一个响应式看板中，让用户不必每次从服务号重新扫码进入；每个账户独立保存设备、访问凭据、快照、提醒和通知。系统只在用户主动刷新或明确开启提醒时访问远端，并通过缓存、同桩请求合并、额度和退避策略控制请求频率。
+<img src=".github/assets/dashboard.webp" alt="Charge Console 充电桩实时看板" width="100%" />
 
-> [!IMPORTANT]
-> 请仅接入你有权访问的设备，并遵守远端服务的使用规则。Charge Console 不是充电平台的官方客户端，也不应被用于高频采集。
+</div>
 
-## 功能概览
+---
 
-| 能力         | 说明                                                                             |
-| ------------ | -------------------------------------------------------------------------------- |
-| 实时看板     | 集中展示多台充电桩及端口的空闲、使用中和离线状态，支持筛选与手动刷新。           |
-| 当前使用情况 | 展示最近快照、读取时间，以及平台返回的已用时间和预计剩余时间；不推算充电历史。 |
-| 空闲提醒     | 可开启 1、2、4 小时或持续到计划断电前的临时提醒；发现空闲后通知一次并自动结束。  |
-| 多通道通知   | 内置站内通知和浏览器提醒；可选 WxPusher 微信提醒、扫码绑定、消息偏好和投递状态。 |
-| 凭据管理     | 支持手动更新 Cookie；接入 `yyb_go` 后可扫码绑定账号，并在凭据失效时尝试恢复。    |
-| 多用户与管理 | 用户数据相互隔离；管理员可管理账户、邀请、异常、审计、运营趋势和系统策略。       |
-| 请求保护     | 短时缓存、同桩请求复用、全局并发限制、每日额度、失败退避和计划断电窗口。         |
-| 本地持久化   | SQLite 保存账户、设备、快照、提醒状态事件、会话和通知；敏感凭据使用 AES-256-GCM 加密。   |
+## 为什么做 Charge Console
+
+每次充电前反复点开公众号或扫码确认车棚有没有空位，既繁琐又容易扑空。**Charge Console** 面向个人与小范围自托管场景，将常看的充电桩集中到同一工作台：
+
+- **一眼看清物理插口状态**：双列硬件模块卡片直观区分空闲（绿）、使用中（蓝，附平台预计剩余与进度）和离线（虚线灰）；点击任意插口即可在右侧悬浮检查器查看已用时长、实时功率与累计用电。
+- **刚好一次的空闲守候**：满位时一键开启 1 / 2 / 4 小时或持续至计划断电前的临时提醒，发现空口通知一次即自动停止；支持站内通知、浏览器弹窗、可选 WxPusher 微信推送与免打扰时段。
+- **克制的远端访问保护**：仅在用户主动刷新或存在活动守候时请求远端，内置短时缓存、同桩请求合并、并发限制、每日额度、失败退避与夜间计划断电窗口。
+- **多用户隔离与管理工作台**：每位用户的设备、加密凭据、提醒和通知完全隔离；管理员可在内置工作区处理异常、发布公告并跟踪确认回执、管理邀请码、查看运营趋势与操作审计。
+- **清爽的现代交互体验**：浅色 / 深色双主题、`⌘K` 快速定位、响应式移动适配与「减少动态效果」无障碍支持。
+
+> [!NOTE]
+> 请仅接入你有权访问的设备，并遵守远端服务的使用规则。Charge Console 为非官方自托管看板工具，不用于高频采集。
 
 ### 界面预览
 
-| 微信扫码登录                                   | 添加充电桩                                  | 账户与会话                                 |
-| ---------------------------------------------- | ------------------------------------------- | ------------------------------------------ |
-| ![微信扫码登录](.github/assets/yyb-login.webp) | ![添加充电桩](.github/assets/add-pile.webp) | ![账户与会话](.github/assets/account.webp) |
+| 深色模式 · 悬浮插口检查器 | 账户与充电平台连接 | 管理工作区 · 异常与趋势 |
+| :---: | :---: | :---: |
+| ![深色模式与悬浮插口检查器](.github/assets/inspector-dark.webp) | ![账户与充电平台连接](.github/assets/account.webp) | ![管理工作区运行概览与运营趋势](.github/assets/admin.webp) |
+
+---
 
 ## 快速开始
 
 ### 环境要求
 
-| 工具    | 推荐版本                                      |
-| ------- | --------------------------------------------- |
-| Node.js | 22                                            |
-| pnpm    | 11                                            |
-| Go      | 1.25，或支持自动下载对应 toolchain 的 Go 版本 |
-| 其他    | Git、Make                                     |
+`Go 1.25+` · `Node.js 22+` · `pnpm 11+` · `Git` · `Make`
 
-### 启动本地环境
+### 三步启动本地开发环境
 
 ```bash
 git clone https://github.com/ninuan/charge-api.git
@@ -67,214 +69,139 @@ make setup
 make dev
 ```
 
-启动后访问：
+启动完成后访问 `http://127.0.0.1:3000`：
 
-```text
-前端：http://127.0.0.1:3000
-管理员：admin
-密码：localadmin123
-数据库：.local/charge_state.db
-```
-
-本地数据库、Cookie 加密密钥和开发配置都保存在已被 Git 忽略的 `.local/`。按 `Ctrl+C` 会同时停止前后端；再次运行 `make dev` 会继续使用原有状态。
-
-启动时会自动清理当前仓库、当前用户遗留的 Go / Next.js 监听进程；正常退出会清理完整的前后端进程组。其他程序占用端口，或另一个 `dev.sh` 仍在运行时，会显示对应 PID 并停止启动，不会自动关闭它们。可使用下方端口变量避开冲突。端口检查需要 `lsof`。
+| 项目       | 本地默认值                |
+| ---------- | ------------------------- |
+| 前端地址   | `http://127.0.0.1:3000`   |
+| 管理员账号 | `admin` / `localadmin123` |
+| 本地数据库 | `.local/charge_state.db`  |
 
 > [!WARNING]
-> `localadmin123` 只用于本机开发。生产环境必须使用独立强密码和持久化密钥。
+> 默认密码仅限本机开发使用。所有本地数据均位于已被 Git 忽略的 `.local/` 目录，按 `Ctrl+C` 即可同时停止前后端。
 
-常用覆盖项：
+<details>
+<summary><b>更多本地开发选项（自定义端口、重置数据、接入扫码登录 sidecar）</b></summary>
+
+#### 覆盖默认配置
 
 ```bash
-LOCAL_ADMIN_PASSWORD="your-local-password" make dev
+LOCAL_ADMIN_PASSWORD="your-password" make dev
 BACKEND_PORT=18080 FRONTEND_PORT=5174 make dev
 LOCAL_DATABASE_FILE=/private/tmp/charge-test.db make dev
 ```
 
-如需清空本地测试数据：
+#### 清空本地测试数据
 
 ```bash
 make reset-local
 ```
 
-该命令会先要求确认，只删除 `.local/`，不会影响服务器数据库。
-
-### 可选：接入扫码登录 sidecar
-
-先复制开发环境模板：
+#### 接入可选的 `yyb_go` 扫码登录 sidecar
 
 ```bash
 mkdir -p .local
 cp examples/dev.env.example .local/dev.env
 ```
 
-编辑 `.local/dev.env`：
+在 `.local/dev.env` 中填写回环地址与共享密钥后重新执行 `make dev`：
 
 ```env
 YYB_BASE_URL=http://127.0.0.1:8000
 YYB_API_SECRET=replace-with-the-same-secret-used-by-yyb-go
 ```
 
-然后让 `yyb_go` 仅监听回环地址，再执行 `make dev`。同名 shell 环境变量的优先级高于 `.local/dev.env`。
+</details>
 
-### 验证改动
+---
 
-```bash
-make check
-```
+## 架构与安全
 
-该命令会检查 OpenAPI 类型漂移、项目脚本、前端 lint、Go 测试与构建、前端测试、类型检查和生产构建。浏览器端到端测试单独运行：
-
-```bash
-pnpm --dir frontend exec playwright install chromium
-pnpm --dir frontend test:e2e
-```
-
-## 生产部署
-
-推荐部署形态是单台 Linux 服务器：由 Nginx、Caddy 或 Cloudflare 入口负责 HTTPS，`charge-server` 与可选的 `yyb_go` 只监听 `127.0.0.1`，SQLite 存放在持久化目录，并由 systemd 管理服务与在线备份。
-
-完整的首次安装、环境变量、systemd、反向代理、安全加固、备份与恢复说明见：
-
-**[生产部署与运维指南](docs/deployment.md)**
-
-已经完成首次部署后，可以用仓库脚本执行“本地检查 → 推送 GitHub → 服务器拉取 → 构建 → 重启 → 健康检查”：
-
-```bash
-make deploy-git DEPLOY_HOST=root@<服务器IP>
-```
-
-中国大陆服务器可仅为本次部署指定 npm 镜像：
-
-```bash
-NPM_REGISTRY=https://registry.npmmirror.com \
-make deploy-git DEPLOY_HOST=root@<服务器IP>
-```
-
-脚本默认使用 `/opt/charge-api`、当前分支和 `charge-api` systemd 服务；可通过 `DEPLOY_PATH`、`DEPLOY_BRANCH` 和 `SERVICE_NAME` 覆盖。部署前可先预演：
-
-```bash
-SKIP_CHECK=1 make deploy-git \
-  DEPLOY_HOST=root@<服务器IP> \
-  DEPLOY_ARGS=--dry-run
-```
-
-## 配置
-
-生产环境通常从 `/etc/charge-api.env` 读取配置。以下仅列常用项；完整说明和文件权限要求见[部署指南](docs/deployment.md#环境变量)。
-
-### Charge 服务
-
-| 变量                    | 必需           | 用途                                                          |
-| ----------------------- | -------------- | ------------------------------------------------------------- |
-| `CHARGE_COOKIE_KEY`     | 生产必需       | 加密 Cookie、WxPusher UID 等敏感状态的 32 字节 Base64 密钥。  |
-| `CHARGE_ADMIN_PASSWORD` | 首次初始化可选 | 首次创建 `admin` 时使用；已有数据库不会因此重置密码。         |
-| `CORS_ALLOWED_ORIGINS`  | 可选           | 前后端跨域部署时的 HTTPS 来源白名单，逗号分隔；同源部署留空。 |
-
-### 扫码登录与凭据恢复
-
-| 变量              | 必需                | 用途                                                    |
-| ----------------- | ------------------- | ------------------------------------------------------- |
-| `YYB_BASE_URL`    | 可选                | `yyb_go` sidecar 地址，推荐 `http://127.0.0.1:8000`。   |
-| `YYB_API_SECRET`  | 启用 sidecar 时必需 | Charge 与 `yyb_go` 之间的 HMAC 共享密钥，两端必须一致。 |
-| `MOCELE_BASE_URL` | 可选                | 覆盖自动登录服务地址；通常保持默认。                    |
-
-### WxPusher
-
-| 变量                 | 必需               | 用途                                                                         |
-| -------------------- | ------------------ | ---------------------------------------------------------------------------- |
-| `WXPUSHER_APP_TOKEN` | 启用微信提醒时必需 | WxPusher 应用的服务端 AppToken，不得暴露给前端。                             |
-| `PUBLIC_BASE_URL`    | 启用微信提醒时必需 | 对外 HTTPS Origin，例如 `https://charge.example.com`，不能带路径或结尾斜杠。 |
-| `WXPUSHER_BASE_URL`  | 仅测试             | 覆盖 WxPusher API；生产环境应留空并使用官方 HTTPS 接口。                     |
-
-生成生产密钥：
-
-```bash
-./scripts/gen_secrets.sh
-```
-
-> [!CAUTION]
-> 密钥必须长期保存且不能随意更换。丢失 `CHARGE_COOKIE_KEY` 或 `YYB_SECRET_KEY` 后，对应数据库中的既有加密数据将无法恢复。
-
-## 架构
+单二进制 Go 服务搭配静态导出的 Next.js 前端与嵌入式 SQLite，无需额外数据库或消息中间件即可完成部署。
 
 ```mermaid
 flowchart LR
   Browser["浏览器<br/>Next.js 静态界面"] -->|HTTPS / SSE| Proxy["Nginx / Caddy / Cloudflare"]
   Proxy --> API["charge-server<br/>Go REST + SSE"]
-  API --> DB[("SQLite<br/>状态、提醒事件、通知、会话")]
-  API -->|用户凭据| Remote["远端充电服务"]
-  API <-->|HMAC / loopback| YYB["yyb_go sidecar<br/>可选"]
-  API -->|可选| WxPusher["WxPusher"]
+  API --> DB[("SQLite<br/>用户 / 设备 / 提醒 / 通知")]
+  API -->|加密用户凭据| Remote["远端充电平台"]
+  API <-->|HMAC / loopback| YYB["yyb_go sidecar<br/>可选扫码登录"]
+  API -->|可选推送| WxPusher["WxPusher"]
   Backup["systemd timer"] -. 在线备份 .-> DB
 ```
 
-关键原则：
+- **凭据不出服务端**：浏览器仅与 Charge 通信，永不接触远端 Cookie、WxPusher AppToken 或 sidecar 密钥。
+- **静态加密与账户安全**：Cookie、WxPusher UID 等敏感数据使用 `CHARGE_COOKIE_KEY` 通过 AES-256-GCM 加密落盘；密码采用 Argon2id，登录/注册配一次性图形验证码、IP 限流与失败锁定。
+- **数据边界清晰**：站内通知为主记录，外部推送异常不阻断状态刷新；仅记录活动提醒与状态快照，不虚构或推算充电历史。
 
-- 浏览器只访问 Charge，不直接接触远端 Cookie、AppToken 或 sidecar 密钥。
-- 每个用户的设备、凭据、缓存、提醒和通知独立存储。
-- 后台提醒只对用户明确创建的规则运行；无活动规则时不会产生对应远端请求。
-- 站内通知是主记录；浏览器和 WxPusher 是可选投递通道，第三方异常不会阻断状态刷新。
+---
 
-## 数据与安全
+## 生产部署
 
-- SQLite 默认位于生产环境的 `/var/lib/charge-api/charge_state.db`。
-- Cookie、WxPusher UID 和短期绑定数据使用 `CHARGE_COOKIE_KEY` 进行 AES-256-GCM 加密。
-- 提醒状态事件仅为活动提醒的通知处理记录，默认保留 90 天；不用于计算占用率或充电历史。
-- 过期的信息类通知和已解决问题按保留策略清理；仍需用户处理的问题会继续保留。
-- 密码使用 Argon2id；Session 持久化到 SQLite，并有数量和有效期限制。
-- 登录和注册使用服务端一次性图片验证码，并配合 IP 限流与失败锁定。
-- 仓库提供 SQLite 在线备份、恢复校验和端到端安全检查脚本。
+推荐单台 Linux 服务器部署：反向代理终止 HTTPS，`charge-server`（及可选 `yyb_go`）仅监听 `127.0.0.1`，由 `systemd` 托管服务与定时在线备份。
 
-生产环境建议至少完成：
+### 核心环境变量
+
+| 变量                                     | 适用场景     | 说明                                                                   |
+| ---------------------------------------- | ------------ | ---------------------------------------------------------------------- |
+| `CHARGE_COOKIE_KEY`                      | 生产必需     | 32 字节 Base64 密钥，用于加密敏感凭据（生成后须妥善保存，不可随意更换） |
+| `CHARGE_ADMIN_PASSWORD`                  | 首次初始化   | 初始化 `admin` 账号密码；已有数据库不会覆盖                            |
+| `CORS_ALLOWED_ORIGINS`                   | 跨域部署可选 | 允许的 HTTPS 来源白名单，同源部署留空                                  |
+| `YYB_BASE_URL` / `YYB_API_SECRET`        | 扫码登录可选 | `yyb_go` 回环地址与两端一致的 HMAC 密钥                                |
+| `WXPUSHER_APP_TOKEN` / `PUBLIC_BASE_URL` | 微信提醒可选 | WxPusher 服务端 AppToken 与对外 HTTPS Origin（不含路径与尾斜杠）       |
 
 ```bash
-sudo systemctl enable --now charge-backup.timer
-./scripts/security_check.sh
+# 生成生产密钥
+./scripts/gen_secrets.sh
+
+# 已完成首次部署后的日常发布（检查 → 推送 → 远端拉取构建 → 重启健康检查）
+make deploy-git DEPLOY_HOST=root@<服务器IP>
 ```
 
-具体权限、备份保留和恢复演练步骤见[部署指南](docs/deployment.md#备份与恢复)。
+完整的首次安装、systemd 单元、反向代理、安全巡检与在线备份恢复指南见 **[docs/deployment.md](docs/deployment.md)**。
 
-## 项目结构
+---
+
+## 项目结构与开发验证
 
 ```text
 backend/
-  cmd/server/              Go 服务入口
-  internal/api/            HTTP API 与中间件
-  internal/runtime/        业务服务、提醒调度与通知投递
-  internal/persistence/    SQLite、迁移和加密存储
-  internal/charger/        远端充电接口客户端
+  cmd/server/            Go 服务入口
+  internal/api/          REST / SSE 接口与中间件
+  internal/runtime/      状态快照、空闲守候调度与通知投递
+  internal/persistence/  SQLite 迁移与加密存储
+  internal/charger/      远端充电接口客户端
 
 frontend/
-  app/                     Next.js 路由
-  components/              页面与业务组件
-  lib/                     API、状态和领域逻辑
-  e2e/                     Playwright 端到端测试
+  app/                   Next.js 路由（看板 / 提醒 / 通知 / 账户 / 管理 / 认证）
+  components/            页面与交互组件
+  lib/                   API 客户端、上下文与领域逻辑
+  e2e/                   Playwright 端到端测试
 
-docs/openapi/              版本化 OpenAPI 契约
-deploy/systemd/            服务与备份 timer 模板
-examples/                  本地环境和脱敏请求模板
-scripts/                   开发、检查、部署、备份与安全脚本
+docs/openapi/            版本化 OpenAPI 契约（当前 v1.5.4）
+deploy/systemd/          服务与 SQLite 在线备份模板
+scripts/                 开发、校验、安全检查与部署脚本
 ```
 
-技术栈：Go `net/http`、SQLite、Next.js、React、TypeScript、Tailwind CSS、shadcn/ui、Vitest 和 Playwright。
+### 运行完整测试门禁
 
-## 文档
+```bash
+# OpenAPI 类型漂移、脚本测试、ESLint、Go 测试构建、前端单测、类型检查与静态构建
+make check
+
+# Playwright 浏览器端到端测试
+pnpm --dir frontend exec playwright install chromium
+pnpm --dir frontend test:e2e
+```
+
+---
+
+## 相关文档
 
 - [生产部署与运维指南](docs/deployment.md)
-- [v1.5.3 发布说明](RELEASE_NOTES.md)
-- [更新日志](CHANGELOG.md)
-- [OpenAPI v1.5.3](docs/openapi/charge-console-v1.5.3.yaml)
-- [本地环境变量示例](examples/dev.env.example)
-
-## 参与开发
-
-欢迎通过 Issue 报告问题或讨论功能。提交 Pull Request 前请：
-
-1. 保持改动聚焦，不提交真实 Cookie、AppToken、UID、数据库或服务器日志。
-2. API 变更同步更新版本化 OpenAPI 和生成类型。
-3. 运行 `make check`；涉及完整交互流程时再运行 `pnpm --dir frontend test:e2e`。
-4. 在描述中说明用户影响、验证方式以及需要关注的部署或迁移事项。
+- [OpenAPI v1.5.4 契约](docs/openapi/charge-console-v1.5.4.yaml)
+- [更新日志](CHANGELOG.md) · [发布说明](RELEASE_NOTES.md)
+- [本地环境变量模板](examples/dev.env.example)
 
 ## License
 
