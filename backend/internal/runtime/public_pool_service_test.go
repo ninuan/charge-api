@@ -157,9 +157,12 @@ func TestPublicPoolQuotaCacheFallbackAndContributionReward(t *testing.T) {
 		t.Fatalf("bob 2nd live refresh err = %v, want ErrRefreshQuotaExhausted", err)
 	}
 
-	// 6. Alice has an expired personal cookie -> smoothly falls back to public pool + notifies!
+	// 6. Alice has an expired personal cookie (joined mutual-aid pool) -> smoothly falls back to public pool + notifies!
 	rtA, _ := manager.runtimeFor(userA.ID)
 	_ = rtA.client.UpdateCookie("wxopenid=alice-expired; info=bad")
+	if _, err := repo.UpsertUserPublicPoolCookie(userA.ID, "用户互助 · alice", "wxopenid=alice-expired; info=bad"); err != nil {
+		t.Fatalf("seed alice pool cookie: %v", err)
+	}
 	snapFallback, err := manager.RefreshPile(userA.ID, "2601201412385560101", true)
 	if err != nil {
 		t.Fatalf("alice fallback refresh: %v", err)
@@ -169,5 +172,33 @@ func TestPublicPoolQuotaCacheFallbackAndContributionReward(t *testing.T) {
 	}
 	if snapFallback.Quota == nil || snapFallback.Quota.PersonalCookieStatus != "expired" {
 		t.Fatalf("expected personalCookieStatus=expired, got %+v", snapFallback.Quota)
+	}
+	// Regression: fallback via public pool must NOT resolve Alice's credential_expired alert,
+	// must expire Alice's mutual-aid pool entry, and must preserve expired state across restarts.
+	alicePoolEntry, err := repo.GetUserPublicPoolCookie(userA.ID)
+	if err != nil || alicePoolEntry == nil || alicePoolEntry.Status != "expired" {
+		t.Fatalf("expected alice mutual-aid pool cookie marked expired, got %+v, %v", alicePoolEntry, err)
+	}
+	notifications, err := manager.Notifications(userA.ID, "", "all", 20)
+	if err != nil {
+		t.Fatalf("Notifications: %v", err)
+	}
+	foundUnresolvedExpired := false
+	for _, n := range notifications.Items {
+		if n.Type == model.NotificationCredentialExpired && n.ResolvedAt == nil {
+			foundUnresolvedExpired = true
+			break
+		}
+	}
+	if !foundUnresolvedExpired {
+		t.Fatalf("expected unresolved credential_expired notification after fallback, got %+v", notifications.Items)
+	}
+	restarted, err := NewManager(repo, "", poolTestRequests(srv.URL), "AdminPass123!", 30*time.Second)
+	if err != nil {
+		t.Fatalf("restart NewManager: %v", err)
+	}
+	restartedQuota, err := restarted.UserRefreshQuota(userA.ID)
+	if err != nil || restartedQuota.PersonalCookieStatus != "expired" {
+		t.Fatalf("expected personalCookieStatus=expired after restart, got %+v, %v", restartedQuota, err)
 	}
 }

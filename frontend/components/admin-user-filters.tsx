@@ -25,7 +25,7 @@ const accountOptions = [
 
 const credentialOptions = [
   { value: "all", label: "全部凭据" },
-  { value: "unbound", label: "未绑定扫码" },
+  { value: "unbound", label: "未配置个人 Cookie" },
   { value: "waiting_device", label: "等待添加设备" },
   { value: "healthy", label: "凭据正常" },
   { value: "sync_failed", label: "同步失败" },
@@ -87,7 +87,7 @@ export function AdminUserFilters({
         <div>
           <h2 className="text-sm font-semibold">筛选用户</h2>
           <p className="mt-1 hidden text-xs leading-5 text-muted-foreground sm:block">
-            组合账户状态、扫码凭据和设备健康度，快速定位需要处理的账户。
+            组合账户状态、个人 Cookie 凭据和设备健康度，快速定位需要处理的账户。
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={reset}>

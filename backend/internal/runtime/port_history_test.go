@@ -97,8 +97,16 @@ func newHistoryManager(t *testing.T, requests []parser.CaptureRequest, minInterv
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	settings := manager.Settings()
+	settings.RequirePoolShareForUnlimited = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
 	for userID, user := range manager.users {
 		if user.Username == "admin" {
+			if err := manager.runtimes[userID].client.UpdateCookie("wxopenid=history-test; info=ok"); err != nil {
+				t.Fatalf("seed personal cookie: %v", err)
+			}
 			return manager, userID
 		}
 	}

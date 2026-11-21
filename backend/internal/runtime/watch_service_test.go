@@ -269,6 +269,7 @@ func newWatchTestManager(t *testing.T) (*Manager, model.User, model.User) {
 		StatsRetentionDays: 90, PortHistoryRetentionDays: 90,
 	})
 	settings.WatchPileLimitPerUser = 1
+	settings.RequirePoolShareForUnlimited = false
 	if err := repository.Save(persistence.State{
 		Version: stateVersion, Users: []model.User{owner, other},
 		UserStates: map[string]persistence.UserState{

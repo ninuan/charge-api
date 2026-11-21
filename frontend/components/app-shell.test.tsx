@@ -212,7 +212,7 @@ describe("AppShell", () => {
     expect(
       within(nav).queryByRole("link", { name: "常用充电桩" })
     ).not.toBeInTheDocument()
-    expect(within(nav).getByRole("link", { name: "运行概览" })).toHaveAttribute(
+    expect(within(nav).getByRole("link", { name: "值守中心" })).toHaveAttribute(
       "aria-current",
       "page"
     )

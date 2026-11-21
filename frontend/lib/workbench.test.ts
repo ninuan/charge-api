@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   dashboardHref,
+  formatQuotaResetTime,
   formatSnapshotTime,
   portCounts,
   portTime,
@@ -79,5 +80,11 @@ describe("live workbench domain", () => {
   it("renders a missing or malformed timestamp as unknown", () => {
     expect(formatSnapshotTime()).toBe("尚未读取")
     expect(formatSnapshotTime("invalid")).toBe("尚未读取")
+  })
+  it("formats daily quota reset time in Beijing time", () => {
+    expect(formatQuotaResetTime()).toBe("每日 00:00（北京时间）")
+    expect(formatQuotaResetTime("2026-11-21T16:00:00Z")).toBe(
+      "11-22 00:00（每日 00:00）"
+    )
   })
 })

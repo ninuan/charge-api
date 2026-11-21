@@ -178,13 +178,14 @@ func (m *Manager) loadWatchedPile(
 	deviceID string,
 	beforeRemoteRequest func() error,
 ) (WatchedPileRefreshResult, error) {
+	usePublicPool := !m.hasValidPersonalCookie(runtime) && m.Settings().FreeUserWatchAllowed
 	coordinator := &m.backgroundRefresh
 	coordinator.mu.Lock()
 	coordinator.initializeLocked()
 	now := coordinator.now()
 	credentialKey := backgroundCredentialKey{userID: userID, deviceID: deviceID}
 	validatedAt := coordinator.credentialValidatedAt[credentialKey]
-	validationDue := validatedAt.IsZero() || now.Sub(validatedAt) >= coordinator.credentialValidationTTL
+	validationDue := !usePublicPool && (validatedAt.IsZero() || now.Sub(validatedAt) >= coordinator.credentialValidationTTL)
 	if entry, ok := coordinator.cache[deviceID]; !validationDue && ok && now.Sub(entry.fetchedAt) < coordinator.cacheTTL {
 		coordinator.mu.Unlock()
 		return WatchedPileRefreshResult{
@@ -220,17 +221,21 @@ func (m *Manager) loadWatchedPile(
 		// disabled state, or backoff across a shared flight; fall back to an
 		// isolated fetch using this user's own runtime and preconditions.
 		if !validationDue {
-			result, fetchErr := fetchWatchedPile(runtime, deviceID, beforeRemoteRequest)
+			result, fetchErr := m.fetchWatchedPile(runtime, deviceID, beforeRemoteRequest, usePublicPool)
 			if fetchErr == nil && !result.Skipped {
 				coordinator.mu.Lock()
-				result.FetchedAt = coordinator.now()
-				result.CredentialValidated = true
+				if result.FetchedAt.IsZero() {
+					result.FetchedAt = coordinator.now()
+				}
+				result.CredentialValidated = !usePublicPool
 				result.Pile = cloneBackgroundPile(result.Pile)
 				coordinator.cache[deviceID] = backgroundPileCacheEntry{
 					pile:      cloneBackgroundPile(result.Pile),
 					fetchedAt: result.FetchedAt,
 				}
-				coordinator.credentialValidatedAt[credentialKey] = result.FetchedAt
+				if !usePublicPool {
+					coordinator.credentialValidatedAt[credentialKey] = result.FetchedAt
+				}
 				coordinator.mu.Unlock()
 			}
 			return result, fetchErr
@@ -244,17 +249,21 @@ func (m *Manager) loadWatchedPile(
 	coordinator.flights[flightKey] = flight
 	coordinator.mu.Unlock()
 
-	result, fetchErr := fetchWatchedPile(runtime, deviceID, beforeRemoteRequest)
+	result, fetchErr := m.fetchWatchedPile(runtime, deviceID, beforeRemoteRequest, usePublicPool)
 	coordinator.mu.Lock()
 	if fetchErr == nil && !result.Skipped {
-		result.FetchedAt = coordinator.now()
-		result.CredentialValidated = true
+		if result.FetchedAt.IsZero() {
+			result.FetchedAt = coordinator.now()
+		}
+		result.CredentialValidated = !usePublicPool
 		result.Pile = cloneBackgroundPile(result.Pile)
 		coordinator.cache[deviceID] = backgroundPileCacheEntry{
 			pile:      cloneBackgroundPile(result.Pile),
 			fetchedAt: result.FetchedAt,
 		}
-		coordinator.credentialValidatedAt[credentialKey] = result.FetchedAt
+		if !usePublicPool {
+			coordinator.credentialValidatedAt[credentialKey] = result.FetchedAt
+		}
 	}
 	flight.result = cloneWatchedPileRefreshResult(result)
 	flight.err = fetchErr
@@ -264,7 +273,39 @@ func (m *Manager) loadWatchedPile(
 	return result, fetchErr
 }
 
-func fetchWatchedPile(runtime *UserRuntime, deviceID string, beforeRemoteRequest func() error) (WatchedPileRefreshResult, error) {
+func (m *Manager) fetchWatchedPile(
+	runtime *UserRuntime,
+	deviceID string,
+	beforeRemoteRequest func() error,
+	usePublicPool bool,
+) (WatchedPileRefreshResult, error) {
+	if usePublicPool {
+		now := m.reminderSchedulerNow()
+		if cachedPile, cachedAt, ok := m.freshSharedPileSnapshotWithTime(deviceID, now); ok {
+			return WatchedPileRefreshResult{
+				Pile:      cloneBackgroundPile(*cachedPile),
+				FetchedAt: cachedAt,
+				Cached:    true,
+			}, nil
+		}
+		if beforeRemoteRequest != nil {
+			if err := beforeRemoteRequest(); err != nil {
+				return WatchedPileRefreshResult{}, err
+			}
+		}
+		pile, err := m.fetchPileViaPublicPool(deviceID)
+		if err != nil {
+			return WatchedPileRefreshResult{
+				Attempted: !errors.Is(err, ErrPublicPoolUnavailable),
+			}, err
+		}
+		m.recordSharedPiles("", []model.Pile{pile})
+		return WatchedPileRefreshResult{
+			Pile:      cloneBackgroundPile(pile),
+			FetchedAt: now,
+			Attempted: true,
+		}, nil
+	}
 	fetched := runtime.client.FetchPileWithPermit(deviceID, false, beforeRemoteRequest)
 	result := WatchedPileRefreshResult{
 		Attempted:   fetched.Attempted > 0,

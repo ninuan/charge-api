@@ -149,6 +149,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
 	mux.HandleFunc("/api/admin/public-pool", s.handleAdminPublicPool)
 	mux.HandleFunc("/api/admin/public-pool/", s.handleAdminPublicPoolActions)
+	mux.HandleFunc("/api/admin/shared-piles", s.handleAdminSharedPiles)
+	mux.HandleFunc("/api/admin/shared-piles/", s.handleAdminSharedPileActions)
 	mux.HandleFunc("/api/announcements", s.handleAnnouncements)
 	mux.HandleFunc("/api/announcements/", s.handleAnnouncements)
 	mux.HandleFunc("/api/admin/announcements", s.handleAnnouncements)
@@ -172,6 +174,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/notifications/", s.handleNotificationActions)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)
 	mux.HandleFunc("/api/session/cookie", s.handleCookieUpdate)
+	mux.HandleFunc("/api/session/cookie/test", s.handleCookieTest)
+	mux.HandleFunc("/api/session/cookie/join-pool", s.handleCookieJoinPool)
 	mux.HandleFunc("/api/session/yyb-binding", s.handleYYBBinding)
 	mux.HandleFunc("/api/session/yyb-qr", s.handleYYBQR)
 	mux.HandleFunc("/api/session/yyb-qr/", s.handleYYBQR)
@@ -239,6 +243,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case snapshot, ok := <-ch:
 			if !ok || !s.streamSessionValid(r, user.ID) {
 				return
+			}
+			if quota, qErr := s.manager.UserRefreshQuota(user.ID); qErr == nil {
+				snapshot.Quota = &quota
 			}
 			payload, err := json.Marshal(snapshot)
 			if err != nil {

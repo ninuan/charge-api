@@ -50,8 +50,31 @@ const publicErrorMessages: Record<string, string> = {
   WXPUSHER_NOT_BOUND: "请先绑定微信提醒",
   WXPUSHER_CHANNEL_DISABLED: "请先开启微信提醒",
   WXPUSHER_INVALID: "微信提醒设置无效",
+  WXPUSHER_TEST_NOT_FOUND: "未找到可查询的测试消息",
   WXPUSHER_RATE_LIMITED: "操作过于频繁，请稍后再试",
   WXPUSHER_UNAVAILABLE: "微信提醒服务暂时不可用，请稍后重试",
+  WATCH_POWER_OFF_ACTIVE: "当前处于计划断电时段，请在恢复供电后再开启提醒",
+  WATCH_CREDENTIAL_EXPIRED: "个人 Cookie 已过期，请先在账号页更新后再开启提醒",
+  WATCH_RECURRING_DISABLED: "固定时段提醒已停用，请开启临时提醒",
+  NOTIFICATION_QUERY_INVALID: "通知筛选或分页参数无效",
+  NOTIFICATION_NOT_FOUND: "未找到通知",
+  PASSWORD_CHANGE_REQUIRED: "请先修改临时密码后再继续操作",
+  REFRESH_QUOTA_EXHAUSTED:
+    "今日免费刷新次数与奖励额度已用完，上传个人 Cookie 并加入互助池可不限次刷新，或录入全站新桩赚取额外次数。",
+  PUBLIC_POOL_UNAVAILABLE:
+    "公共查询通道暂无可用 Cookie。请前往「平台连接」上传个人 Cookie 并加入互助池，或联系管理员补充公共池。",
+  DAILY_PROBE_LIMIT_REACHED: "今日录桩校验次数已达上限，请明天再试。",
+  PERSONAL_COOKIE_REQUIRED:
+    "此操作需要配置有效个人 Cookie 并加入互助公共池（请前往「平台连接」开启）。",
+  COOKIE_TEST_FAILED: "测试个人 Cookie 失败，请检查网络或先添加至少 1 台充电桩后重试。",
+  JOIN_POOL_FAILED: "加入互助公共池失败，请确认当前个人 Cookie 有效后重试。",
+  PUBLIC_POOL_INVALID: "公共 Cookie 备注名或内容无效，请检查后重试。",
+  PUBLIC_POOL_NOT_FOUND: "未找到对应的公共 Cookie。",
+  PUBLIC_POOL_TEST_FAILED: "测试公共 Cookie 失败，请检查网络或确认公共桩库中至少有 1 台充电桩。",
+  SHARED_PILE_NOT_FOUND: "未找到对应的公共充电桩。",
+  SHARED_PILE_INVALID: "公共充电桩名称或位置格式无效。",
+  SHARED_PILE_REFRESH_FAILED: "刷新公共桩失败，请确认公共 Cookie 池有可用凭据。",
+  USER_QUOTA_INVALID: "永久奖励刷新次数需要在 0 到 10000 之间。",
 }
 
 export async function responseErrorMessage(

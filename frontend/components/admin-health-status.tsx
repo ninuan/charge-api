@@ -4,8 +4,8 @@ import {
   CircleCheckIcon,
   CircleXIcon,
   DatabaseIcon,
+  KeyRoundIcon,
   LoaderCircleIcon,
-  QrCodeIcon,
   ServerIcon,
   TriangleAlertIcon,
 } from "lucide-react"
@@ -27,7 +27,7 @@ import type { AdminHealth, HealthState } from "@/lib/types"
 const services = [
   { key: "charge", label: "充电服务", icon: ServerIcon },
   { key: "database", label: "数据库", icon: DatabaseIcon },
-  { key: "yyb", label: "扫码服务", icon: QrCodeIcon },
+  { key: "yyb", label: "公共 Cookie 池", icon: KeyRoundIcon },
 ] as const
 
 const statePresentation: Record<

@@ -9,15 +9,16 @@ import {
   BellRingIcon,
   ChevronRightIcon,
   Clock3Icon,
+  DatabaseIcon,
   MapPinIcon,
   PencilIcon,
   PlugZapIcon,
+  PlusIcon,
   RefreshCwIcon,
   SlidersHorizontalIcon,
   Trash2Icon,
   WifiOffIcon,
   XIcon,
-  ZapIcon,
 } from "lucide-react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
@@ -30,7 +31,7 @@ import {
   useMemo,
   useState,
 } from "react"
-import type { Pile, Port } from "@/lib/types"
+import type { DashboardSnapshot, Pile, Port, SharedPile } from "@/lib/types"
 import { AnnouncementStrip } from "@/components/announcement-strip"
 import { AppShell } from "@/components/app-shell"
 import { AddPileDialog } from "@/components/add-pile-dialog"
@@ -55,6 +56,7 @@ import { notify } from "@/lib/feedback"
 import { parseDashboardQuery } from "@/lib/dashboard-query"
 import {
   dashboardHref,
+  formatQuotaResetTime,
   formatSnapshotTime,
   portCounts,
   portTime,
@@ -84,37 +86,49 @@ const WatchRuleDialog = dynamic(
 
 const stateLabel = { idle: "空闲", in_use: "使用中", offline: "离线" } as const
 
+function parseRemainingMinutes(text?: string): number | null {
+  const cleaned = text?.replace(/\s+/g, "") ?? ""
+  if (!cleaned || cleaned === "充满自停") return null
+  const match = cleaned.match(/^(?:(\d+)小时)?(?:(\d+)分钟?)?(?:(\d+)秒)?$/)
+  if (!match || (!match[1] && !match[2] && !match[3])) return null
+  const hours = match[1] ? Number(match[1]) : 0
+  const mins = match[2] ? Number(match[2]) : 0
+  const secs = match[3] ? Number(match[3]) : 0
+  return hours * 60 + mins + (secs > 0 ? Math.ceil(secs / 60) : 0)
+}
+
 function shortRemaining(port: Port): string {
   if (port.status !== "in_use") return ""
-  if (port.sessionMin && port.sessionMin > 0) {
-    const remMin = Math.max(
-      1,
-      Math.round(port.sessionMin - (port.usedSeconds || 0) / 60)
-    )
+  const text = port.remainingText?.replace(/\s+/g, "") ?? ""
+  if (text === "充满自停") return "充满自停"
+  const remMin = parseRemainingMinutes(text)
+  if (remMin !== null) {
+    if (remMin <= 0) return "0m"
     if (remMin < 60) return `${remMin}m`
     const h = Math.floor(remMin / 60)
     const m = remMin % 60
     return m > 0 ? `${h}h${m}m` : `${h}h`
   }
-  if (port.remainingText) return port.remainingText.replace(/\s+/g, "")
+  if (text) return text
   return "充电中"
 }
 
-function portProgressPct(port: Port): number {
-  if (port.status !== "in_use" || !port.sessionMin || port.sessionMin <= 0) {
-    return 0
-  }
-  return Math.min(
-    100,
-    Math.round(((port.usedSeconds || 0) / (port.sessionMin * 60)) * 100)
-  )
+function portProgressPct(port: Port): number | null {
+  if (port.status !== "in_use") return null
+  const remMin = parseRemainingMinutes(port.remainingText)
+  if (remMin === null) return null
+  const usedMin = (port.usedSeconds || 0) / 60
+  const totalMin = usedMin + remMin
+  if (totalMin <= 0) return null
+  return Math.min(100, Math.round((usedMin / totalMin) * 100))
 }
 
 function soonestPort(pile: Pile): Port | null {
   let best: { port: Port; rem: number } | null = null
   for (const port of pile.ports) {
-    if (port.status !== "in_use" || !port.sessionMin) continue
-    const rem = Math.max(1, port.sessionMin - (port.usedSeconds || 0) / 60)
+    if (port.status !== "in_use") continue
+    const rem = parseRemainingMinutes(port.remainingText)
+    if (rem === null) continue
     if (!best || rem < best.rem) best = { port, rem }
   }
   return best?.port ?? null
@@ -195,8 +209,10 @@ function WorkbenchContent() {
   const {
     snapshot,
     streamState,
+    addPile,
     refreshFromCapture,
     refreshPile,
+    searchSharedPiles,
     reorderPiles,
     fetchSnapshot,
   } = useDashboard()
@@ -205,12 +221,63 @@ function WorkbenchContent() {
   const { unreadCount, loaded: notificationsLoaded } = useNotifications()
   const online = useOnline()
 
+  const viewMode = params.get("view") === "catalog" ? "catalog" : "mine"
+  const [catalogItems, setCatalogItems] = useState<SharedPile[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogAddingId, setCatalogAddingId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshingPileId, setRefreshingPileId] = useState<string | null>(null)
   const [ordering, setOrdering] = useState(false)
   const [reordering, setReordering] = useState(false)
   const [refreshError, setRefreshError] = useState("")
   const [watchPileId, setWatchPileId] = useState<string | null>(null)
+
+  const ownedPileIds = useMemo(
+    () => new Set(snapshot.piles.map((p) => p.id)),
+    [snapshot.piles]
+  )
+
+  useEffect(() => {
+    if (viewMode !== "catalog") return
+    let active = true
+    const timer = window.setTimeout(() => {
+      setCatalogLoading(true)
+      searchSharedPiles(deferredSearch)
+        .then((items) => {
+          if (active) setCatalogItems(items)
+        })
+        .catch(() => {
+          if (active) setCatalogItems([])
+        })
+        .finally(() => {
+          if (active) setCatalogLoading(false)
+        })
+    }, 120)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [viewMode, deferredSearch, searchSharedPiles])
+
+  async function addFromCatalogView(item: SharedPile) {
+    if (catalogAddingId || !online) return
+    setCatalogAddingId(item.deviceId)
+    try {
+      await addPile({
+        id: item.deviceId,
+        name: item.name || "",
+        number: item.number,
+        openNum: item.openNum || 10,
+        status: "在线",
+        address: item.address || "",
+      })
+      notify.success(`已将「${item.name || item.number}」加入常用充电桩`)
+    } catch (reason) {
+      notify.error(reason, { title: "加入常用失败" })
+    } finally {
+      setCatalogAddingId(null)
+    }
+  }
 
   const entries = useMemo(
     () => selectWorkbenchPiles(snapshot.piles, deferredSearch, query.filter),
@@ -285,20 +352,46 @@ function WorkbenchContent() {
     return () => window.removeEventListener("keydown", focus)
   }, [])
 
+  function notifyRefreshResult(
+    result: DashboardSnapshot,
+    pileLabel?: string
+  ) {
+    if (result.refresh.personalCookieFallback) {
+      notify.warning("个人 Cookie 已失效，已自动降级用公共池刷新", {
+        description:
+          result.refresh.message || "请尽快前往账号页更新个人 Cookie。",
+      })
+      return
+    }
+    if (result.refresh.partial || result.refresh.failedDevices > 0) {
+      notify.warning("部分充电桩未能更新", {
+        description: result.refresh.message || "未成功的设备保留最近快照。",
+      })
+      return
+    }
+    if (result.refresh.cached) {
+      notify.success(
+        result.refresh.usedPool
+          ? "已命中全站最近缓存（未消耗刷新次数）"
+          : "刷新间隔内，已展示最近快照",
+        {
+          description: result.refresh.message || undefined,
+        }
+      )
+      return
+    }
+    notify.success(
+      pileLabel ? `${pileLabel} 状态已更新` : "充电桩状态已更新",
+      { description: result.refresh.message || undefined }
+    )
+  }
+
   async function refresh() {
     setRefreshing(true)
     setRefreshError("")
     try {
       const result = await refreshFromCapture()
-      if (result.refresh.partial || result.refresh.failedDevices > 0)
-        notify.warning("部分设备未能更新", {
-          description: result.refresh.message || "未成功的设备保留最近快照。",
-        })
-      else
-        notify.success(
-          result.refresh.cached ? "正在使用最近一次快照" : "设备状态已更新",
-          { description: result.refresh.message || undefined }
-        )
+      notifyRefreshResult(result)
     } catch (reason) {
       if (reason instanceof RequestError && reason.status === 401) {
         clearSession()
@@ -320,17 +413,7 @@ function WorkbenchContent() {
     setRefreshError("")
     try {
       const result = await refreshPile(pile.id)
-      if (result.refresh.personalCookieFallback) {
-        notify.warning("个人 Cookie 已失效，已自动降级用公共池刷新", {
-          description: "请尽快前往账号页更新个人 Cookie。",
-        })
-      } else if (result.refresh.cached) {
-        notify.success("已同步全站最近状态（未消耗额度）")
-      } else {
-        notify.success(`${pile.name || pile.number} 状态已更新`, {
-          description: result.refresh.message || undefined,
-        })
-      }
+      notifyRefreshResult(result, pile.name || pile.number)
     } catch (reason) {
       if (reason instanceof RequestError && reason.status === 401) {
         clearSession()
@@ -372,24 +455,21 @@ function WorkbenchContent() {
   }
 
   const quota = snapshot.quota
-  const quotaLabel =
-    quota?.personalCookieStatus === "valid"
-      ? "个人 Cookie · 不限次"
-      : quota?.personalCookieStatus === "expired"
-        ? `Cookie 已失效 · 降级余 ${quota.totalFreeRemaining} 次`
-        : quota
-          ? `免费余 ${quota.freeDailyRemaining} · 奖励 ${quota.bonusRemaining}`
-          : null
+  const unlimitedQuotaLabel = quota?.unlimitedActive
+    ? quota.joinedPublicPool
+      ? "互助 Cookie · 不限次"
+      : "个人 Cookie · 不限次"
+    : null
 
   const actions = (
     <>
-      {quotaLabel && (
+      {unlimitedQuotaLabel && (
         <Link
           href="/account?tab=connection"
           className="wb-btn wb-btn-ghost"
-          title="查看刷新额度或上传个人 Cookie"
+          title="查看个人 Cookie 与刷新额度"
         >
-          {quotaLabel}
+          {unlimitedQuotaLabel}
         </Link>
       )}
       <WorkbenchButton
@@ -492,6 +572,48 @@ function WorkbenchContent() {
         <div className="wb-heading-actions">{actions}</div>
       </header>
 
+      {quota && !quota.unlimitedActive && (
+        <div
+          className="wb-quota-ribbon"
+          aria-label="查询额度概览"
+          style={{ marginBottom: "14px" }}
+        >
+          <div>
+            <span>每日额度</span>
+            <strong className="wb-mono">
+              {quota.freeDailyRemaining} / {quota.freeDailyLimit} 次
+            </strong>
+          </div>
+          <div>
+            <span>永久额度（跨天不清零）</span>
+            <strong className="wb-mono">{quota.bonusRemaining} 次</strong>
+          </div>
+          <div>
+            <span>每日额度更新时间</span>
+            <strong className="wb-mono">
+              {formatQuotaResetTime(quota.dailyResetAt)}
+            </strong>
+          </div>
+          <div>
+            <span>扣减规则</span>
+            <strong>
+              优先扣每日 · {quota.sharedPileCacheTTLSeconds ?? 60}s 内缓存免扣
+            </strong>
+          </div>
+          <Link
+            href="/account?tab=connection"
+            className="wb-text-link wb-quota-link"
+          >
+            {quota.personalCookieStatus === "expired"
+              ? "Cookie 已失效，去更新"
+              : quota.hasPersonalCookie && quota.requirePoolShareForUnlimited
+                ? "未入互助池，去加入解锁不限次"
+                : "配置个人 Cookie 不限次"}
+            <ArrowRightIcon size={13} />
+          </Link>
+        </div>
+      )}
+
       {!!refreshError && (
         <div className="wb-state-banner wb-banner-warning" role="alert">
           <WifiOffIcon size={16} />
@@ -529,36 +651,76 @@ function WorkbenchContent() {
           className="wb-canvas-ribbon"
           data-slot="dashboard-search-toolbar"
         >
-          <div className="wb-seg-rail" role="group" aria-label="筛选充电口">
-            {[
-              ["all", "全部", snapshot.piles.length],
-              ["idle", "有空闲", availablePiles.length],
-              ["charging", "使用中", chargingPiles],
-              ["offline", "离线", offlinePiles],
-            ].map(([value, label, num]) => (
-              <button
-                key={String(value)}
-                type="button"
-                className={`wb-seg-btn ${
-                  query.filter === value ? "wb-seg-active" : ""
-                }`}
-                aria-pressed={query.filter === value}
-                onClick={() =>
-                  updatePageQuery({
-                    status: value === "all" ? null : String(value),
-                    pile: null,
-                    port: null,
-                    detail: null,
-                  })
-                }
-              >
-                <span>{label}</span>
-                {!initialLoading && (
-                  <span className="wb-seg-cnt">{num}</span>
-                )}
-              </button>
-            ))}
+          <div className="wb-seg-rail" role="tablist" aria-label="视图切换">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === "mine"}
+              className={`wb-seg-btn ${
+                viewMode === "mine" ? "wb-seg-active" : ""
+              }`}
+              onClick={() =>
+                updatePageQuery({ view: null, pile: null, port: null })
+              }
+            >
+              <span>我的常用桩</span>
+              {!initialLoading && (
+                <span className="wb-seg-cnt">{snapshot.piles.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === "catalog"}
+              className={`wb-seg-btn ${
+                viewMode === "catalog" ? "wb-seg-active" : ""
+              }`}
+              onClick={() =>
+                updatePageQuery({
+                  view: "catalog",
+                  pile: null,
+                  port: null,
+                  detail: null,
+                })
+              }
+            >
+              <DatabaseIcon size={13} />
+              <span>公共桩库</span>
+            </button>
           </div>
+
+          {viewMode === "mine" && (
+            <div className="wb-seg-rail" role="group" aria-label="筛选充电口">
+              {[
+                ["all", "全部", snapshot.piles.length],
+                ["idle", "有空闲", availablePiles.length],
+                ["charging", "使用中", chargingPiles],
+                ["offline", "离线", offlinePiles],
+              ].map(([value, label, num]) => (
+                <button
+                  key={String(value)}
+                  type="button"
+                  className={`wb-seg-btn ${
+                    query.filter === value ? "wb-seg-active" : ""
+                  }`}
+                  aria-pressed={query.filter === value}
+                  onClick={() =>
+                    updatePageQuery({
+                      status: value === "all" ? null : String(value),
+                      pile: null,
+                      port: null,
+                      detail: null,
+                    })
+                  }
+                >
+                  <span>{label}</span>
+                  {!initialLoading && (
+                    <span className="wb-seg-cnt">{num}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="wb-ribbon-right">
             <WorkbenchSearch
@@ -571,22 +733,133 @@ function WorkbenchContent() {
                 )
               }
             />
-            <WorkbenchButton
-              variant={ordering ? "secondary" : "ghost"}
-              className="wb-order-toggle"
-              aria-label={ordering ? "完成排序" : "调整充电桩顺序"}
-              aria-pressed={ordering}
-              disabled={snapshot.piles.length < 2 || !online}
-              onClick={() => setOrdering((v) => !v)}
-            >
-              <SlidersHorizontalIcon size={14} />
-              <span>{ordering ? "完成排序" : "排序"}</span>
-            </WorkbenchButton>
+            {viewMode === "mine" && (
+              <WorkbenchButton
+                variant={ordering ? "secondary" : "ghost"}
+                className="wb-order-toggle"
+                aria-label={ordering ? "完成排序" : "调整充电桩顺序"}
+                aria-pressed={ordering}
+                disabled={snapshot.piles.length < 2 || !online}
+                onClick={() => setOrdering((v) => !v)}
+              >
+                <SlidersHorizontalIcon size={14} />
+                <span>{ordering ? "完成排序" : "排序"}</span>
+              </WorkbenchButton>
+            )}
           </div>
         </div>
 
         {/* Spatial Station Module Gallery */}
-        {initialLoading && !snapshot.piles.length ? (
+        {viewMode === "catalog" ? (
+          catalogLoading ? (
+            <StationSkeletonGrid count={4} label="正在加载公共桩库" />
+          ) : catalogItems.length === 0 ? (
+            <WorkbenchEmpty
+              title="公共桩库暂无匹配的充电桩"
+              description={
+                search
+                  ? "换个桩名或桩号搜搜看，或者点击右上角「添加充电桩 → 录入新桩」贡献新桩并赚取永久刷新额度。"
+                  : "还没有收录任何充电桩，点击右上角「添加充电桩 → 录入新桩」成为首位贡献者并获赠永久刷新额度。"
+              }
+              action={
+                <AddPileDialog
+                  disabled={!online || initialLoading}
+                  onAdded={(pile) =>
+                    updatePageQuery({
+                      view: null,
+                      pile: pile.id,
+                      port: null,
+                      detail: null,
+                      q: null,
+                    })
+                  }
+                />
+              }
+            />
+          ) : (
+            <div className="wb-station-grid">
+              {catalogItems.map((item) => {
+                const owned = ownedPileIds.has(item.deviceId)
+                const snap = item.lastSnapshot
+                const snapCounts = snap ? portCounts(snap) : null
+                return (
+                  <section
+                    key={item.deviceId}
+                    aria-label={`${item.name || item.number} 公共充电桩`}
+                    className={`wb-station-card ${
+                      snapCounts && snap?.online
+                        ? snapCounts.idle > 0
+                          ? "wb-station-idle"
+                          : "wb-station-busy"
+                        : "wb-station-offline"
+                    }`}
+                  >
+                    <div className="wb-card-head">
+                      <div className="wb-card-id">
+                        <div className="wb-card-title-row">
+                          <h2>
+                            {item.name ||
+                              `充电桩 ${item.number || item.deviceId.slice(-6)}`}
+                          </h2>
+                          <span className="wb-mono wb-pile-code">
+                            {item.number || item.deviceId.slice(-8)}
+                          </span>
+                        </div>
+                        <p className="wb-card-addr">
+                          <MapPinIcon size={12} aria-hidden="true" />
+                          <span>{item.address || "尚未填写位置"}</span>
+                        </p>
+                      </div>
+                      <div className="wb-card-readout">
+                        {snapCounts && snap?.online ? (
+                          snapCounts.idle > 0 ? (
+                            <div className="wb-readout-big wb-idle-text">
+                              <strong>
+                                {String(snapCounts.idle).padStart(2, "0")}
+                              </strong>
+                              <span>
+                                / {String(snap.ports.length).padStart(2, "0")}{" "}
+                                空闲
+                              </span>
+                            </div>
+                          ) : (
+                            <StatusPill tone="busy">
+                              全满 {snap.ports.length}/{snap.ports.length}
+                            </StatusPill>
+                          )
+                        ) : (
+                          <StatusPill tone="neutral">
+                            {item.openNum || 0} 口
+                          </StatusPill>
+                        )}
+                      </div>
+                    </div>
+                    <div className="wb-card-foot">
+                      <span className="wb-foot-note">
+                        {item.lastFetchedAt
+                          ? `最近全站缓存 ${formatSnapshotTime(item.lastFetchedAt)}`
+                          : "已收录至公共桩库"}
+                      </span>
+                      <WorkbenchButton
+                        variant={owned ? "ghost" : "outline"}
+                        disabled={
+                          owned ||
+                          !online ||
+                          catalogAddingId === item.deviceId
+                        }
+                        busy={catalogAddingId === item.deviceId}
+                        onClick={() => void addFromCatalogView(item)}
+                      >
+                        <PlusIcon size={13} />
+                        {owned ? "已在常用" : "加入常用"}
+                      </WorkbenchButton>
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+          )
+        ) : initialLoading && !snapshot.piles.length ? (
           <StationSkeletonGrid count={4} label="正在读取充电桩" />
         ) : error && !snapshot.piles.length ? (
           <WorkbenchError message={error} retry={() => void retry()} />
@@ -685,7 +958,11 @@ function WorkbenchContent() {
                           variant="ghost"
                           className="wb-icon-button"
                           aria-label={`刷新 ${pile.name || pile.number}`}
-                          title="刷新此桩（未命中全站缓存消耗 1 次额度）"
+                          title={
+                            quota?.unlimitedActive
+                              ? "刷新此桩（不限次）"
+                              : "刷新此桩（未命中全站缓存消耗 1 次额度）"
+                          }
                           busy={refreshingPileId === pile.id}
                           disabled={
                             !online ||
@@ -803,12 +1080,14 @@ function WorkbenchContent() {
                                     ? rem
                                     : "离线"}
                               </span>
-                              {port.status === "in_use" && (
+                              {port.status === "in_use" && pct !== null && (
                                 <span
                                   className="wb-socket-chip-meter"
                                   aria-hidden="true"
                                 >
-                                  <i style={{ width: `${pct || 28}%` }} />
+                                  <i
+                                    style={{ width: `${Math.max(4, pct)}%` }}
+                                  />
                                 </span>
                               )}
                             </button>
@@ -1014,6 +1293,15 @@ function WorkbenchContent() {
                   portId={selectedPortId}
                   stale={stale || !selected.online}
                   onRemind={() => remind(selected)}
+                  onRefresh={() => void refreshSinglePile(selected)}
+                  refreshing={refreshingPileId === selected.id}
+                  refreshDisabled={
+                    !online ||
+                    !currentUser?.refreshEnabled ||
+                    refreshing ||
+                    (refreshingPileId !== null &&
+                      refreshingPileId !== selected.id)
+                  }
                   activeReminder={activeRules.some(
                     (rule) => rule.deviceId === selected.id
                   )}
@@ -1055,12 +1343,18 @@ function PileDetail({
   portId,
   stale,
   onRemind,
+  onRefresh,
+  refreshing = false,
+  refreshDisabled = false,
   activeReminder,
 }: {
   pile: Pile
   portId?: number
   stale: boolean
   onRemind: () => void
+  onRefresh?: () => void
+  refreshing?: boolean
+  refreshDisabled?: boolean
   activeReminder: boolean
 }) {
   const { deletePile, updatePile, fetchSnapshot } = useDashboard()
@@ -1155,6 +1449,17 @@ function PileDetail({
         </div>
 
         <div className="wb-insp-head-ops">
+          {onRefresh && (
+            <WorkbenchButton
+              variant="ghost"
+              busy={refreshing}
+              disabled={refreshDisabled}
+              onClick={onRefresh}
+            >
+              <RefreshCwIcon size={13} />
+              刷新
+            </WorkbenchButton>
+          )}
           <WorkbenchButton
             variant="ghost"
             disabled={!online}
@@ -1468,22 +1773,6 @@ function PortInspector({ port, stale }: { port: Port; stale: boolean }) {
           <div>
             <dt>预计剩余</dt>
             <dd>{portTime(port, "remaining")}</dd>
-          </div>
-          <div>
-            <dt>{stale ? "上次功率" : "当前功率"}</dt>
-            <dd className="wb-mono">
-              <ZapIcon size={12} className="wb-busy-text" />
-              {Number.isFinite(port.powerKw) ? port.powerKw.toFixed(2) : "—"} kW
-            </dd>
-          </div>
-          <div>
-            <dt>累计用电</dt>
-            <dd className="wb-mono">
-              {Number.isFinite(port.energyKwh)
-                ? port.energyKwh.toFixed(2)
-                : "—"}{" "}
-              kWh
-            </dd>
           </div>
         </dl>
       ) : (

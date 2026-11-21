@@ -11,8 +11,10 @@ import type {
   OperationsStatus,
   PublicPoolCookie,
   RegistrationSettings,
+  SharedPile,
   SystemException,
   TemporaryPasswordResponse,
+  UserRefreshQuota,
   UserRole,
 } from "@/lib/types"
 import type { AdminTrendRange, AdminTrendsResponse } from "@/lib/api/generated"
@@ -245,5 +247,56 @@ export const adminApi = {
       `/api/admin/public-pool/${encodeURIComponent(id)}`,
       { method: "DELETE" },
       "删除公共 Cookie 失败"
+    ),
+  testPublicPoolCookie: (id: string) =>
+    request<PublicPoolCookie>(
+      `/api/admin/public-pool/${encodeURIComponent(id)}/test`,
+      { method: "POST" },
+      "测试公共 Cookie 失败"
+    ),
+  sharedPiles: (q = "") => {
+    const params = new URLSearchParams()
+    if (q.trim()) params.set("q", q.trim())
+    const suffix = params.toString() ? `?${params.toString()}` : ""
+    return request<SharedPile[]>(
+      `/api/admin/shared-piles${suffix}`,
+      {},
+      "加载公共桩库失败"
+    )
+  },
+  updateSharedPile: (
+    deviceId: string,
+    payload: { name: string; address: string }
+  ) =>
+    request<SharedPile>(
+      `/api/admin/shared-piles/${encodeURIComponent(deviceId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "更新公共桩信息失败"
+    ),
+  refreshSharedPile: (deviceId: string) =>
+    request<SharedPile>(
+      `/api/admin/shared-piles/${encodeURIComponent(deviceId)}/refresh`,
+      { method: "POST" },
+      "刷新公共桩状态失败"
+    ),
+  deleteSharedPile: (deviceId: string) =>
+    request<void>(
+      `/api/admin/shared-piles/${encodeURIComponent(deviceId)}`,
+      { method: "DELETE" },
+      "删除公共桩失败"
+    ),
+  updateUserQuota: (userId: string, bonusRemaining: number) =>
+    request<UserRefreshQuota>(
+      `/api/admin/users/${encodeURIComponent(userId)}/quota`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bonusRemaining }),
+      },
+      "更新用户奖励次数失败"
     ),
 }

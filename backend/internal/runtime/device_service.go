@@ -210,7 +210,7 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		snapshot.Refresh.Message = "管理员已暂停此账户的远端刷新，当前展示缓存数据"
 		return m.attachQuota(userID, snapshot), nil
 	}
-	if !m.hasValidPersonalCookie(runtime) && m.PublicPoolAvailableCount() > 0 {
+	if !m.hasUnlimitedPrivilege(userID, runtime) {
 		return m.refreshViaPublicPool(userID, runtime, runtime.client.HasPersonalCookie() && runtime.isPersonalCookieExpired())
 	}
 	remotePiles, err := runtime.refresh(force)
@@ -218,16 +218,16 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		info := runtime.store.Snapshot().Refresh
 		m.recordRefreshMetrics(userID, info)
 		if charger.IsAuthExpired(err) {
-			runtime.setPersonalCookieExpired(true)
-			m.recordMetric(userID, "cookie_error")
-			if notificationErr := m.notifyCredentialExpired(userID, time.Now().UTC()); notificationErr != nil {
+			if notificationErr := m.markPersonalCookieExpired(userID, runtime, time.Now().UTC()); notificationErr != nil {
 				err = errors.Join(err, fmt.Errorf("record expired credential notification: %w", notificationErr))
 			}
 			if m.PublicPoolAvailableCount() > 0 {
 				return m.refreshViaPublicPool(userID, runtime, true)
 			}
+			_ = m.Save()
+			return model.DashboardSnapshot{}, err
 		}
-		runtime.recordFailure(charger.IsAuthExpired(err))
+		runtime.recordFailure(false)
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
@@ -277,6 +277,10 @@ func (m *Manager) RecoverRefreshWithYYB(userID string, yybClient YYBCodeClient, 
 }
 
 func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.DashboardSnapshot, error) {
+	return m.UpdateCookieWithPoolOption(userID, rawCookie, false)
+}
+
+func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, joinPool bool) (model.DashboardSnapshot, error) {
 	cookie, err := charger.ExtractCookie(rawCookie)
 	if err != nil {
 		return model.DashboardSnapshot{}, err
@@ -297,8 +301,24 @@ func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.Dashboard
 	}
 	m.invalidateBackgroundCredentialValidation(userID)
 	user, _ := m.User(userID)
+	syncPool := func() {
+		if joinPool {
+			label := "用户互助 · " + user.Username
+			if user.Username == "" {
+				label = "用户互助 · " + userID
+			}
+			_, _ = m.repository.UpsertUserPublicPoolCookie(userID, label, cookie)
+		} else {
+			_ = m.repository.DeleteUserPublicPoolCookie(userID)
+		}
+	}
 	if !user.RefreshEnabled {
+		if joinPool {
+			_ = runtime.client.UpdateCookie(previous)
+			return model.DashboardSnapshot{}, fmt.Errorf("管理员已暂停此账户的远端刷新，暂时无法验证并加入互助公共池")
+		}
 		runtime.setPersonalCookieExpired(false)
+		_ = m.repository.DeleteUserPublicPoolCookie(userID)
 		snapshot := runtime.store.Snapshot()
 		snapshot.Refresh.Cached = true
 		snapshot.Refresh.Message = "Cookie 已保存；远端刷新当前已暂停，继续展示缓存数据"
@@ -312,15 +332,22 @@ func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.Dashboard
 		if shared, _ := m.repository.SearchSharedPiles("", 1); len(shared) > 0 {
 			if _, probeErr := runtime.client.FetchPileWithCookie(shared[0].DeviceID, cookie); probeErr != nil {
 				_ = runtime.client.UpdateCookie(previous)
-				runtime.recordFailure(charger.IsAuthExpired(probeErr))
+				runtime.recordFailure(false)
 				_ = m.Save()
 				return model.DashboardSnapshot{}, probeErr
 			}
 		}
+		now := time.Now().UTC()
 		runtime.setPersonalCookieExpired(false)
-		_ = m.resolveCredentialExpired(userID, time.Now().UTC())
+		runtime.recordRemoteOK(now)
+		syncPool()
+		_ = m.resolveCredentialExpired(userID, now)
 		snapshot := runtime.store.Snapshot()
-		snapshot.Refresh.Message = "个人 Cookie 已保存并生效，已解锁不限次刷新与空位提醒"
+		if joinPool {
+			snapshot.Refresh.Message = "个人 Cookie 已加入互助公共池，已解锁不限次刷新与空位提醒"
+		} else {
+			snapshot.Refresh.Message = "个人 Cookie 已保存"
+		}
 		runtime.store.SetRefreshInfo(snapshot.Refresh)
 		if err := m.Save(); err != nil {
 			return model.DashboardSnapshot{}, err
@@ -332,16 +359,13 @@ func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.Dashboard
 		info := runtime.store.Snapshot().Refresh
 		m.recordRefreshMetrics(userID, info)
 		_ = runtime.client.UpdateCookie(previous)
-		runtime.recordFailure(charger.IsAuthExpired(err))
-		if charger.IsAuthExpired(err) {
-			if notificationErr := m.notifyCredentialExpired(userID, time.Now().UTC()); notificationErr != nil {
-				err = errors.Join(err, fmt.Errorf("record expired credential notification: %w", notificationErr))
-			}
-		}
+		runtime.recordFailure(false)
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
 	runtime.setPersonalCookieExpired(false)
+	runtime.recordRemoteOK(time.Now().UTC())
+	syncPool()
 	m.recordSharedPiles(userID, remotePiles)
 	snapshot := runtime.store.Snapshot()
 	m.recordRefreshMetrics(userID, snapshot.Refresh)
@@ -352,6 +376,14 @@ func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.Dashboard
 }
 
 func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) error {
+	return m.saveAndRecordPiles(userID, piles, true)
+}
+
+func (m *Manager) saveAndRecordPoolPiles(userID string, piles []model.Pile) error {
+	return m.saveAndRecordPiles(userID, piles, false)
+}
+
+func (m *Manager) saveAndRecordPiles(userID string, piles []model.Pile, validatePersonalCredential bool) error {
 	if err := m.Save(); err != nil {
 		return err
 	}
@@ -365,10 +397,12 @@ func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) er
 	if err := m.processPileAvailability(userID, piles, events); err != nil {
 		return fmt.Errorf("deliver remote port notifications: %w", err)
 	}
-	now := time.Now().UTC()
-	m.markBackgroundCredentialsValidated(userID, piles, now)
-	if err := m.resolveCredentialExpired(userID, now); err != nil {
-		return fmt.Errorf("resolve credential notification: %w", err)
+	if validatePersonalCredential {
+		now := time.Now().UTC()
+		m.markBackgroundCredentialsValidated(userID, piles, now)
+		if err := m.resolveCredentialExpired(userID, now); err != nil {
+			return fmt.Errorf("resolve credential notification: %w", err)
+		}
 	}
 	return nil
 }

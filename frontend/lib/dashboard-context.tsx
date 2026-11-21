@@ -66,7 +66,10 @@ type DashboardContextValue = {
   refreshFromCapture: () => Promise<DashboardSnapshot>
   refreshPile: (id: string) => Promise<DashboardSnapshot>
   searchSharedPiles: (query: string) => Promise<SharedPile[]>
-  updateCookie: (cookie: string) => Promise<void>
+  updateCookie: (cookie: string, joinPublicPool?: boolean) => Promise<void>
+  testCookie: () => Promise<{ valid: boolean; error?: string }>
+  joinPublicPool: () => Promise<void>
+  leavePublicPool: () => Promise<void>
   clearCookie: () => Promise<void>
   connectStream: () => void
   disconnectStream: () => void
@@ -104,13 +107,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const applySnapshot = useCallback((next: DashboardSnapshot) => {
+    if (!next || !Array.isArray(next.piles)) return
     const stamp = Date.parse(next.updatedAt)
     if (Number.isFinite(stamp)) {
+      if (stamp <= 0 && lastServerStampRef.current > 0) return
       // 慢的 REST 响应可能晚于更新的 SSE 帧到达，旧快照直接丢弃，避免数据闪回。
-      if (stamp < lastServerStampRef.current) return
-      lastServerStampRef.current = stamp
+      if (stamp > 0 && stamp < lastServerStampRef.current) return
+      if (stamp > 0) lastServerStampRef.current = stamp
     }
-    setSnapshot(next)
+    setSnapshot((current) => ({
+      ...next,
+      quota: next.quota ?? current.quota,
+    }))
   }, [])
 
   const reset = useCallback(() => {
@@ -155,6 +163,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         },
         "添加充电桩失败，请检查桩号后重试。"
       )
+      setSnapshot((current) => {
+        const exists = current.piles.some((item) => item.id === pile.id)
+        const nextPiles = exists
+          ? current.piles.map((item) => (item.id === pile.id ? pile : item))
+          : [...current.piles, pile]
+        return {
+          ...current,
+          piles: nextPiles,
+          statistics: {
+            ...current.statistics,
+            pileCount: nextPiles.length,
+          },
+          quota: pile.quota ?? current.quota,
+        }
+      })
       await syncAfterMutation()
       return pile
     },
@@ -243,14 +266,14 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const updateCookie = useCallback(
-    async (cookie: string) => {
+    async (cookie: string, joinPublicPool = true) => {
       applySnapshot(
         await request<DashboardSnapshot>(
           "/api/session/cookie",
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cookie }),
+            body: JSON.stringify({ cookie, joinPublicPool }),
             timeoutMs: remoteOperationTimeoutMs,
           },
           "登录信息更新失败，请检查内容后重试。"
@@ -259,6 +282,42 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     },
     [applySnapshot]
   )
+
+  const joinPublicPool = useCallback(async () => {
+    applySnapshot(
+      await request<DashboardSnapshot>(
+        "/api/session/cookie/join-pool",
+        { method: "POST", timeoutMs: remoteOperationTimeoutMs },
+        "加入互助公共池失败，请确认当前 Cookie 仍然有效。"
+      )
+    )
+  }, [applySnapshot])
+
+  const leavePublicPool = useCallback(async () => {
+    applySnapshot(
+      await request<DashboardSnapshot>(
+        "/api/session/cookie/join-pool",
+        { method: "DELETE" },
+        "退出互助公共池失败，请稍后重试。"
+      )
+    )
+  }, [applySnapshot])
+
+  const testCookie = useCallback(async () => {
+    const res = await request<{
+      valid: boolean
+      error?: string
+      snapshot?: DashboardSnapshot
+    }>(
+      "/api/session/cookie/test",
+      { method: "POST", timeoutMs: remoteOperationTimeoutMs },
+      "测试个人 Cookie 失败，请稍后重试。"
+    )
+    if (res.snapshot && Array.isArray(res.snapshot.piles)) {
+      applySnapshot(res.snapshot)
+    }
+    return { valid: res.valid, error: res.error }
+  }, [applySnapshot])
 
   const clearCookie = useCallback(async () => {
     applySnapshot(
@@ -350,6 +409,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       refreshPile,
       searchSharedPiles,
       updateCookie,
+      testCookie,
+      joinPublicPool,
+      leavePublicPool,
       clearCookie,
       connectStream,
       disconnectStream,
@@ -374,6 +436,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       subscribeNotifications,
       subscribeStreamOpen,
       streamState,
+      joinPublicPool,
+      leavePublicPool,
+      testCookie,
       updateCookie,
       updatePile,
     ]

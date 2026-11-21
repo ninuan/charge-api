@@ -87,3 +87,21 @@ export function updatePageQuery(
   if (replace) window.history.replaceState(null, "", url)
   else window.history.pushState(null, "", url)
 }
+
+export function formatQuotaResetTime(iso?: string): string {
+  if (!iso) return "每日 00:00（北京时间）"
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) return "每日 00:00（北京时间）"
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date)
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? ""
+  const hour = get("hour") === "24" ? "00" : get("hour")
+  return `${get("month")}-${get("day")} ${hour}:${get("minute")}（每日 00:00）`
+}

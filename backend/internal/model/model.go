@@ -185,6 +185,7 @@ type PileCreateResponse struct {
 type PublicPoolCookie struct {
 	ID                  string     `json:"id"`
 	Label               string     `json:"label"`
+	OwnerUserID         string     `json:"ownerUserId,omitempty"`
 	Enabled             bool       `json:"enabled"`
 	Status              string     `json:"status"` // "healthy" | "expired"
 	ConsecutiveFailures int        `json:"consecutiveFailures"`
@@ -220,18 +221,23 @@ type SharedPile struct {
 }
 
 type UserRefreshQuota struct {
-	HasPersonalCookie          bool   `json:"hasPersonalCookie"`
-	PersonalCookieStatus       string `json:"personalCookieStatus"` // "none" | "valid" | "expired"
-	FreeDailyLimit             int    `json:"freeDailyLimit"`
-	FreeDailyUsed              int    `json:"freeDailyUsed"`
-	FreeDailyRemaining         int    `json:"freeDailyRemaining"`
-	BonusRemaining             int    `json:"bonusRemaining"`
-	TotalFreeRemaining         int    `json:"totalFreeRemaining"`
-	ContributedPileCount       int    `json:"contributedPileCount"`
-	PileContributionBonusQuota int    `json:"pileContributionBonusQuota"`
-	FreeUserWatchAllowed       bool   `json:"freeUserWatchAllowed"`
-	CookieGuideURL             string `json:"cookieGuideUrl,omitempty"`
-	PublicPoolAvailable        int    `json:"publicPoolAvailable"`
+	HasPersonalCookie            bool       `json:"hasPersonalCookie"`
+	PersonalCookieStatus         string     `json:"personalCookieStatus"` // "none" | "valid" | "expired"
+	JoinedPublicPool             bool       `json:"joinedPublicPool"`
+	RequirePoolShareForUnlimited bool       `json:"requirePoolShareForUnlimited"`
+	UnlimitedActive              bool       `json:"unlimitedActive"`
+	FreeDailyLimit               int        `json:"freeDailyLimit"`
+	FreeDailyUsed                int        `json:"freeDailyUsed"`
+	FreeDailyRemaining           int        `json:"freeDailyRemaining"`
+	BonusRemaining               int        `json:"bonusRemaining"`
+	TotalFreeRemaining           int        `json:"totalFreeRemaining"`
+	DailyResetAt                 *time.Time `json:"dailyResetAt,omitempty"`
+	SharedPileCacheTTLSeconds    int        `json:"sharedPileCacheTTLSeconds,omitempty"`
+	ContributedPileCount         int        `json:"contributedPileCount"`
+	PileContributionBonusQuota   int        `json:"pileContributionBonusQuota"`
+	FreeUserWatchAllowed         bool       `json:"freeUserWatchAllowed"`
+	CookieGuideURL               string     `json:"cookieGuideUrl,omitempty"`
+	PublicPoolAvailable          int        `json:"publicPoolAvailable"`
 }
 
 type PileUpsertRequest struct {
@@ -342,6 +348,7 @@ type RegistrationSettings struct {
 	PileContributionBonusQuota   int    `json:"pileContributionBonusQuota"`
 	SharedPileCacheTTLSeconds    int    `json:"sharedPileCacheTTLSeconds"`
 	FreeUserWatchAllowed         bool   `json:"freeUserWatchAllowed"`
+	RequirePoolShareForUnlimited bool   `json:"requirePoolShareForUnlimited"`
 	CookieGuideURL               string `json:"cookieGuideUrl"`
 }
 
@@ -925,6 +932,7 @@ type AdminUserSummary struct {
 	Credential          CredentialSummary    `json:"credential"`
 	SnapshotUpdatedAt   time.Time            `json:"snapshotUpdatedAt"`
 	LastRefresh         RefreshInfo          `json:"lastRefresh"`
+	Quota               *UserRefreshQuota    `json:"quota,omitempty"`
 	RecoveryDiagnostics []RecoveryDiagnostic `json:"recoveryDiagnostics"`
 }
 

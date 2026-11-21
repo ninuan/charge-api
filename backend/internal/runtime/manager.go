@@ -142,6 +142,7 @@ func NewManager(
 			PileContributionBonusQuota:   defaultPileContributionBonus,
 			SharedPileCacheTTLSeconds:    defaultSharedPileCacheTTL,
 			FreeUserWatchAllowed:         false,
+			RequirePoolShareForUnlimited: true,
 			CookieGuideURL:               "",
 		},
 	}
@@ -344,13 +345,21 @@ func newUserRuntime(requests []parser.CaptureRequest, state persistence.UserStat
 		store.SetRefreshInfo(refresh)
 	}
 
+	expiredOnBoot := false
+	if state.Cookie != "" && state.Stats.LastAuthFailureAt != nil {
+		if state.Stats.LastRemoteOKAt == nil || state.Stats.LastAuthFailureAt.After(*state.Stats.LastRemoteOKAt) {
+			expiredOnBoot = true
+		}
+	}
+
 	runtime := &UserRuntime{
-		store:               store,
-		client:              client,
-		stats:               state.Stats,
-		minInterval:         minInterval,
-		yybBinding:          cloneYYBBinding(state.YYBBinding),
-		recoveryDiagnostics: cloneRecoveryDiagnostics(state.RecoveryDiagnostics),
+		store:                 store,
+		client:                client,
+		stats:                 state.Stats,
+		minInterval:           minInterval,
+		yybBinding:            cloneYYBBinding(state.YYBBinding),
+		recoveryDiagnostics:   cloneRecoveryDiagnostics(state.RecoveryDiagnostics),
+		personalCookieExpired: expiredOnBoot,
 	}
 	if refresh.LastRemoteAt != nil {
 		runtime.lastRemoteFetch = *refresh.LastRemoteAt

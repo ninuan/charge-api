@@ -4,6 +4,7 @@ import {
   ClipboardListIcon,
   CopyIcon,
   DatabaseIcon,
+  PencilIcon,
   PlusIcon,
   RefreshCwIcon,
   Trash2Icon,
@@ -33,6 +34,7 @@ import type {
   OperationsStatus,
   PublicPoolCookie,
   RegistrationSettings,
+  SharedPile,
 } from "@/lib/types"
 import {
   SectionHeading,
@@ -331,6 +333,256 @@ export function WorkbenchPolicies() {
     <PolicyForm key={JSON.stringify(data)} initial={data} onSaved={setData} />
   )
 }
+
+export function WorkbenchPublicPool() {
+  const online = useOnline()
+  return <PublicCookiePoolManager online={online} />
+}
+
+export function WorkbenchSharedPiles() {
+  const online = useOnline()
+  const [query, setQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 200)
+    return () => window.clearTimeout(timer)
+  }, [query])
+  const fetcher = useCallback(
+    () => adminApi.sharedPiles(debouncedQuery),
+    [debouncedQuery]
+  )
+  const { data, error, loading, reload } = useRemote<SharedPile[]>(fetcher)
+  const [editing, setEditing] = useState<SharedPile | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<SharedPile | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editAddress, setEditAddress] = useState("")
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  async function saveEdit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editing) return
+    setSaving(true)
+    try {
+      await adminApi.updateSharedPile(editing.deviceId, {
+        name: editName.trim(),
+        address: editAddress.trim(),
+      })
+      setEditing(null)
+      reload()
+      notify.success("公共桩信息已更新")
+    } catch (reason) {
+      notify.error(reason instanceof Error ? reason.message : "更新失败")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function refreshItem(item: SharedPile) {
+    setBusyId(item.deviceId)
+    try {
+      await adminApi.refreshSharedPile(item.deviceId)
+      reload()
+      notify.success(`已刷新「${item.name || item.number}」`)
+    } catch (reason) {
+      notify.error(reason instanceof Error ? reason.message : "刷新失败")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function deleteItem(item: SharedPile) {
+    setBusyId(item.deviceId)
+    try {
+      await adminApi.deleteSharedPile(item.deviceId)
+      setConfirmDelete(null)
+      reload()
+      notify.success(`已从公共桩库移除「${item.name || item.number}」`)
+    } catch (reason) {
+      notify.error(reason instanceof Error ? reason.message : "删除失败")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const items = data ?? []
+
+  return (
+    <section className="wb-invites">
+      <div className="wb-page-rule">
+        <WorkbenchSearch
+          label="搜索公共桩库"
+          placeholder="按桩名、短桩号、设备 ID 或位置搜索"
+          value={query}
+          onChange={setQuery}
+        />
+        <span className="wb-small wb-muted">共收录 {items.length} 台</span>
+      </div>
+      {error ? (
+        <WorkbenchError message={error} retry={reload} />
+      ) : loading && !data ? (
+        <WorkbenchLoading label="正在读取公共桩库" />
+      ) : items.length === 0 ? (
+        <WorkbenchEmpty
+          icon={DatabaseIcon}
+          title="公共桩库暂无记录"
+          description="用户添加并校验通过的新充电桩会自动收录到这里。"
+        />
+      ) : (
+        <div className="wb-table-wrap">
+          <table className="wb-data-table">
+            <thead>
+              <tr>
+                <th>充电桩</th>
+                <th>桩号 / 设备 ID</th>
+                <th>口数</th>
+                <th>最近全站缓存</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.deviceId}>
+                  <td>
+                    <strong>{item.name || "未命名充电桩"}</strong>
+                    {item.address && (
+                      <p className="wb-small wb-muted">{item.address}</p>
+                    )}
+                  </td>
+                  <td className="wb-mono">
+                    <div>{item.number || "—"}</div>
+                    <div className="wb-small wb-muted">{item.deviceId}</div>
+                  </td>
+                  <td>{item.openNum || 0} 口</td>
+                  <td>
+                    {item.lastFetchedAt
+                      ? formatSnapshotTime(item.lastFetchedAt, true)
+                      : "尚未缓存"}
+                  </td>
+                  <td>
+                    <div className="wb-row-actions">
+                      <WorkbenchButton
+                        variant="ghost"
+                        disabled={!online || busyId === item.deviceId}
+                        onClick={() => {
+                          setEditing(item)
+                          setEditName(item.name || "")
+                          setEditAddress(item.address || "")
+                        }}
+                      >
+                        <PencilIcon size={14} />
+                        编辑
+                      </WorkbenchButton>
+                      <WorkbenchButton
+                        variant="ghost"
+                        busy={busyId === item.deviceId}
+                        disabled={!online || busyId !== null}
+                        onClick={() => void refreshItem(item)}
+                      >
+                        <RefreshCwIcon size={14} />
+                        刷新
+                      </WorkbenchButton>
+                      <WorkbenchButton
+                        variant="ghost"
+                        disabled={!online || busyId !== null}
+                        onClick={() => setConfirmDelete(item)}
+                      >
+                        <Trash2Icon size={14} />
+                        删除
+                      </WorkbenchButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Dialog
+        open={!!editing}
+        onOpenChange={(open) => !open && !saving && setEditing(null)}
+      >
+        <DialogContent className="workbench-dialog">
+          <DialogHeader>
+            <DialogTitle>编辑公共充电桩信息</DialogTitle>
+            <DialogDescription>
+              修改后的名称和位置将同步展示给公共桩库里的所有用户。
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={saveEdit} className="space-y-4">
+            <Field>
+              <FieldLabel htmlFor="shared-pile-name">名称</FieldLabel>
+              <Input
+                id="shared-pile-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="例如：北门车棚 3 号桩"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="shared-pile-addr">位置</FieldLabel>
+              <Input
+                id="shared-pile-addr"
+                value={editAddress}
+                onChange={(e) => setEditAddress(e.target.value)}
+                placeholder="例如：1 号楼东侧"
+              />
+            </Field>
+            <DialogFooter>
+              <WorkbenchButton
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setEditing(null)}
+              >
+                取消
+              </WorkbenchButton>
+              <WorkbenchButton type="submit" busy={saving} disabled={!online}>
+                保存
+              </WorkbenchButton>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!confirmDelete}
+        onOpenChange={(open) => !open && !busyId && setConfirmDelete(null)}
+      >
+        <DialogContent className="workbench-dialog">
+          <DialogHeader>
+            <DialogTitle>从公共桩库删除该充电桩？</DialogTitle>
+            <DialogDescription>
+              将从全站公共桩库移除「
+              {confirmDelete?.name || confirmDelete?.number || confirmDelete?.deviceId}
+              」，已将该桩加入常用列表的用户不会受影响。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <WorkbenchButton
+              type="button"
+              variant="outline"
+              disabled={busyId !== null}
+              onClick={() => setConfirmDelete(null)}
+            >
+              取消
+            </WorkbenchButton>
+            <WorkbenchButton
+              type="button"
+              variant="destructive"
+              busy={busyId !== null && busyId === confirmDelete?.deviceId}
+              disabled={!online}
+              onClick={() => confirmDelete && void deleteItem(confirmDelete)}
+            >
+              确认删除
+            </WorkbenchButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  )
+}
 function PolicyForm({
   initial,
   onSaved,
@@ -339,6 +591,9 @@ function PolicyForm({
   onSaved: (value: RegistrationSettings) => void
 }) {
   const online = useOnline()
+  const [section, setSection] = useState<
+    "pool" | "registration" | "reminders" | "retention"
+  >("pool")
   const [draft, setDraft] = useState(initial),
     [saving, setSaving] = useState(false),
     [error, setError] = useState("")
@@ -422,7 +677,7 @@ function PolicyForm({
           min={min}
           max={max}
           required
-          value={Number(draft[key])}
+          value={Number(draft[key] ?? 0)}
           onChange={(event) =>
             change(
               key,
@@ -453,112 +708,164 @@ function PolicyForm({
   )
   return (
     <form onSubmit={submit} className="wb-policies-form">
-      <SectionHeading title="注册与默认权限" />
-      {toggle(
-        "openRegistration",
-        "开放自助注册",
-        "开启后，不填写邀请码也可以创建账户。"
-      )}
-      {toggle(
-        "inviteRequired",
-        "允许邀请码注册",
-        "关闭自助注册时，持有有效邀请码的人仍可注册。"
-      )}
-      {toggle(
-        "defaultRefreshEnabled",
-        "新用户允许刷新",
-        "新建账户的默认远端访问权限，不影响已有账户。"
-      )}
-      <div className="wb-form-grid">{input("defaultDeviceLimit")}</div>
-      <SectionHeading title="按需提醒" />
-      {toggle(
-        "backgroundRemindersEnabled",
-        "允许后台空闲提醒",
-        "只为用户主动开启的临时提醒检查设备；固定周期规则已停用。"
-      )}
-      <div className="wb-form-grid">
-        {input("watchRefreshIntervalMinutes")}
-        {input("watchPileLimitPerUser")}
-        {input("watchDailyRefreshQuota")}
+      <div
+        className="wb-seg-rail"
+        role="tablist"
+        aria-label="系统策略分类"
+        style={{ marginBottom: "20px" }}
+      >
+        {(
+          [
+            ["pool", "公共池与额度"],
+            ["registration", "注册与权限"],
+            ["reminders", "提醒与断电"],
+            ["retention", "数据保留"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={section === id}
+            className={`wb-seg-btn ${section === id ? "wb-seg-active" : ""}`}
+            onClick={() => setSection(id)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
-      <SectionHeading title="计划断电" />
-      {toggle(
-        "scheduledPowerOffEnabled",
-        "在断电时段暂停请求",
-        "临时提醒的截止时间不超过当日断电开始时间。"
-      )}
-      {draft.scheduledPowerOffEnabled && (
-        <div className="wb-form-grid">
-          {(
-            [
-              ["scheduledPowerOffStartMinute", "断电开始时间"],
-              ["scheduledPowerOffEndMinute", "恢复供电时间"],
-            ] as const
-          ).map(([key, label]) => (
-            <Field key={key}>
-              <FieldLabel htmlFor={`policy-${key}`}>{label}</FieldLabel>
+
+      {section === "pool" && (
+        <>
+          <SectionHeading
+            title="公共 Cookie 池与免费额度"
+            description="免费用户共享公共池查询；贡献全站新桩后自动发放永不过期的额外刷新次数。"
+          />
+          {toggle(
+            "requirePoolShareForUnlimited",
+            "需要加入互助公共池才解锁个人 Cookie 权益",
+            "开启后，用户需同意将个人 Cookie 加入公共池才算个人 Cookie 用户（不限次刷新+空位提醒）；未加入则按免费用户额度计费。"
+          )}
+          {toggle(
+            "freeUserWatchAllowed",
+            "允许免费用户开启空位提醒",
+            "关闭时，仅已解锁个人 Cookie 权益的用户可以创建和运行后台空位提醒。"
+          )}
+          <div className="wb-form-grid">
+            {input("freeDailyRefreshQuota")}
+            {input("pileContributionBonusQuota")}
+            {input("sharedPileCacheTTLSeconds")}
+            <Field>
+              <FieldLabel htmlFor="policy-cookieGuideUrl">
+                Cookie 抓包视频教程链接（可选）
+              </FieldLabel>
               <Input
-                id={`policy-${key}`}
-                type="time"
-                required
-                value={minutesToTime(draft[key])}
-                onChange={(event) => {
-                  const value = timeToMinutes(event.target.value)
-                  if (value !== null) change(key, value)
-                }}
+                id="policy-cookieGuideUrl"
+                value={draft.cookieGuideUrl ?? ""}
+                onChange={(event) =>
+                  change("cookieGuideUrl", event.target.value)
+                }
+                placeholder="https://www.bilibili.com/video/..."
               />
             </Field>
-          ))}
-          {input("powerRestoreJitterMinutes")}
-          <Field>
-            <FieldLabel htmlFor="policy-timezone">时区</FieldLabel>
-            <Input
-              id="policy-timezone"
-              value={draft.scheduledPowerOffTimezone}
-              required
-              onChange={(event) =>
-                change("scheduledPowerOffTimezone", event.target.value)
-              }
-              placeholder="Asia/Shanghai"
-            />
-          </Field>
-        </div>
+          </div>
+        </>
       )}
-      <SectionHeading
-        title="数据保留"
-        description="缩短保留时间会清理过期记录，尚未解决的问题会继续保留。"
-      />
-      <div className="wb-form-grid">
-        {input("statsRetentionDays")}
-        {input("portHistoryRetentionDays")}
-        {input("notificationRetentionDays")}
-      </div>
-      <SectionHeading
-        title="公共 Cookie 池与免费额度"
-        description="免费用户共享公共池查询；贡献全站新桩后自动发放永不过期的额外刷新次数。"
-      />
-      {toggle(
-        "freeUserWatchAllowed",
-        "允许免费用户开启空位提醒",
-        "关闭时，仅已提供个人 Cookie 的用户可以创建和运行后台空位提醒。"
+
+      {section === "registration" && (
+        <>
+          <SectionHeading title="注册与默认权限" />
+          {toggle(
+            "openRegistration",
+            "开放自助注册",
+            "开启后，不填写邀请码也可以创建账户。"
+          )}
+          {toggle(
+            "inviteRequired",
+            "允许邀请码注册",
+            "关闭自助注册时，持有有效邀请码的人仍可注册。"
+          )}
+          {toggle(
+            "defaultRefreshEnabled",
+            "新用户允许刷新",
+            "新建账户的默认远端访问权限，不影响已有账户。"
+          )}
+          <div className="wb-form-grid">{input("defaultDeviceLimit")}</div>
+        </>
       )}
-      <div className="wb-form-grid">
-        {input("freeDailyRefreshQuota")}
-        {input("pileContributionBonusQuota")}
-        {input("sharedPileCacheTTLSeconds")}
-        <Field>
-          <FieldLabel htmlFor="policy-cookieGuideUrl">
-            Cookie 抓包视频教程链接（可选）
-          </FieldLabel>
-          <Input
-            id="policy-cookieGuideUrl"
-            value={draft.cookieGuideUrl ?? ""}
-            onChange={(event) => change("cookieGuideUrl", event.target.value)}
-            placeholder="https://www.bilibili.com/video/..."
+
+      {section === "reminders" && (
+        <>
+          <SectionHeading title="按需提醒" />
+          {toggle(
+            "backgroundRemindersEnabled",
+            "允许后台空闲提醒",
+            "只为用户主动开启的临时提醒检查设备；固定周期规则已停用。"
+          )}
+          <div className="wb-form-grid">
+            {input("watchRefreshIntervalMinutes")}
+            {input("watchPileLimitPerUser")}
+            {input("watchDailyRefreshQuota")}
+          </div>
+          <SectionHeading title="计划断电" />
+          {toggle(
+            "scheduledPowerOffEnabled",
+            "在断电时段暂停请求",
+            "临时提醒的截止时间不超过当日断电开始时间。"
+          )}
+          {draft.scheduledPowerOffEnabled && (
+            <div className="wb-form-grid">
+              {(
+                [
+                  ["scheduledPowerOffStartMinute", "断电开始时间"],
+                  ["scheduledPowerOffEndMinute", "恢复供电时间"],
+                ] as const
+              ).map(([key, label]) => (
+                <Field key={key}>
+                  <FieldLabel htmlFor={`policy-${key}`}>{label}</FieldLabel>
+                  <Input
+                    id={`policy-${key}`}
+                    type="time"
+                    required
+                    value={minutesToTime(draft[key])}
+                    onChange={(event) => {
+                      const value = timeToMinutes(event.target.value)
+                      if (value !== null) change(key, value)
+                    }}
+                  />
+                </Field>
+              ))}
+              {input("powerRestoreJitterMinutes")}
+              <Field>
+                <FieldLabel htmlFor="policy-timezone">时区</FieldLabel>
+                <Input
+                  id="policy-timezone"
+                  value={draft.scheduledPowerOffTimezone}
+                  required
+                  onChange={(event) =>
+                    change("scheduledPowerOffTimezone", event.target.value)
+                  }
+                  placeholder="Asia/Shanghai"
+                />
+              </Field>
+            </div>
+          )}
+        </>
+      )}
+
+      {section === "retention" && (
+        <>
+          <SectionHeading
+            title="数据保留"
+            description="缩短保留时间会清理过期记录，尚未解决的问题会继续保留。"
           />
-        </Field>
-      </div>
-      <PublicCookiePoolManager online={online} />
+          <div className="wb-form-grid">
+            {input("statsRetentionDays")}
+            {input("portHistoryRetentionDays")}
+            {input("notificationRetentionDays")}
+          </div>
+        </>
+      )}
       {error && (
         <p className="wb-form-error" role="alert">
           {error}
@@ -628,10 +935,34 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
     adminApi.publicPool
   )
   const [addOpen, setAddOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<PublicPoolCookie | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<PublicPoolCookie | null>(
+    null
+  )
   const [label, setLabel] = useState("")
   const [cookie, setCookie] = useState("")
+  const [editLabel, setEditLabel] = useState("")
+  const [editCookie, setEditCookie] = useState("")
   const [busy, setBusy] = useState(false)
+  const [testingId, setTestingId] = useState<string | null>(null)
   const [formError, setFormError] = useState("")
+
+  async function testItem(item: PublicPoolCookie) {
+    setTestingId(item.id)
+    try {
+      const updated = await adminApi.testPublicPoolCookie(item.id)
+      reload()
+      if (updated.status === "healthy") {
+        notify.success(`${item.label} 实测有效`)
+      } else {
+        notify.warning(`${item.label} 实测已失效，请更新`)
+      }
+    } catch (reason) {
+      notify.error(reason instanceof Error ? reason.message : "测试失败")
+    } finally {
+      setTestingId(null)
+    }
+  }
 
   async function addPoolCookie(event: React.FormEvent) {
     event.preventDefault()
@@ -649,10 +980,40 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
       setLabel("")
       setCookie("")
       setAddOpen(false)
-      await reload()
+      reload()
       notify.success("公共池 Cookie 已添加")
     } catch (reason) {
       setFormError(reason instanceof Error ? reason.message : "添加失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveEditCookie(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editingItem) return
+    if (!editLabel.trim()) {
+      setFormError("请填写备注名。")
+      return
+    }
+    setBusy(true)
+    setFormError("")
+    try {
+      const payload: { label?: string; cookie?: string } = {
+        label: editLabel.trim(),
+      }
+      if (editCookie.trim()) {
+        payload.cookie = editCookie.trim()
+      }
+      await adminApi.updatePublicPoolCookie(editingItem.id, payload)
+      setEditingItem(null)
+      setEditCookie("")
+      reload()
+      notify.success(
+        payload.cookie ? "公共池 Cookie 已替换并恢复可用" : "公共池备注已更新"
+      )
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "更新失败")
     } finally {
       setBusy(false)
     }
@@ -663,7 +1024,7 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
       await adminApi.updatePublicPoolCookie(item.id, {
         enabled: !item.enabled,
       })
-      await reload()
+      reload()
       notify.success(item.enabled ? "已停用该公共 Cookie" : "已启用该公共 Cookie")
     } catch (reason) {
       notify.error(reason instanceof Error ? reason.message : "更新失败")
@@ -671,92 +1032,158 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
   }
 
   async function removeItem(item: PublicPoolCookie) {
+    setBusy(true)
     try {
       await adminApi.deletePublicPoolCookie(item.id)
-      await reload()
+      setConfirmDelete(null)
+      reload()
       notify.success("已删除公共 Cookie")
     } catch (reason) {
       notify.error(reason instanceof Error ? reason.message : "删除失败")
+    } finally {
+      setBusy(false)
     }
   }
 
   const items = data ?? []
+  const healthyCount = items.filter(
+    (i) => i.enabled && i.status === "healthy"
+  ).length
 
   return (
-    <div className="wb-grouped-list" style={{ marginTop: "1rem" }}>
-      <div className="wb-setting-row">
-        <div>
-          <h3>公共 Cookie 池（{items.filter((i) => i.enabled && i.status === "healthy").length} / {items.length} 可用）</h3>
-          <p>
-            免费用户刷新与新桩校验将轮询使用池内可用 Cookie；任一失效时自动熔断并告警管理员。
-          </p>
+    <section className="wb-invites">
+      <div className="wb-page-rule">
+        <div className="flex items-center gap-3">
+          <StatusPill
+            tone={
+              healthyCount >= 2
+                ? "idle"
+                : healthyCount === 1
+                  ? "warning"
+                  : "danger"
+            }
+          >
+            {healthyCount} / {items.length} 可用
+          </StatusPill>
+          <span className="wb-small wb-muted">
+            轮询供给免费用户刷新与新桩校验，任一失效自动熔断
+          </span>
         </div>
         <WorkbenchButton
           type="button"
-          variant="outline"
           disabled={!online}
           onClick={() => {
             setFormError("")
             setAddOpen(true)
           }}
         >
-          <PlusIcon size={14} />
+          <PlusIcon size={15} />
           添加公共 Cookie
         </WorkbenchButton>
       </div>
-      {error && <WorkbenchError message={error} retry={() => void reload()} />}
-      {items.length === 0 ? (
-        <div className="wb-setting-row">
-          <p>暂无公共池 Cookie，请至少添加 1~2 个长效 Cookie 以启用免费用户刷新。</p>
-        </div>
+      {error ? (
+        <WorkbenchError message={error} retry={() => void reload()} />
+      ) : items.length === 0 ? (
+        <WorkbenchEmpty
+          icon={DatabaseIcon}
+          title="暂无公共池 Cookie"
+          description="请添加至少 1~2 个长效 Cookie，或引导已有 Cookie 的用户在账号页加入互助公共池。"
+        />
       ) : (
-        items.map((item) => (
-          <div key={item.id} className="wb-setting-row">
-            <div>
-              <h3>
-                {item.label}{" "}
-                <StatusPill
-                  tone={
-                    !item.enabled
-                      ? "neutral"
-                      : item.status === "healthy"
-                        ? "idle"
-                        : "warning"
-                  }
-                >
-                  {!item.enabled
-                    ? "已停用"
-                    : item.status === "healthy"
-                      ? "正常"
-                      : "已失效"}
-                </StatusPill>
-              </h3>
-              <p>
-                {item.lastUsedAt
-                  ? `最近使用 ${formatSnapshotTime(item.lastUsedAt, true)}`
-                  : "尚未使用"}
-                {item.lastError ? ` · ${item.lastError}` : ""}
-              </p>
-            </div>
-            <div className="wb-row-actions">
-              <Switch
-                checked={item.enabled}
-                disabled={!online}
-                onCheckedChange={() => void toggleEnabled(item)}
-                aria-label={`切换 ${item.label}`}
-              />
-              <WorkbenchButton
-                type="button"
-                variant="ghost"
-                disabled={!online}
-                onClick={() => void removeItem(item)}
-              >
-                <Trash2Icon size={14} />
-                删除
-              </WorkbenchButton>
-            </div>
-          </div>
-        ))
+        <div className="wb-table-wrap">
+          <table className="wb-data-table">
+            <thead>
+              <tr>
+                <th>凭据备注</th>
+                <th>来源</th>
+                <th>状态</th>
+                <th>最近使用</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <strong>{item.label}</strong>
+                    {item.lastError && (
+                      <p className="wb-small wb-muted">{item.lastError}</p>
+                    )}
+                  </td>
+                  <td>
+                    <StatusPill tone={item.ownerUserId ? "brand" : "neutral"}>
+                      {item.ownerUserId ? "用户互助" : "管理员"}
+                    </StatusPill>
+                  </td>
+                  <td>
+                    <StatusPill
+                      tone={
+                        !item.enabled
+                          ? "neutral"
+                          : item.status === "healthy"
+                            ? "idle"
+                            : "warning"
+                      }
+                    >
+                      {!item.enabled
+                        ? "已停用"
+                        : item.status === "healthy"
+                          ? "正常"
+                          : "已失效"}
+                    </StatusPill>
+                  </td>
+                  <td>
+                    {item.lastUsedAt
+                      ? formatSnapshotTime(item.lastUsedAt, true)
+                      : "尚未使用"}
+                  </td>
+                  <td>
+                    <div className="wb-row-actions">
+                      <WorkbenchButton
+                        type="button"
+                        variant="outline"
+                        busy={testingId === item.id}
+                        disabled={!online || testingId !== null}
+                        onClick={() => void testItem(item)}
+                      >
+                        测试
+                      </WorkbenchButton>
+                      <WorkbenchButton
+                        type="button"
+                        variant="ghost"
+                        disabled={!online || busy}
+                        onClick={() => {
+                          setFormError("")
+                          setEditingItem(item)
+                          setEditLabel(item.label)
+                          setEditCookie("")
+                        }}
+                      >
+                        <PencilIcon size={14} />
+                        更新
+                      </WorkbenchButton>
+                      <Switch
+                        checked={item.enabled}
+                        disabled={!online || busy}
+                        onCheckedChange={() => void toggleEnabled(item)}
+                        aria-label={`切换 ${item.label}`}
+                      />
+                      <WorkbenchButton
+                        type="button"
+                        variant="ghost"
+                        disabled={!online || busy}
+                        onClick={() => setConfirmDelete(item)}
+                      >
+                        <Trash2Icon size={14} />
+                        删除
+                      </WorkbenchButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <Dialog open={addOpen} onOpenChange={(open) => !busy && setAddOpen(open)}>
@@ -767,7 +1194,7 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
               支持直接粘贴抓包工具复制的 Copy as cURL、请求头或纯 Cookie 字符串。
             </DialogDescription>
           </DialogHeader>
-          <div className="wb-form-stack">
+          <form onSubmit={addPoolCookie} className="wb-form-stack">
             <Field>
               <FieldLabel htmlFor="pool-cookie-label">备注名</FieldLabel>
               <Input
@@ -793,28 +1220,121 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
                 {formError}
               </p>
             )}
-          </div>
+            <DialogFooter>
+              <WorkbenchButton
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setAddOpen(false)}
+              >
+                取消
+              </WorkbenchButton>
+              <WorkbenchButton type="submit" busy={busy} disabled={!online}>
+                保存入池
+              </WorkbenchButton>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!editingItem}
+        onOpenChange={(open) => !open && !busy && setEditingItem(null)}
+      >
+        <DialogContent className="workbench-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {editingItem?.ownerUserId ? "编辑互助凭据备注" : "更新公共 Cookie"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingItem?.ownerUserId
+                ? "用户互助 Cookie 仅可由用户本人在账号页更新，管理员此处仅可修改备注名。"
+                : "可修改备注名，或粘贴新 Cookie / Copy as cURL 原地替换失效凭据（留空则保留原 Cookie）。"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={saveEditCookie} className="wb-form-stack">
+            <Field>
+              <FieldLabel htmlFor="edit-pool-cookie-label">备注名</FieldLabel>
+              <Input
+                id="edit-pool-cookie-label"
+                value={editLabel}
+                onChange={(event) => setEditLabel(event.target.value)}
+                placeholder="例如：手机号 1 / 备用号 2"
+              />
+            </Field>
+            {!editingItem?.ownerUserId && (
+              <Field>
+                <FieldLabel htmlFor="edit-pool-cookie-value">
+                  新 Cookie / cURL（可选）
+                </FieldLabel>
+                <textarea
+                  id="edit-pool-cookie-value"
+                  className="wb-input wb-textarea"
+                  autoComplete="off"
+                  value={editCookie}
+                  onChange={(event) => setEditCookie(event.target.value)}
+                  placeholder="留空则仅修改备注名；粘贴新内容将替换原 Cookie 并重置为正常状态"
+                />
+              </Field>
+            )}
+            {formError && (
+              <p role="alert" className="wb-form-error">
+                {formError}
+              </p>
+            )}
+            <DialogFooter>
+              <WorkbenchButton
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setEditingItem(null)}
+              >
+                取消
+              </WorkbenchButton>
+              <WorkbenchButton type="submit" busy={busy} disabled={!online}>
+                保存更新
+              </WorkbenchButton>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!confirmDelete}
+        onOpenChange={(open) => !open && !busy && setConfirmDelete(null)}
+      >
+        <DialogContent className="workbench-dialog">
+          <DialogHeader>
+            <DialogTitle>删除该公共 Cookie？</DialogTitle>
+            <DialogDescription>
+              删除「{confirmDelete?.label}」后将立即从公共池移除
+              {confirmDelete?.ownerUserId
+                ? "，该互助用户将切回免费额度模式。"
+                : "，不可恢复。"}
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter>
             <WorkbenchButton
               type="button"
               variant="outline"
               disabled={busy}
-              onClick={() => setAddOpen(false)}
+              onClick={() => setConfirmDelete(null)}
             >
               取消
             </WorkbenchButton>
             <WorkbenchButton
               type="button"
+              variant="destructive"
               busy={busy}
               disabled={!online}
-              onClick={(event) => void addPoolCookie(event)}
+              onClick={() => confirmDelete && void removeItem(confirmDelete)}
             >
-              保存入池
+              确认删除
             </WorkbenchButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </section>
   )
 }
 
@@ -881,7 +1401,7 @@ export function WorkbenchInvites() {
     }
   }
   return (
-    <>
+    <section className="wb-invites">
       <div className="wb-page-rule">
         <WorkbenchSearch
           label="搜索邀请码"
@@ -1087,7 +1607,7 @@ export function WorkbenchInvites() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </section>
   )
 }
 
@@ -1097,10 +1617,21 @@ const auditLabels: Record<string, string> = {
   "user.delete": "删除用户",
   "user.password_reset": "重置密码",
   "user.refresh": "刷新用户设备",
+  "user.quota_update": "调整用户奖励次数",
   "settings.update": "更新系统策略",
   "incident.update": "更新异常",
   "invite.create": "创建邀请码",
   "invite.delete": "删除邀请码",
+  "public_pool.create": "新增公共 Cookie",
+  "public_pool.update": "更新公共 Cookie",
+  "public_pool.delete": "删除公共 Cookie",
+  "public_pool.test": "实测公共 Cookie",
+  "shared_pile.update": "编辑公共桩信息",
+  "shared_pile.refresh": "刷新公共桩",
+  "shared_pile.delete": "删除公共桩",
+  "announcement.create": "发布公告",
+  "announcement.update": "更新公告",
+  "announcement.delete": "删除公告",
 }
 export function WorkbenchAudit() {
   const params = useSearchParams(),
@@ -1118,7 +1649,7 @@ export function WorkbenchAudit() {
         )
     ) ?? []
   return (
-    <>
+    <section className="wb-audit">
       <div className="wb-page-rule">
         <WorkbenchSearch
           label="搜索操作记录"
@@ -1212,6 +1743,6 @@ export function WorkbenchAudit() {
           </div>
         </div>
       )}
-    </>
+    </section>
   )
 }

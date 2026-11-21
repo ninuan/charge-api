@@ -55,6 +55,7 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 		settings.FreeDailyRefreshQuota = defaultFreeDailyRefreshQuota
 		settings.PileContributionBonusQuota = defaultPileContributionBonus
 		settings.SharedPileCacheTTLSeconds = defaultSharedPileCacheTTL
+		settings.RequirePoolShareForUnlimited = true
 	}
 	settings.CookieGuideURL = strings.TrimSpace(settings.CookieGuideURL)
 	// Fixed-schedule reminders were retired in 1.5.2. Keep the persisted field

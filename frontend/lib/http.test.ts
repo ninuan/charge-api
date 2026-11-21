@@ -158,6 +158,25 @@ describe("requestJSON", () => {
     await expect(pending).resolves.toEqual({ ok: true })
   })
 
+  it("maps public pool and quota business errors instead of generic fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "PUBLIC_POOL_UNAVAILABLE",
+            error: "backend text",
+          }),
+          { status: 503 }
+        )
+      )
+    )
+
+    await expect(
+      requestJSON("/api/refresh", { method: "POST" }, "暂时无法刷新设备状态，请稍后重试。")
+    ).rejects.toThrow("公共查询通道暂无可用 Cookie")
+  })
+
   it("handles empty responses through the same request entry point", async () => {
     vi.stubGlobal(
       "fetch",

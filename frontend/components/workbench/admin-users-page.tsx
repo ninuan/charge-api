@@ -13,7 +13,6 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 import { AdminUserDiagnostics } from "@/components/admin-user-diagnostics"
 import { AdminUserFilters } from "@/components/admin-user-filters"
-import { AdminUserRefreshTiming } from "@/components/admin-user-refresh-timing"
 import {
   Dialog,
   DialogContent,
@@ -210,24 +209,35 @@ export function WorkbenchAdminUsers({
                     <td>
                       <StatusPill
                         tone={
-                          user.role === "admin" ||
-                          item.dashboard.pileCount === 0
+                          user.role === "admin"
                             ? "neutral"
-                            : item.credential.state === "healthy"
+                            : item.quota?.unlimitedActive
                               ? "idle"
-                              : ["expired", "sync_failed"].includes(
-                                    item.credential.state
-                                  )
-                                ? "danger"
+                              : item.quota?.personalCookieStatus === "expired"
+                                ? "warning"
                                 : "neutral"
                         }
                       >
                         {user.role === "admin"
-                          ? "无需扫码"
-                          : item.dashboard.pileCount === 0
-                            ? "待添加设备"
-                            : credentialLabels[item.credential.state]}
+                          ? "无需个人凭据"
+                          : item.quota?.unlimitedActive
+                            ? item.quota.joinedPublicPool
+                              ? "互助 Cookie · 不限次"
+                              : "个人 Cookie · 不限次"
+                            : item.quota?.personalCookieStatus === "valid"
+                              ? "已传 Cookie · 未入互助池"
+                              : item.quota?.personalCookieStatus === "expired"
+                                ? "个人 Cookie 失效"
+                                : "公共池免费"}
                       </StatusPill>
+                      {user.role !== "admin" && item.quota && (
+                        <div className="wb-small wb-muted">
+                          每日额度 {item.quota.freeDailyRemaining}/
+                          {item.quota.freeDailyLimit} · 永久额度{" "}
+                          {item.quota.bonusRemaining} · 贡献{" "}
+                          {item.quota.contributedPileCount}
+                        </div>
+                      )}
                     </td>
                     <td className="wb-mono">
                       {item.dashboard.pileCount} / {user.deviceLimit}
@@ -294,6 +304,7 @@ function WorkbenchAdminUserDetail({
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
   const [limit, setLimit] = useState("")
+  const [bonusInput, setBonusInput] = useState("0")
   const [role, setRole] = useState<UserRole>("user")
   const [modal, setModal] = useState<"password" | "delete" | "role" | null>(
     null
@@ -308,6 +319,7 @@ function WorkbenchAdminUserDetail({
       const value = await adminApi.userDetail(userId)
       setDetail(value)
       setLimit(String(value.summary.user.deviceLimit))
+      setBonusInput(String(value.summary.quota?.bonusRemaining ?? 0))
       setRole(value.summary.user.role)
       setError("")
     } catch (reason) {
@@ -324,6 +336,7 @@ function WorkbenchAdminUserDetail({
         if (active) {
           setDetail(value)
           setLimit(String(value.summary.user.deviceLimit))
+          setBonusInput(String(value.summary.quota?.bonusRemaining ?? 0))
           setRole(value.summary.user.role)
         }
       })
@@ -371,6 +384,24 @@ function WorkbenchAdminUserDetail({
       return
     }
     await mutate({ deviceLimit: Number(limit) }, "设备上限已保存")
+  }
+  async function saveBonusQuota() {
+    const parsed = Number(bonusInput)
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10000) {
+      setError("永久奖励刷新次数需要是 0–10000 之间的整数。")
+      return
+    }
+    setPending(true)
+    setError("")
+    try {
+      await adminApi.updateUserQuota(userId, parsed)
+      await load()
+      notify.success(`永久奖励刷新次数已设为 ${parsed} 次`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "奖励次数未保存。")
+    } finally {
+      setPending(false)
+    }
   }
   async function resetPassword() {
     setPending(true)
@@ -529,6 +560,38 @@ function WorkbenchAdminUserDetail({
               保存更改
             </WorkbenchButton>
           </form>
+          {user!.role !== "admin" && (
+            <div className="wb-setting-row">
+              <div>
+                <h3>永久额度（跨天不清零）</h3>
+                <p>
+                  每日额度 {summary.quota?.freeDailyRemaining ?? 0}/
+                  {summary.quota?.freeDailyLimit ?? 2} 次（每日 00:00 重置） ·
+                  累计贡献 {summary.quota?.contributedPileCount ?? 0} 台新桩
+                </p>
+              </div>
+              <div className="wb-row-actions">
+                <Input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  aria-label="永久奖励刷新次数"
+                  value={bonusInput}
+                  onChange={(e) => setBonusInput(e.target.value)}
+                  disabled={pending}
+                  style={{ width: "96px" }}
+                />
+                <WorkbenchButton
+                  variant="outline"
+                  busy={pending}
+                  disabled={!online}
+                  onClick={() => void saveBonusQuota()}
+                >
+                  保存额度
+                </WorkbenchButton>
+              </div>
+            </div>
+          )}
           <div className="wb-setting-row">
             <div>
               <h3>重置登录密码</h3>
@@ -566,33 +629,53 @@ function WorkbenchAdminUserDetail({
         </div>
       ) : tab === "diagnostics" ? (
         <div className="wb-settings-content">
-          <SectionHeading title="平台连接" />
+          <SectionHeading title="凭据与刷新模式" />
           <div className="wb-setting-row">
             <div>
               <h3>
                 {user!.role === "admin"
-                  ? "管理员不需要绑定充电平台"
-                  : credentialLabels[summary.credential.state]}
+                  ? "管理员账户无需个人凭据"
+                  : summary.quota?.unlimitedActive
+                    ? summary.quota.joinedPublicPool
+                      ? "互助 Cookie 有效 · 不限次刷新"
+                      : "个人 Cookie 有效 · 不限次刷新"
+                    : summary.quota?.personalCookieStatus === "valid"
+                      ? "已配置个人 Cookie（未加入互助池 · 免费模式）"
+                      : summary.quota?.personalCookieStatus === "expired"
+                        ? "个人 Cookie 已失效"
+                        : "公共池免费模式"}
               </h3>
               <p>
-                {summary.credential.state === "expired"
-                  ? "需要用户本人重新扫码，管理员不能代替其授权。"
-                  : "这里只展示连接摘要，不会显示 Cookie、OpenID 或其他访问凭据。"}
+                {summary.quota?.personalCookieStatus === "expired"
+                  ? "需要用户本人更新个人 Cookie，更新前刷新将自动降级走公共池。"
+                  : summary.quota?.personalCookieStatus === "valid" &&
+                      !summary.quota?.unlimitedActive
+                    ? "当前策略要求加入互助公共池才解锁不限次刷新与空位提醒。"
+                    : "这里只展示凭据状态与额度摘要，不会显示 Cookie 明文。"}
               </p>
             </div>
             <StatusPill
-              tone={summary.credential.state === "healthy" ? "idle" : "neutral"}
+              tone={
+                summary.quota?.unlimitedActive
+                  ? "idle"
+                  : summary.quota?.personalCookieStatus === "expired"
+                    ? "warning"
+                    : "neutral"
+              }
             >
               {user!.role === "admin"
                 ? "不适用"
-                : credentialLabels[summary.credential.state]}
+                : summary.quota?.unlimitedActive
+                  ? summary.quota.joinedPublicPool
+                    ? "互助 Cookie"
+                    : "个人 Cookie"
+                  : summary.quota?.personalCookieStatus === "valid"
+                    ? "未入互助池"
+                    : summary.quota?.personalCookieStatus === "expired"
+                      ? "已失效"
+                      : "公共池免费"}
             </StatusPill>
           </div>
-          <AdminUserRefreshTiming
-            bound={summary.credential.bound}
-            lastCheckedAt={summary.credential.lastCheckedAt}
-            lastRemoteAt={summary.lastRefresh.lastRemoteAt}
-          />
           <dl className="wb-diagnostic-facts">
             {[
               ["最近快照", formatSnapshotTime(summary.snapshotUpdatedAt, true)],

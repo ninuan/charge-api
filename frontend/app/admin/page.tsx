@@ -73,6 +73,20 @@ const Policies = dynamic(
     ),
   { ssr: false, loading }
 )
+const PublicPool = dynamic(
+  () =>
+    import("@/components/workbench/admin-system-pages").then(
+      (module) => module.WorkbenchPublicPool
+    ),
+  { ssr: false, loading }
+)
+const SharedPiles = dynamic(
+  () =>
+    import("@/components/workbench/admin-system-pages").then(
+      (module) => module.WorkbenchSharedPiles
+    ),
+  { ssr: false, loading }
+)
 const Invites = dynamic(
   () =>
     import("@/components/workbench/admin-system-pages").then(
@@ -90,9 +104,11 @@ const Audit = dynamic(
 const pages = {
   overview: ["运行概览", "先处理需要关注的事，再了解系统运行情况。"],
   incidents: ["异常处理", "定位影响、记录处理过程，再关闭问题。"],
-  users: ["用户", "账户访问、设备额度与连接问题，在同一处处理。"],
-  operations: ["系统运行", "服务、提醒调度、消息投递与数据保存情况。"],
-  settings: ["系统策略", "控制注册范围、远端访问频率与数据保留。"],
+  pool: ["公共 Cookie 池", "管理公共查询凭据，轮询供给免费用户刷新与新桩校验。"],
+  piles: ["公共桩库", "查看并维护全站众包收录的充电桩名称、位置与缓存状态。"],
+  users: ["用户", "管理账户权限、个人 Cookie 状态与免费奖励刷新次数。"],
+  operations: ["系统运行", "主服务、提醒调度、消息投递与数据保存情况。"],
+  settings: ["系统策略", "控制注册范围、公共池免费额度、众包奖励与数据保留。"],
   invites: ["邀请注册", "创建并分享有效邀请码，管理可注册的范围。"],
   announcements: ["公告管理", "发布消息，安排有效时间并管理提醒。"],
   audit: ["操作记录", "管理操作留下记录，重要变化有据可查。"],
@@ -118,9 +134,11 @@ const ADMIN_DOMAINS: readonly AdminDomain[] = [
   },
   {
     id: "people",
-    label: "用户与公告",
-    defaultTab: "users",
+    label: "资源与用户",
+    defaultTab: "pool",
     tabs: [
+      { id: "pool", label: "公共 Cookie 池", href: "/admin?tab=pool" },
+      { id: "piles", label: "公共桩库", href: "/admin?tab=piles" },
       { id: "users", label: "用户", href: "/admin?tab=users" },
       { id: "announcements", label: "公告管理", href: "/admin?tab=announcements" },
     ],
@@ -303,26 +321,6 @@ function AdminContent() {
               </Link>
             ))}
           </div>
-          <div className="wb-admin-domain-pills" aria-label="快速切换管理域">
-            {ADMIN_DOMAINS.map((domain) => {
-              const selectedDomain = domain.id === activeDomain.id
-              const href =
-                domain.defaultTab === "overview"
-                  ? "/admin"
-                  : `/admin?tab=${domain.defaultTab}`
-              return (
-                <Link
-                  key={domain.id}
-                  href={href}
-                  className={`wb-admin-subtab ${
-                    selectedDomain ? "wb-admin-subtab-active" : ""
-                  }`}
-                >
-                  {domain.label}
-                </Link>
-              )
-            })}
-          </div>
         </nav>
 
         {(tab === "overview" || tab === "operations") && (
@@ -332,7 +330,7 @@ function AdminContent() {
               onRecheck={async () => setHealth(await adminApi.health())}
             />
             <span>
-              {healthError || "主服务、数据库与扫码服务的最近检查结果"}
+              {healthError || "主服务、数据库与公共 Cookie 池的最近检查结果"}
             </span>
           </div>
         )}
@@ -343,6 +341,10 @@ function AdminContent() {
             <div className="wb-continuous">
               <AdminIncidents onUser={openUser} />
             </div>
+          ) : tab === "pool" ? (
+            <PublicPool />
+          ) : tab === "piles" ? (
+            <SharedPiles />
           ) : tab === "users" ? (
             <AdminUsers currentUserId={currentUser.id} />
           ) : tab === "operations" ? (

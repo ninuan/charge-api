@@ -212,7 +212,17 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 		if summary.User.Role != model.RoleUser {
 			continue
 		}
-		if len(summary.DeviceIDs) > 0 && summary.Credential.State != model.CredentialHealthy {
+		if summary.Quota != nil && summary.Quota.PersonalCookieStatus == "expired" {
+			exceptions = append(exceptions, model.SystemException{
+				ID:       "credential-" + summary.User.ID,
+				UserID:   summary.User.ID,
+				Username: summary.User.Username,
+				Type:     "credential",
+				Level:    "critical",
+				Message:  "个人 Cookie 已失效，需用户更新",
+				Time:     summary.SnapshotUpdatedAt,
+			})
+		} else if len(summary.DeviceIDs) > 0 && (summary.Credential.State == model.CredentialExpired || summary.Credential.State == model.CredentialSyncFailed) {
 			exceptions = append(exceptions, model.SystemException{
 				ID:       "credential-" + summary.User.ID,
 				UserID:   summary.User.ID,
@@ -448,8 +458,19 @@ func (m *Manager) recordMetricCount(userID, kind string, count int) {
 	_ = m.repository.RecordMetricCount(userID, kind, count, now)
 }
 
+func (m *Manager) recordMetricCountOnly(userID, kind string, count int) {
+	if count <= 0 {
+		return
+	}
+	_ = m.repository.RecordMetricCount(userID, kind, count, time.Now())
+}
+
 func (m *Manager) recordRefreshMetrics(userID string, info model.RefreshInfo) {
 	m.recordMetricCount(userID, "remote", info.AttemptedDevices)
-	m.recordMetricCount(userID, "remote_ok", info.SuccessfulDevices)
+	if info.UsedPool {
+		m.recordMetricCountOnly(userID, "remote_ok", info.SuccessfulDevices)
+	} else {
+		m.recordMetricCount(userID, "remote_ok", info.SuccessfulDevices)
+	}
 	m.recordMetricCount(userID, "remote_failed", info.FailedDevices)
 }

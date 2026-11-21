@@ -142,6 +142,17 @@ func TestAdminHealthRequiresAdminAndReturnsRedactedServiceState(t *testing.T) {
 		t.Fatalf("user status = %d, want 403", userRecorder.Code)
 	}
 
+	if _, err := manager.CreatePublicPoolCookie(model.PublicPoolCookieCreateRequest{
+		Label: "pool-1", Cookie: "wxopenid=p1; info=ok1",
+	}); err != nil {
+		t.Fatalf("seed pool-1: %v", err)
+	}
+	if _, err := manager.CreatePublicPoolCookie(model.PublicPoolCookieCreateRequest{
+		Label: "pool-2", Cookie: "wxopenid=p2; info=ok2",
+	}); err != nil {
+		t.Fatalf("seed pool-2: %v", err)
+	}
+
 	adminRequest := httptest.NewRequest(http.MethodGet, "/api/admin/health", nil)
 	adminRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
 	adminRecorder := httptest.NewRecorder()

@@ -3,7 +3,6 @@
 import {
   DatabaseIcon,
   PlusIcon,
-  SearchIcon,
   ServerCogIcon,
   SparklesIcon,
 } from "lucide-react"
@@ -12,7 +11,10 @@ import { useEffect, useRef, useState } from "react"
 import { useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
 import { useCloseAppShellMenu } from "@/components/app-shell"
-import { WorkbenchButton as Button } from "@/components/workbench/surfaces"
+import {
+  WorkbenchButton as Button,
+  WorkbenchSearch,
+} from "@/components/workbench/surfaces"
 import {
   Dialog,
   DialogContent,
@@ -110,7 +112,7 @@ export function AddPileDialog({
     try {
       const added = await addPile({
         id: item.deviceId,
-        name: item.name || `充电桩 ${item.number || item.deviceId.slice(-6)}`,
+        name: item.name || "",
         number: item.number,
         openNum: item.openNum || 10,
         status: "在线",
@@ -139,7 +141,7 @@ export function AddPileDialog({
     try {
       const added = await addPile({
         id,
-        name: form.name.trim() || `充电桩 ${number || id.slice(-6)}`,
+        name: form.name.trim(),
         number,
         openNum: Number(form.openNum),
         status: form.status.trim() || "在线",
@@ -230,18 +232,12 @@ export function AddPileDialog({
 
         {mode === "catalog" ? (
           <div className="space-y-3">
-            <div className="relative">
-              <SearchIcon
-                size={15}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 opacity-60"
-              />
-              <Input
-                value={catalogQuery}
-                onChange={(e) => setCatalogQuery(e.target.value)}
-                placeholder="按桩名、桩号或位置搜索公共桩库…"
-                className="pl-9"
-              />
-            </div>
+            <WorkbenchSearch
+              value={catalogQuery}
+              onChange={setCatalogQuery}
+              label="搜索公共桩库"
+              placeholder="按桩名、桩号或位置搜索公共桩库…"
+            />
 
             {catalogLoading ? (
               <p className="py-6 text-center text-sm opacity-70">

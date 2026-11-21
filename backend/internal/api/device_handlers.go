@@ -51,9 +51,9 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 			writeCodedError(w, http.StatusBadRequest, "PILE_FIELDS_INVALID", "充电桩字段长度超出限制")
 			return
 		}
-		if req.OpenNum < 0 || req.OpenNum > 20 {
+		if req.OpenNum < 0 || req.OpenNum > 64 {
 			s.recordDashboardDiagnostic(user, "add_pile", "pile_port_count_invalid", req.ID, http.StatusBadRequest)
-			writeCodedError(w, http.StatusBadRequest, "PILE_PORT_COUNT_INVALID", "充电口数量必须在 1-20 之间")
+			writeCodedError(w, http.StatusBadRequest, "PILE_PORT_COUNT_INVALID", "充电口数量必须在 1-64 之间")
 			return
 		}
 		var resp model.PileCreateResponse

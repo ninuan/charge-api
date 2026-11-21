@@ -2298,7 +2298,7 @@
   font-variant-numeric: tabular-nums;
 }
 .wb-policies-form {
-  max-width: 850px;
+  width: 100%;
 }
 .wb-policies-form > .wb-section-heading:not(:first-child) {
   margin-top: 35px;
@@ -2319,7 +2319,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 20px 0;
-  background: var(--wb-bg);
+  background: var(--wb-surface);
   border-top: 1px solid var(--wb-line);
 }
 .wb-save-bar > span {

@@ -32,7 +32,7 @@ import { NotificationProvider } from "@/lib/notification-context"
 import { WatchProvider, useWatch } from "@/lib/watch-context"
 import { useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
-import { updatePageQuery } from "@/lib/workbench"
+import { formatQuotaResetTime, updatePageQuery } from "@/lib/workbench"
 import { DashboardSession } from "./dashboard-session"
 import { UserWorkbenchShell } from "./user-shell"
 import {
@@ -191,16 +191,70 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
 function PlatformConnection() {
   const params = useSearchParams(),
     online = useOnline()
-  const { snapshot, updateCookie, clearCookie } = useDashboard()
+  const {
+    snapshot,
+    updateCookie,
+    testCookie,
+    joinPublicPool,
+    leavePublicPool,
+    clearCookie,
+  } = useDashboard()
   const quota = snapshot.quota
   const [cookieOpen, setCookieOpen] = useState(params.get("connect") === "1")
   const [clearOpen, setClearOpen] = useState(false)
   const [cookie, setCookie] = useState("")
+  const [joinPoolChecked, setJoinPoolChecked] = useState(true)
   const [pending, setPending] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [poolBusy, setPoolBusy] = useState(false)
   const [formError, setFormError] = useState("")
+
+  async function togglePoolMembership(join: boolean) {
+    setPoolBusy(true)
+    try {
+      if (join) {
+        await joinPublicPool()
+        notify.success("已加入互助公共池，不限次刷新与空位提醒已解锁")
+      } else {
+        await leavePublicPool()
+        notify.success("已退出互助公共池，当前按免费用户额度计费")
+      }
+    } catch (reason) {
+      notify.error(reason, {
+        title: join ? "加入互助公共池失败" : "退出互助公共池失败",
+      })
+    } finally {
+      setPoolBusy(false)
+    }
+  }
+
+  async function runCookieTest() {
+    setTesting(true)
+    try {
+      const res = await testCookie()
+      if (res.valid) {
+        notify.success(
+          unlimitedActive || !requirePool
+            ? "当前个人 Cookie 有效，可正常不限次刷新"
+            : "当前个人 Cookie 有效；加入互助公共池后即可解锁不限次刷新"
+        )
+      } else {
+        notify.warning("当前个人 Cookie 已失效，请尽快更新", {
+          description: res.error || "更新前将自动平滑降级使用公共池。",
+        })
+      }
+    } catch (reason) {
+      notify.error(reason, { title: "测试个人 Cookie 失败" })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const hasPersonal = Boolean(quota?.hasPersonalCookie)
   const personalStatus = quota?.personalCookieStatus ?? "none"
+  const joinedPool = Boolean(quota?.joinedPublicPool)
+  const requirePool = Boolean(quota?.requirePoolShareForUnlimited)
+  const unlimitedActive = Boolean(quota?.unlimitedActive)
 
   async function saveCookie(event: React.FormEvent) {
     event.preventDefault()
@@ -211,11 +265,17 @@ function PlatformConnection() {
     setPending(true)
     setFormError("")
     try {
-      await updateCookie(cookie.trim())
+      await updateCookie(cookie.trim(), joinPoolChecked)
       setCookie("")
       setCookieOpen(false)
       updatePageQuery({ connect: null }, true)
-      notify.success("个人 Cookie 已更新，已解锁不限次刷新与空位提醒")
+      notify.success(
+        joinPoolChecked
+          ? "个人 Cookie 已加入互助公共池，已解锁不限次刷新与空位提醒"
+          : requirePool
+            ? "个人 Cookie 已保存（未加入互助公共池，暂按免费额度计费）"
+            : "个人 Cookie 已保存，已解锁不限次刷新与空位提醒"
+      )
     } catch (reason) {
       setFormError(
         reason instanceof Error ? reason.message : "未能更新，请检查内容后重试。"
@@ -254,33 +314,105 @@ function PlatformConnection() {
             查询通道{" "}
             <StatusPill
               tone={
-                personalStatus === "valid"
+                unlimitedActive
                   ? "idle"
                   : personalStatus === "expired"
                     ? "warning"
                     : "neutral"
               }
             >
-              {personalStatus === "valid"
-                ? "个人 Cookie · 不限次"
+              {unlimitedActive
+                ? joinedPool
+                  ? "互助 Cookie · 不限次"
+                  : "个人 Cookie · 不限次"
                 : personalStatus === "expired"
                   ? "个人 Cookie 已失效"
-                  : "公共池免费模式"}
+                  : hasPersonal && requirePool
+                    ? "未加入互助池 · 免费模式"
+                    : "公共池免费模式"}
             </StatusPill>
           </h3>
           <p>
-            {personalStatus === "valid"
-              ? "当前使用你自己的长效 Cookie，不限次刷新且支持空位提醒。"
+            {unlimitedActive
+              ? joinedPool
+                ? "当前不限次刷新且支持空位提醒；感谢你参与全站互助公共池。"
+                : "当前已使用个人 Cookie，支持不限次刷新与空位提醒。"
               : personalStatus === "expired"
-                ? "个人 Cookie 已过期，刷新时会自动平滑降级到公共池；请及时更新。"
-                : quota
-                  ? `今日免费剩 ${quota.freeDailyRemaining}/${quota.freeDailyLimit} 次 · 录桩奖励剩 ${quota.bonusRemaining} 次（已贡献 ${quota.contributedPileCount} 台新桩）`
-                  : "正在读取刷新额度…"}
+                ? "个人 Cookie 已过期，刷新时会自动平滑降级使用公共池额度；请及时更新。"
+                : hasPersonal && requirePool
+                  ? "你已有个人 Cookie，但尚未加入互助公共池；加入后立刻解锁不限次刷新与空位提醒。"
+                  : quota
+                    ? `当前使用公共池查询，贡献全站新桩可额外获赠 +${quota.pileContributionBonusQuota} 次永久额度。`
+                    : "正在读取刷新额度…"}
           </p>
         </div>
       </div>
 
+      {quota && (
+        <div className="wb-quota-ribbon" aria-label="刷新额度明细">
+          <div>
+            <span>每日额度</span>
+            <strong className="wb-mono">
+              {quota.freeDailyRemaining} / {quota.freeDailyLimit} 次
+              {quota.freeDailyUsed > 0 ? `（今日已用 ${quota.freeDailyUsed} 次）` : ""}
+            </strong>
+          </div>
+          <div>
+            <span>永久额度（跨天不清零）</span>
+            <strong className="wb-mono">
+              {quota.bonusRemaining} 次（已贡献 {quota.contributedPileCount} 台新桩）
+            </strong>
+          </div>
+          <div>
+            <span>每日额度更新时间</span>
+            <strong className="wb-mono">
+              {formatQuotaResetTime(quota.dailyResetAt)}
+            </strong>
+          </div>
+          <div>
+            <span>扣减规则</span>
+            <strong>
+              优先扣每日，用完扣永久 · {quota.sharedPileCacheTTLSeconds ?? 60}s 内全站缓存免扣
+            </strong>
+          </div>
+        </div>
+      )}
+
       <div className="wb-grouped-list">
+        {hasPersonal && personalStatus === "valid" && requirePool && !joinedPool && (
+          <div className="wb-setting-row">
+            <div>
+              <h3>加入互助公共池（解锁不限次与空位提醒）</h3>
+              <p>
+                你的 Cookie 仅用于全站查询充电桩空闲状态（不涉及支付/启动充电），加入后立刻升级为不限次刷新用户。
+              </p>
+            </div>
+            <WorkbenchButton
+              busy={poolBusy}
+              disabled={!online}
+              onClick={() => void togglePoolMembership(true)}
+            >
+              立即加入互助池
+            </WorkbenchButton>
+          </div>
+        )}
+
+        {joinedPool && (
+          <div className="wb-setting-row">
+            <div>
+              <h3>互助公共池共享中</h3>
+              <p>随时可退出互助池；退出后账户将切回免费用户额度模式。</p>
+            </div>
+            <WorkbenchButton
+              variant="ghost"
+              busy={poolBusy}
+              disabled={!online}
+              onClick={() => void togglePoolMembership(false)}
+            >
+              退出互助池
+            </WorkbenchButton>
+          </div>
+        )}
         <div className="wb-setting-row">
           <div>
             <h3>{hasPersonal ? "更新个人 Cookie" : "上传个人 Cookie"}</h3>
@@ -322,6 +454,23 @@ function PlatformConnection() {
         {hasPersonal && (
           <div className="wb-setting-row">
             <div>
+              <h3>测试当前 Cookie 有效性</h3>
+              <p>实测当前保存的个人 Cookie 是否仍可正常查询充电桩状态。</p>
+            </div>
+            <WorkbenchButton
+              variant="outline"
+              busy={testing}
+              disabled={!online}
+              onClick={() => void runCookieTest()}
+            >
+              测试有效性
+            </WorkbenchButton>
+          </div>
+        )}
+
+        {hasPersonal && (
+          <div className="wb-setting-row">
+            <div>
               <h3>清除个人 Cookie</h3>
               <p>移除当前保存的个人 Cookie 并切回公共池免费额度模式。</p>
             </div>
@@ -342,7 +491,7 @@ function PlatformConnection() {
       <div className="wb-settings-note">
         <ShieldCheckIcon size={17} />
         <p>
-          个人 Cookie 仅加密保存在服务端供你本人查询，不会在页面回显，也不会共享给他人。
+          个人 Cookie 均加密保存在服务端，不会在任何页面回显明文；如你选择加入互助公共池，也仅用于全站只读查询充电桩空闲状态，随时可一键退出。
         </p>
       </div>
 
@@ -378,6 +527,17 @@ function PlatformConnection() {
                 placeholder="粘贴 curl 'https://ele.mocele.com/...' 或 wxopenid=...; info=..."
               />
             </Field>
+            <label className="mt-3 flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={joinPoolChecked}
+                onChange={(event) => setJoinPoolChecked(event.target.checked)}
+              />
+              <span>
+                同意将该 Cookie 加入全站互助公共池（仅用于查询空闲状态，不涉及支付或充电），立即解锁不限次刷新与空位提醒
+              </span>
+            </label>
             {quota?.cookieGuideUrl && (
               <p className="wb-field-hint">
                 不知道怎么获取？

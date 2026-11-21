@@ -101,9 +101,7 @@ function RemindersContent() {
     })
   const quota = snapshot.quota
   const watchRequiresPersonalCookie =
-    !!quota &&
-    !quota.freeUserWatchAllowed &&
-    quota.personalCookieStatus !== "valid"
+    !!quota && !quota.freeUserWatchAllowed && !quota.unlimitedActive
   const disabled =
     !online ||
     watchRequiresPersonalCookie ||
@@ -174,18 +172,42 @@ function RemindersContent() {
         {watchRequiresPersonalCookie && (
           <div role="status" className="wb-state-banner wb-banner-warning">
             <div>
-              <strong>空位提醒仅对已配置个人 Cookie 的用户开放</strong>
+              <strong>
+                {quota?.hasPersonalCookie &&
+                quota.personalCookieStatus === "valid" &&
+                quota.requirePoolShareForUnlimited &&
+                !quota.joinedPublicPool
+                  ? "加入互助公共池后即可开启空位提醒"
+                  : "空位提醒仅对已解锁个人 Cookie 权益的用户开放"}
+              </strong>
               <span>
                 {quota?.personalCookieStatus === "expired"
                   ? "你的个人 Cookie 已失效，更新后即可恢复后台空位提醒。"
-                  : "上传个人 Cookie 即可解锁不限次刷新与实时空位推送。"}
+                  : quota?.hasPersonalCookie &&
+                      quota.personalCookieStatus === "valid" &&
+                      quota.requirePoolShareForUnlimited &&
+                      !quota.joinedPublicPool
+                    ? "你已上传个人 Cookie，前往平台连接一键加入互助公共池即可立即解锁不限次刷新与空位提醒。"
+                    : "上传个人 Cookie 并加入互助公共池即可解锁不限次刷新与实时空位推送。"}
               </span>
             </div>
             <Link
-              href="/account?tab=connection&connect=1"
+              href={
+                quota?.hasPersonalCookie &&
+                quota.personalCookieStatus === "valid" &&
+                quota.requirePoolShareForUnlimited &&
+                !quota.joinedPublicPool
+                  ? "/account?tab=connection"
+                  : "/account?tab=connection&connect=1"
+              }
               className="wb-btn wb-btn-outline"
             >
-              去配置 Cookie
+              {quota?.hasPersonalCookie &&
+              quota.personalCookieStatus === "valid" &&
+              quota.requirePoolShareForUnlimited &&
+              !quota.joinedPublicPool
+                ? "去加入互助池"
+                : "去配置 Cookie"}
               <ArrowRightIcon size={14} />
             </Link>
           </div>

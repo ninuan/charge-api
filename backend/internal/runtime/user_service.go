@@ -269,6 +269,7 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 	}
 	m.mu.RUnlock()
 
+	poolAvail := m.PublicPoolAvailableCount()
 	summaries := make([]model.AdminUserSummary, 0, len(users))
 	for i, user := range users {
 		runtime := runtimes[i]
@@ -287,7 +288,18 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 			summary.HasCookie = summary.Credential.HasCredential
 			summary.SnapshotUpdatedAt = latestSnapshotDataTime(snapshot, user.CreatedAt)
 			summary.LastRefresh = snapshot.Refresh
-			summary.RecoveryDiagnostics = runtime.recoveryDiagnosticsSnapshot()
+			if quota, qErr := m.userRefreshQuotaWithPoolCount(user.ID, poolAvail); qErr == nil {
+				summary.Quota = &quota
+			}
+			rawDiagnostics := runtime.recoveryDiagnosticsSnapshot()
+			filteredDiagnostics := make([]model.RecoveryDiagnostic, 0, len(rawDiagnostics))
+			for _, d := range rawDiagnostics {
+				if d.Operation == diagnosticOperationScan || d.Operation == diagnosticOperationSync || strings.HasPrefix(d.Code, "yyb_") {
+					continue
+				}
+				filteredDiagnostics = append(filteredDiagnostics, d)
+			}
+			summary.RecoveryDiagnostics = filteredDiagnostics
 		}
 		summaries = append(summaries, summary)
 	}
@@ -378,7 +390,9 @@ func matchesAdminUserListQuery(summary model.AdminUserSummary, query model.Admin
 }
 
 func hasAdminUserRisk(summary model.AdminUserSummary) bool {
-	hasCredentialRisk := len(summary.DeviceIDs) > 0 && (summary.Credential.State == model.CredentialUnbound || summary.Credential.State == model.CredentialSyncFailed || summary.Credential.State == model.CredentialExpired)
+	hasPersonalCookieExpired := summary.Quota != nil && summary.Quota.PersonalCookieStatus == "expired"
+	hasCredentialRisk := hasPersonalCookieExpired ||
+		(len(summary.DeviceIDs) > 0 && (summary.Credential.State == model.CredentialSyncFailed || summary.Credential.State == model.CredentialExpired))
 	return !summary.User.Enabled || hasCredentialRisk || hasActiveAuthFailure(summary.Stats) || summary.LastRefresh.FailedDevices > 0 || summary.Dashboard.OfflinePorts > 0
 }
 
@@ -603,6 +617,7 @@ func (m *Manager) DeleteUser(id string) error {
 	delete(m.users, id)
 	delete(m.runtimes, id)
 	m.mu.Unlock()
+	_ = m.repository.DeleteUserPublicPoolCookie(id)
 	m.invalidateBackgroundCredentialValidation(id)
 	m.wakeReminderScheduler()
 

@@ -305,6 +305,7 @@ func newBackgroundRefreshTestManager(t *testing.T, handler http.Handler) (*Manag
 		DefaultDeviceLimit: 10, DefaultRefreshEnabled: true,
 		StatsRetentionDays: 90, PortHistoryRetentionDays: 90,
 	})
+	settings.RequirePoolShareForUnlimited = false
 	if err := repository.Save(persistence.State{
 		Version: stateVersion, Users: []model.User{owner, other}, Settings: settings,
 		UserStates: map[string]persistence.UserState{

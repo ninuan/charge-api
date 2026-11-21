@@ -42,7 +42,14 @@ func (s *Server) handleAdminIncidents(w http.ResponseWriter, r *http.Request) {
 		writePublicOperationError(w, http.StatusBadRequest, "list admin incidents", "异常筛选条件无效。", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, issues)
+	filtered := make([]model.SystemException, 0, len(issues))
+	for _, item := range issues {
+		if strings.Contains(strings.ToLower(item.Type), "yyb") || strings.Contains(item.Message, "扫码") {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func (s *Server) handleAdminIncidentActions(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +185,8 @@ func (s *Server) recordAdminAuditMessage(
 	action, targetType, targetID, targetLabel, result, message string,
 ) {
 	if err := s.manager.RecordAdminAudit(
-		admin, action, targetType, targetID, targetLabel, result, message,
+		admin, action, targetType, targetID, targetLabel, result,
+		security.SanitizeLogText(message, 256),
 	); err != nil {
 		logStructuredError("record_admin_audit", action, err)
 	}
@@ -299,6 +307,28 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	if len(parts) == 5 && parts[4] == "quota" && r.Method == http.MethodPatch {
+		var req struct {
+			BonusRemaining int `json:"bonusRemaining"`
+		}
+		if !decodeJSON(w, r, adminBodyLimit, &req) {
+			return
+		}
+		target, _ := s.manager.User(parts[3])
+		targetLabel := target.Username
+		if targetLabel == "" {
+			targetLabel = parts[3]
+		}
+		quota, err := s.manager.AdminSetUserBonusQuota(parts[3], req.BonusRemaining)
+		if err != nil {
+			s.recordAdminAuditMessage(admin, "user.quota_update", "user", parts[3], targetLabel, "failure", err.Error())
+			writeCodedError(w, http.StatusBadRequest, "USER_QUOTA_INVALID", err.Error())
+			return
+		}
+		s.recordAdminAuditMessage(admin, "user.quota_update", "user", parts[3], targetLabel, "success", fmt.Sprintf("永久奖励次数设为 %d", req.BonusRemaining))
+		writeJSON(w, http.StatusOK, quota)
+		return
+	}
 	if len(parts) == 5 && parts[4] == "refresh" && r.Method == http.MethodPost {
 		_, err := s.manager.Refresh(parts[3], true)
 		if err != nil {
@@ -382,6 +412,17 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		logStructuredError("load_admin_stats", "", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "运营统计暂时不可用，服务健康已降级"})
 		return
+	}
+	if len(stats.Exceptions) > 0 {
+		filtered := make([]model.SystemException, 0, len(stats.Exceptions))
+		for _, item := range stats.Exceptions {
+			if strings.Contains(strings.ToLower(item.Type), "yyb") || strings.Contains(item.Message, "扫码") {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		stats.Exceptions = filtered
+		stats.Overview.OpenIssues = len(filtered)
 	}
 	s.setAdminDegraded("")
 	writeJSON(w, http.StatusOK, stats)
@@ -494,6 +535,24 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
+	poolAvail := s.manager.PublicPoolAvailableCount()
+	poolHealth := model.ServiceHealth{
+		State:   model.HealthHealthy,
+		Message: fmt.Sprintf("公共池正常（%d 个可用）", poolAvail),
+	}
+	if poolAvail == 0 {
+		poolHealth = model.ServiceHealth{
+			State:          model.HealthUnavailable,
+			Message:        "公共 Cookie 池暂无可用凭据",
+			RecoveryAdvice: "前往「资源与用户 → 公共 Cookie 池」补充至少 1~2 个可用公共 Cookie，以恢复免费用户刷新。",
+		}
+	} else if poolAvail == 1 {
+		poolHealth = model.ServiceHealth{
+			State:          model.HealthDegraded,
+			Message:        "公共池仅剩 1 个可用 Cookie",
+			RecoveryAdvice: "建议在「资源与用户 → 公共 Cookie 池」补充备用公共 Cookie，避免单个失效影响免费用户。",
+		}
+	}
 	result := model.AdminHealth{
 		CheckedAt: time.Now(),
 		Charge: model.ServiceHealth{
@@ -502,9 +561,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		Database: model.ServiceHealth{
 			State: model.HealthHealthy, Message: "存储正常",
 		},
-		YYB: model.ServiceHealth{
-			State: model.HealthUnavailable, Message: "扫码服务未配置",
-		},
+		YYB: poolHealth,
 	}
 	if reason := s.adminDegradation(); reason != "" {
 		result.Charge = model.ServiceHealth{
@@ -517,20 +574,8 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 			State: model.HealthUnavailable, Message: "存储暂不可用",
 		}
 	}
-	if s.yybClient != nil {
-		if err := s.yybClient.Health(ctx); err != nil {
-			result.YYB = model.ServiceHealth{
-				State: model.HealthDegraded, Message: "扫码服务连接异常",
-				RecoveryAdvice: "确认扫码服务进程和网络可用后重新检查；仍异常时查看服务日志。",
-			}
-		} else {
-			result.YYB = model.ServiceHealth{
-				State: model.HealthHealthy, Message: "扫码服务正常",
-			}
-		}
-	}
 	for service, health := range map[string]model.ServiceHealth{
-		"charge": result.Charge, "database": result.Database, "yyb": result.YYB,
+		"charge": result.Charge, "database": result.Database, "public_pool": result.YYB,
 	} {
 		enriched, err := s.manager.RecordHealthCheck(service, health)
 		if err != nil {
@@ -547,7 +592,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 			result.Charge = enriched
 		case "database":
 			result.Database = enriched
-		case "yyb":
+		case "public_pool":
 			result.YYB = enriched
 		}
 	}
@@ -613,6 +658,7 @@ func settingsAuditMessage(previous, next model.RegistrationSettings) string {
 		previous.PileContributionBonusQuota != next.PileContributionBonusQuota ||
 		previous.SharedPileCacheTTLSeconds != next.SharedPileCacheTTLSeconds ||
 		previous.FreeUserWatchAllowed != next.FreeUserWatchAllowed ||
+		previous.RequirePoolShareForUnlimited != next.RequirePoolShareForUnlimited ||
 		previous.CookieGuideURL != next.CookieGuideURL {
 		groups = append(groups, "公共池与额度")
 	}

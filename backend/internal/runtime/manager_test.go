@@ -705,7 +705,7 @@ func TestAdminCredentialStatesAndIssues(t *testing.T) {
 				DeviceIDs: []string{"2601201412385560001"},
 			},
 			wantState: model.CredentialUnbound,
-			wantIssue: true,
+			wantIssue: false,
 		},
 		{
 			name: "healthy manual cookie",

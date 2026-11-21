@@ -64,6 +64,7 @@ export function useCloseAppShellMenu() {
 
 export type WorkbenchSection =
   | "piles"
+  | "pool"
   | "reminders"
   | "notifications"
   | "account"
@@ -417,18 +418,21 @@ export function AppShell({
                       {[
                         {
                           href: "/admin",
-                          label: "运行概览",
+                          label: "值守中心",
                           icon: ActivityIcon,
                           isCurrent:
                             active === "overview" || active === "incidents",
                           count: counts.incidents,
                         },
                         {
-                          href: "/admin?tab=users",
-                          label: "用户与公告",
+                          href: "/admin?tab=pool",
+                          label: "资源与用户",
                           icon: UsersIcon,
                           isCurrent:
-                            active === "users" || active === "announcements",
+                            active === "pool" ||
+                            active === "piles" ||
+                            active === "users" ||
+                            active === "announcements",
                         },
                         {
                           href: "/admin?tab=operations",

@@ -56,11 +56,16 @@ export interface RefreshInfo {
 export interface UserRefreshQuota {
   hasPersonalCookie: boolean
   personalCookieStatus: "none" | "valid" | "expired"
+  joinedPublicPool?: boolean
+  requirePoolShareForUnlimited?: boolean
+  unlimitedActive?: boolean
   freeDailyLimit: number
   freeDailyUsed: number
   freeDailyRemaining: number
   bonusRemaining: number
   totalFreeRemaining: number
+  dailyResetAt?: string
+  sharedPileCacheTTLSeconds?: number
   contributedPileCount: number
   pileContributionBonusQuota: number
   freeUserWatchAllowed: boolean
@@ -90,6 +95,7 @@ export interface PileCreateResponse extends Pile {
 export interface PublicPoolCookie {
   id: string
   label: string
+  ownerUserId?: string
   enabled: boolean
   status: "healthy" | "expired"
   consecutiveFailures: number
@@ -174,6 +180,7 @@ export interface AdminUserSummary {
   credential: CredentialSummary
   snapshotUpdatedAt: string
   lastRefresh: RefreshInfo
+  quota?: UserRefreshQuota
   recoveryDiagnostics?: RecoveryDiagnostic[]
 }
 
@@ -220,6 +227,7 @@ export interface RegistrationSettings {
   pileContributionBonusQuota?: number
   sharedPileCacheTTLSeconds?: number
   freeUserWatchAllowed?: boolean
+  requirePoolShareForUnlimited?: boolean
   cookieGuideUrl?: string
 }
 

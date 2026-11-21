@@ -86,7 +86,7 @@ describe("AddPileDialog", () => {
     await user.click(screen.getByRole("button", { name: "校验并收录" }))
 
     expect(addPile).toHaveBeenCalledWith(
-      expect.objectContaining({ number: "invalid" })
+      expect.objectContaining({ number: "invalid", name: "" })
     )
     expect(await screen.findByRole("alert")).toHaveTextContent("桩号格式不正确")
     expect(screen.getByRole("button", { name: "校验并收录" })).toBeEnabled()
