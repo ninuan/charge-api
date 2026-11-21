@@ -32,16 +32,32 @@ func StaticHandler(directory string) http.Handler {
 			}
 			info, statErr := file.Stat()
 			_ = file.Close()
-			if statErr != nil || info.IsDir() {
+			if statErr != nil {
 				http.NotFound(w, r)
 				return
+			}
+			if info.IsDir() {
+				// Next.js static export (trailingSlash: true) exports routes as
+				// <dir>/index.html. Allow directories with index.html while blocking
+				// directory listings on asset folders like /_next/static.
+				indexFile, indexErr := root.Open(path.Join(name, "index.html"))
+				if indexErr != nil {
+					http.NotFound(w, r)
+					return
+				}
+				indexInfo, indexStatErr := indexFile.Stat()
+				_ = indexFile.Close()
+				if indexStatErr != nil || !indexInfo.Mode().IsRegular() {
+					http.NotFound(w, r)
+					return
+				}
 			}
 			files.ServeHTTP(w, r)
 			return
 		}
 		file, err := root.Open(name)
 		if err != nil {
-			files.ServeHTTP(w, r)
+			http.NotFound(w, r)
 			return
 		}
 		defer file.Close()

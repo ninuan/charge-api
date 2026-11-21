@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -219,5 +221,46 @@ func TestDecodeJSONRejectsOversizedTrailingWhitespace(t *testing.T) {
 	var target struct{}
 	if decodeJSON(recorder, request, 32, &target) || recorder.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d, want 413", recorder.Code)
+	}
+}
+
+func TestStaticHandlerRoutesAndBlocksDirectoryListing(t *testing.T) {
+	dir := t.TempDir()
+	for _, rel := range []string{
+		"index.html",
+		"dashboard/index.html",
+		"login/index.html",
+		"_next/static/chunks/app.js",
+	} {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte("<html><script>console.log(1)</script></html>"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	handler := StaticHandler(dir)
+	tests := []struct {
+		path   string
+		status int
+	}{
+		{"/", http.StatusOK},
+		{"/dashboard/", http.StatusOK},
+		{"/dashboard", http.StatusMovedPermanently},
+		{"/login", http.StatusMovedPermanently},
+		{"/_next/static/chunks/app.js", http.StatusOK},
+		{"/_next/static", http.StatusNotFound},
+		{"/_next/static/", http.StatusNotFound},
+		{"/_next/static/chunks", http.StatusNotFound},
+		{"/_next/static/chunks/", http.StatusNotFound},
+	}
+	for _, tc := range tests {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if rec.Code != tc.status {
+			t.Fatalf("GET %s: status=%d, want %d", tc.path, rec.Code, tc.status)
+		}
 	}
 }
