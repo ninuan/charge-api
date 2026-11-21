@@ -13,7 +13,12 @@ import {
 
 import { request } from "@/lib/http"
 import type { Notification } from "@/lib/api/generated"
-import type { DashboardSnapshot, Pile } from "@/lib/types"
+import type {
+  DashboardSnapshot,
+  Pile,
+  PileCreateResponse,
+  SharedPile,
+} from "@/lib/types"
 
 const initialSnapshot: DashboardSnapshot = {
   piles: [],
@@ -51,7 +56,7 @@ type DashboardContextValue = {
   setSnapshot: (snapshot: DashboardSnapshot) => void
   reset: () => void
   fetchSnapshot: () => Promise<void>
-  addPile: (payload: PilePayload) => Promise<Pile>
+  addPile: (payload: PilePayload) => Promise<PileCreateResponse>
   deletePile: (id: string) => Promise<void>
   updatePile: (
     id: string,
@@ -59,7 +64,10 @@ type DashboardContextValue = {
   ) => Promise<void>
   reorderPiles: (ids: string[]) => Promise<void>
   refreshFromCapture: () => Promise<DashboardSnapshot>
+  refreshPile: (id: string) => Promise<DashboardSnapshot>
+  searchSharedPiles: (query: string) => Promise<SharedPile[]>
   updateCookie: (cookie: string) => Promise<void>
+  clearCookie: () => Promise<void>
   connectStream: () => void
   disconnectStream: () => void
   subscribeNotifications: (
@@ -137,7 +145,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const addPile = useCallback(
     async (payload: PilePayload) => {
-      const pile = await request<Pile>(
+      const pile = await request<PileCreateResponse>(
         "/api/piles",
         {
           method: "POST",
@@ -210,6 +218,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     return next
   }, [applySnapshot])
 
+  const refreshPile = useCallback(
+    async (id: string) => {
+      const next = await request<DashboardSnapshot>(
+        `/api/piles/${encodeURIComponent(id)}/refresh`,
+        { method: "POST", timeoutMs: remoteOperationTimeoutMs },
+        "暂时无法刷新该充电桩，请稍后重试。"
+      )
+      applySnapshot(next)
+      return next
+    },
+    [applySnapshot]
+  )
+
+  const searchSharedPiles = useCallback(async (query: string) => {
+    const params = new URLSearchParams()
+    if (query.trim()) params.set("q", query.trim())
+    const suffix = params.toString() ? `?${params.toString()}` : ""
+    return request<SharedPile[]>(
+      `/api/shared-piles${suffix}`,
+      {},
+      "暂时无法搜索公共充电桩库，请稍后重试。"
+    )
+  }, [])
+
   const updateCookie = useCallback(
     async (cookie: string) => {
       applySnapshot(
@@ -227,6 +259,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     },
     [applySnapshot]
   )
+
+  const clearCookie = useCallback(async () => {
+    applySnapshot(
+      await request<DashboardSnapshot>(
+        "/api/session/cookie",
+        { method: "DELETE" },
+        "清除个人 Cookie 失败，请稍后重试。"
+      )
+    )
+  }, [applySnapshot])
 
   const openStream = useCallback(() => {
     if (streamRef.current || typeof EventSource === "undefined") return
@@ -305,7 +347,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       updatePile,
       reorderPiles,
       refreshFromCapture,
+      refreshPile,
+      searchSharedPiles,
       updateCookie,
+      clearCookie,
       connectStream,
       disconnectStream,
       subscribeNotifications,
@@ -314,6 +359,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [
       addPile,
       applySnapshot,
+      clearCookie,
       connectStream,
       deletePile,
       disconnectStream,
@@ -321,7 +367,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       loading,
       reorderPiles,
       refreshFromCapture,
+      refreshPile,
       reset,
+      searchSharedPiles,
       snapshot,
       subscribeNotifications,
       subscribeStreamOpen,

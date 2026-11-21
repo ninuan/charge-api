@@ -609,6 +609,13 @@ func settingsAuditMessage(previous, next model.RegistrationSettings) string {
 		previous.PowerRestoreJitterMinutes != next.PowerRestoreJitterMinutes {
 		groups = append(groups, "计划断电")
 	}
+	if previous.FreeDailyRefreshQuota != next.FreeDailyRefreshQuota ||
+		previous.PileContributionBonusQuota != next.PileContributionBonusQuota ||
+		previous.SharedPileCacheTTLSeconds != next.SharedPileCacheTTLSeconds ||
+		previous.FreeUserWatchAllowed != next.FreeUserWatchAllowed ||
+		previous.CookieGuideURL != next.CookieGuideURL {
+		groups = append(groups, "公共池与额度")
+	}
 	if len(groups) == 0 {
 		return "设置内容未发生变化"
 	}

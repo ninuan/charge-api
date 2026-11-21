@@ -15,6 +15,15 @@ func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.Method == http.MethodDelete {
+		snapshot, err := s.manager.ClearPersonalCookie(user.ID)
+		if err != nil {
+			writePublicOperationError(w, http.StatusInternalServerError, "clear cookie", "暂时无法清除个人 Cookie，请稍后重试。", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+		return
+	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
 		return

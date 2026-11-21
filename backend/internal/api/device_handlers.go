@@ -56,19 +56,21 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 			writeCodedError(w, http.StatusBadRequest, "PILE_PORT_COUNT_INVALID", "充电口数量必须在 1-20 之间")
 			return
 		}
-		var pile model.Pile
+		var resp model.PileCreateResponse
 		var err error
 		if s.yybClient != nil && s.moceleClient != nil {
-			pile, err = s.manager.AddPileWithYYB(user.ID, req, s.yybClient, s.moceleClient)
+			pile, yybErr := s.manager.AddPileWithYYB(user.ID, req, s.yybClient, s.moceleClient)
+			resp = model.PileCreateResponse{Pile: pile}
+			err = yybErr
 		} else {
-			pile, err = s.manager.AddPile(user.ID, req)
+			resp, err = s.manager.AddPileWithCatalog(user.ID, req)
 		}
 		if err != nil {
 			s.recordDashboardDiagnostic(user, "add_pile", "add_pile_failed", req.ID, appruntime.DiagnosticStatusCode(err))
 			writeAddPileError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, pile)
+		writeJSON(w, http.StatusCreated, resp)
 	default:
 		methodNotAllowed(w)
 	}
@@ -79,6 +81,14 @@ func (s *Server) recordDashboardDiagnostic(user model.CurrentUser, operation, co
 }
 
 func writeAddPileError(w http.ResponseWriter, err error) {
+	if errors.Is(err, appruntime.ErrDailyProbeLimitReached) {
+		writeCodedError(w, http.StatusTooManyRequests, "DAILY_PROBE_LIMIT_REACHED", "今日录桩校验次数已达上限，请明天再试。")
+		return
+	}
+	if errors.Is(err, appruntime.ErrPublicPoolUnavailable) {
+		writeCodedError(w, http.StatusServiceUnavailable, "PUBLIC_POOL_UNAVAILABLE", "公共查询通道暂时不可用，请上传个人 Cookie 或联系管理员。")
+		return
+	}
 	if errors.Is(err, yyb.ErrAccountRecoveryFailed) {
 		writeCodedError(w, http.StatusBadGateway, "YYB_RECOVERY_FAILED", "已保留平台绑定，登录状态暂时无法恢复，请稍后重试。")
 		return
@@ -124,6 +134,24 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) == 4 && parts[3] == "refresh" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !deviceIDPattern.MatchString(parts[2]) {
+			writeCodedError(w, http.StatusBadRequest, "PILE_ID_INVALID", "设备ID格式无效")
+			return
+		}
+		snapshot, err := s.manager.RefreshPile(user.ID, parts[2], false)
+		if err != nil {
+			s.recordDashboardDiagnostic(user, "refresh", "refresh_failed", parts[2], appruntime.DiagnosticStatusCode(err))
+			writeRefreshError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+		return
+	}
 	if (len(parts) == 4 && parts[3] == "history") ||
 		(len(parts) == 6 && parts[3] == "ports" && parts[5] == "history") {
 		s.handlePileHistory(w, r, user, parts)
@@ -196,8 +224,20 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.recordDashboardDiagnostic(user, "refresh", "refresh_failed", "", appruntime.DiagnosticStatusCode(err))
-		writePublicOperationError(w, http.StatusInternalServerError, "refresh piles", "暂时无法刷新设备状态，请稍后重试。", err)
+		writeRefreshError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func writeRefreshError(w http.ResponseWriter, err error) {
+	if errors.Is(err, appruntime.ErrRefreshQuotaExhausted) {
+		writeCodedError(w, http.StatusTooManyRequests, "REFRESH_QUOTA_EXHAUSTED", "今日免费刷新次数与奖励额度已用完，上传个人 Cookie 可不限次刷新，或录入全站新桩赚取额外次数。")
+		return
+	}
+	if errors.Is(err, appruntime.ErrPublicPoolUnavailable) {
+		writeCodedError(w, http.StatusServiceUnavailable, "PUBLIC_POOL_UNAVAILABLE", "公共查询通道暂时不可用，请上传个人 Cookie 或联系管理员补充公共池。")
+		return
+	}
+	writePublicOperationError(w, http.StatusInternalServerError, "refresh piles", "暂时无法刷新设备状态，请稍后重试。", err)
 }

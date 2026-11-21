@@ -281,6 +281,10 @@ func (c *Client) AddDeviceWithLimit(id string, limit int) error {
 }
 
 func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
+	return c.ResolveDeviceIDWithCookie(number, "")
+}
+
+func (c *Client) ResolveDeviceIDWithCookie(number string, cookieOverride string) (string, error) {
 	number = strings.TrimSpace(number)
 	if !numericIDPattern.MatchString(number) {
 		return "", fmt.Errorf("桩号必须是 6-64 位数字")
@@ -290,6 +294,10 @@ func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
 	templateURL := c.template.URL
 	headers := cloneHeaders(c.template.Headers)
 	c.mu.RUnlock()
+
+	if strings.TrimSpace(cookieOverride) != "" {
+		headers["Cookie"] = strings.TrimSpace(cookieOverride)
+	}
 
 	resolveURL, err := buildCnumURL(templateURL, number)
 	if err != nil {
@@ -325,6 +333,27 @@ func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
 		return id, nil
 	}
 	return "", fmt.Errorf("桩号 %s 没有解析到设备长ID", number)
+}
+
+func (c *Client) FetchPileWithCookie(deviceID string, cookie string) (model.Pile, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return model.Pile{}, fmt.Errorf("device id is required")
+	}
+	c.mu.RLock()
+	request := c.template
+	c.mu.RUnlock()
+
+	request.Name = deviceID
+	request.Body = withFormValue(request.Body, "id", deviceID)
+	request.Headers = cloneHeaders(request.Headers)
+	request.Headers["Referer"] = withURLQueryValue(request.Headers["Referer"], "id", deviceID)
+	request.Headers["Cookie"] = withCookieValue(strings.TrimSpace(cookie), "deviceid", deviceID)
+	return c.fetchPile(request)
+}
+
+func (c *Client) HasPersonalCookie() bool {
+	return strings.TrimSpace(c.Cookie()) != ""
 }
 
 func (c *Client) addDevice(id string, limit int) error {

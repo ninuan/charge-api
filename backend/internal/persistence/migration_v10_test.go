@@ -120,8 +120,8 @@ func assertV9DataPreservedInCurrentSchema(t *testing.T, store *Store) {
 	if err := store.db.QueryRow(`SELECT value FROM metadata WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != "13" {
-		t.Fatalf("schema version = %s, want 13", version)
+	if version != "14" {
+		t.Fatalf("schema version = %s, want 14", version)
 	}
 	var mode, completionReason string
 	var expiresAt, completedAt any

@@ -13,6 +13,11 @@ import (
 
 func TestWatchRuleAPIIsAuthenticatedScopedAndStable(t *testing.T) {
 	fixture := newHistoryAPIFixture(t)
+	settings := fixture.manager.Settings()
+	settings.FreeUserWatchAllowed = true
+	if err := fixture.manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("enable free watch in fixture: %v", err)
+	}
 	const deviceID = "2601201412385560088"
 
 	anonymous := watchAPIRequest(t, fixture, "", http.MethodGet, "/api/watch-rules", "")
@@ -171,6 +176,11 @@ func TestNotificationAPIManagesPreferencesInboxAndOwnership(t *testing.T) {
 
 func TestWatchOverviewReturnsOnlyCurrentUserPolicyAndQuota(t *testing.T) {
 	fixture := newHistoryAPIFixture(t)
+	settings := fixture.manager.Settings()
+	settings.FreeUserWatchAllowed = true
+	if err := fixture.manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("enable free watch in fixture: %v", err)
+	}
 	const deviceID = "2601201412385560088"
 	duration := model.WatchDurationTwoHours
 	if _, err := fixture.manager.CreateWatchRule(fixture.owner.ID, model.WatchRuleCreateRequest{

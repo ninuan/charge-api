@@ -46,9 +46,13 @@ const (
 	defaultNotificationDays     = 90
 	defaultPowerOffStartMinute  = 23 * 60
 	defaultPowerOffEndMinute    = 7 * 60
-	defaultPowerOffTimezone     = "Asia/Shanghai"
-	defaultPowerRestoreJitter   = 10
-	maxRecoveryDiagnostics      = 20
+	defaultPowerOffTimezone      = "Asia/Shanghai"
+	defaultPowerRestoreJitter    = 10
+	defaultFreeDailyRefreshQuota = 2
+	defaultPileContributionBonus = 2
+	defaultSharedPileCacheTTL    = 60
+	defaultDailyPileProbeLimit   = 10
+	maxRecoveryDiagnostics       = 20
 	diagnosticOperationRecovery = "credential_recovery"
 	diagnosticOperationAddPile  = "add_pile"
 	diagnosticOperationRefresh  = "refresh"
@@ -66,6 +70,9 @@ type Manager struct {
 	watchMu                sync.Mutex
 	notificationMu         sync.Mutex
 	wxPusherMu             sync.Mutex
+	poolMu                 sync.Mutex
+	poolCursor             uint64
+	poolAlertSentAt        time.Time
 	wxPusherAttempts       map[string][]time.Time
 	retentionMu            sync.Mutex
 	lastRetentionRun       time.Time
@@ -87,16 +94,17 @@ type Manager struct {
 }
 
 type UserRuntime struct {
-	mu                  sync.Mutex
-	refreshMu           sync.Mutex
-	credentialMu        sync.Mutex // serializes binding replacement against in-flight recovery
-	store               *store.DashboardStore
-	client              *charger.Client
-	stats               model.TrafficStats
-	lastRemoteFetch     time.Time
-	minInterval         time.Duration
-	yybBinding          *model.YYBBinding
-	recoveryDiagnostics []model.RecoveryDiagnostic
+	mu                    sync.Mutex
+	refreshMu             sync.Mutex
+	credentialMu          sync.Mutex // serializes binding replacement against in-flight recovery
+	store                 *store.DashboardStore
+	client                *charger.Client
+	stats                 model.TrafficStats
+	lastRemoteFetch       time.Time
+	minInterval           time.Duration
+	yybBinding            *model.YYBBinding
+	recoveryDiagnostics   []model.RecoveryDiagnostic
+	personalCookieExpired bool
 }
 
 func NewManager(
@@ -130,6 +138,11 @@ func NewManager(
 			ScheduledPowerOffEndMinute:   defaultPowerOffEndMinute,
 			ScheduledPowerOffTimezone:    defaultPowerOffTimezone,
 			PowerRestoreJitterMinutes:    defaultPowerRestoreJitter,
+			FreeDailyRefreshQuota:        defaultFreeDailyRefreshQuota,
+			PileContributionBonusQuota:   defaultPileContributionBonus,
+			SharedPileCacheTTLSeconds:    defaultSharedPileCacheTTL,
+			FreeUserWatchAllowed:         false,
+			CookieGuideURL:               "",
 		},
 	}
 

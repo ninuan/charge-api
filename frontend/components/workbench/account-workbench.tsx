@@ -3,7 +3,8 @@
 import {
   ArrowRightIcon,
   CheckIcon,
-  Link2Icon,
+  ExternalLinkIcon,
+  KeyRoundIcon,
   LogOutIcon,
   ShieldCheckIcon,
 } from "lucide-react"
@@ -13,7 +14,6 @@ import { Suspense, useCallback, useEffect, useState } from "react"
 import { AppShell } from "@/components/app-shell"
 import { AccountSecurityPanel } from "@/components/account-security-panel"
 import { AppearanceSettings } from "@/components/appearance-settings"
-import { YybLoginDialog } from "@/components/yyb-login-dialog"
 import { BrowserNotificationSetting } from "@/components/notification-center"
 import { WxPusherChannelCard } from "@/components/wxpusher-channel-card"
 import { QuietHoursForm } from "@/components/watch-management-sheet"
@@ -31,9 +31,8 @@ import { DashboardProvider, useDashboard } from "@/lib/dashboard-context"
 import { NotificationProvider } from "@/lib/notification-context"
 import { WatchProvider, useWatch } from "@/lib/watch-context"
 import { useOnline } from "@/lib/browser-state"
-import { requestJSON, requestEmpty } from "@/lib/http"
 import { notify } from "@/lib/feedback"
-import { formatSnapshotTime, updatePageQuery } from "@/lib/workbench"
+import { updatePageQuery } from "@/lib/workbench"
 import { DashboardSession } from "./dashboard-session"
 import { UserWorkbenchShell } from "./user-shell"
 import {
@@ -189,59 +188,24 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
   )
 }
 
-type BindingState = {
-  bound: boolean
-  nickname?: string
-  openidSuffix?: string
-  status?: string
-  boundAt?: string
-  lastCheckedAt?: string
-}
 function PlatformConnection() {
   const params = useSearchParams(),
     online = useOnline()
-  const { updateCookie } = useDashboard()
-  const [binding, setBinding] = useState<BindingState | null>(null)
-  const [error, setError] = useState("")
-  const [loading, setLoading] = useState(true)
-  const [scanOpen, setScanOpen] = useState(params.get("connect") === "1")
-  const [cookieOpen, setCookieOpen] = useState(false)
-  const [unlinkOpen, setUnlinkOpen] = useState(false)
+  const { snapshot, updateCookie, clearCookie } = useDashboard()
+  const quota = snapshot.quota
+  const [cookieOpen, setCookieOpen] = useState(params.get("connect") === "1")
+  const [clearOpen, setClearOpen] = useState(false)
   const [cookie, setCookie] = useState("")
   const [pending, setPending] = useState(false)
   const [formError, setFormError] = useState("")
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError("")
-    try {
-      setBinding(
-        await requestJSON<BindingState>(
-          "/api/session/yyb-binding",
-          {},
-          "暂时无法读取平台绑定状态。"
-        )
-      )
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : "暂时无法读取平台绑定状态。"
-      )
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  useEffect(() => {
-    let active = true
-    queueMicrotask(() => {
-      if (active) void load()
-    })
-    return () => {
-      active = false
-    }
-  }, [load])
+
+  const hasPersonal = Boolean(quota?.hasPersonalCookie)
+  const personalStatus = quota?.personalCookieStatus ?? "none"
+
   async function saveCookie(event: React.FormEvent) {
     event.preventDefault()
     if (!cookie.trim()) {
-      setFormError("请填写有效的 Cookie。")
+      setFormError("请粘贴有效的 Cookie、请求头或 Copy as cURL。")
       return
     }
     setPending(true)
@@ -250,93 +214,79 @@ function PlatformConnection() {
       await updateCookie(cookie.trim())
       setCookie("")
       setCookieOpen(false)
-      notify.success("访问凭据已更新")
+      updatePageQuery({ connect: null }, true)
+      notify.success("个人 Cookie 已更新，已解锁不限次刷新与空位提醒")
     } catch (reason) {
       setFormError(
-        reason instanceof Error ? reason.message : "未能更新，请重试。"
+        reason instanceof Error ? reason.message : "未能更新，请检查内容后重试。"
       )
     } finally {
       setPending(false)
     }
   }
-  async function unlink() {
+
+  async function removePersonalCookie() {
     setPending(true)
     setFormError("")
     try {
-      await requestEmpty(
-        "/api/session/yyb-binding",
-        { method: "DELETE" },
-        "解除平台绑定失败。"
-      )
-      setUnlinkOpen(false)
-      await load()
-      notify.success("平台绑定已解除")
+      await clearCookie()
+      setClearOpen(false)
+      notify.success("已清除个人 Cookie，当前切回公共池免费模式")
     } catch (reason) {
-      setFormError(reason instanceof Error ? reason.message : "解除绑定失败。")
+      setFormError(reason instanceof Error ? reason.message : "清除失败。")
     } finally {
       setPending(false)
     }
   }
+
   return (
     <div className="wb-settings-content">
       <SectionHeading
-        title="充电平台连接"
-        description="首次扫码获取平台 Cookie；Cookie 有效期较长，不会自动重复同步，失效时可手动更新 Cookie 或重新扫码。"
+        title="个人 Cookie 与刷新额度"
+        description="提供个人 Cookie 可随时不限次刷新并开启空位提醒；未提供时使用公共池，享每日免费额度，录入全站新桩可永久增加奖励次数。"
       />
-      {loading && !binding ? (
-        <WorkbenchLoading label="正在检查平台绑定" />
-      ) : (
-        <>
-          <div className="wb-connection-line">
-            <span className="wb-service-icon">
-              <Link2Icon size={26} />
-            </span>
-            <div>
-              <h3>
-                充电平台{" "}
-                <StatusPill tone={binding?.bound ? "idle" : "neutral"}>
-                  {error
-                    ? "暂时无法检查"
-                    : binding?.bound
-                      ? "微信已绑定"
-                      : "尚未绑定"}
-                </StatusPill>
-              </h3>
-              <p>
-                {binding?.bound
-                  ? `${binding.nickname || "微信账户"}${binding.openidSuffix ? ` · 尾号 ${binding.openidSuffix}` : ""}${binding.lastCheckedAt ? ` · 最近检查 ${formatSnapshotTime(binding.lastCheckedAt, true)}` : ""}`
-                  : "首次扫码用于获取平台 Cookie；也可直接手动填写 Cookie。"}
-              </p>
-            </div>
-            <YybLoginDialog
-              open={scanOpen}
-              onOpenChange={(open) => {
-                setScanOpen(open)
-                if (!open) {
-                  updatePageQuery({ connect: null }, true)
-                  void load()
-                }
-              }}
-            />
-          </div>
-          {error && (
-            <div role="alert" className="wb-state-banner wb-banner-warning">
-              <div>
-                <strong>绑定状态读取失败</strong>
-                <span>{error}</span>
-              </div>
-              <WorkbenchButton variant="outline" onClick={() => void load()}>
-                重试
-              </WorkbenchButton>
-            </div>
-          )}
-        </>
-      )}
+      <div className="wb-connection-line">
+        <span className="wb-service-icon">
+          <KeyRoundIcon size={24} />
+        </span>
+        <div>
+          <h3>
+            查询通道{" "}
+            <StatusPill
+              tone={
+                personalStatus === "valid"
+                  ? "idle"
+                  : personalStatus === "expired"
+                    ? "warning"
+                    : "neutral"
+              }
+            >
+              {personalStatus === "valid"
+                ? "个人 Cookie · 不限次"
+                : personalStatus === "expired"
+                  ? "个人 Cookie 已失效"
+                  : "公共池免费模式"}
+            </StatusPill>
+          </h3>
+          <p>
+            {personalStatus === "valid"
+              ? "当前使用你自己的长效 Cookie，不限次刷新且支持空位提醒。"
+              : personalStatus === "expired"
+                ? "个人 Cookie 已过期，刷新时会自动平滑降级到公共池；请及时更新。"
+                : quota
+                  ? `今日免费剩 ${quota.freeDailyRemaining}/${quota.freeDailyLimit} 次 · 录桩奖励剩 ${quota.bonusRemaining} 次（已贡献 ${quota.contributedPileCount} 台新桩）`
+                  : "正在读取刷新额度…"}
+          </p>
+        </div>
+      </div>
+
       <div className="wb-grouped-list">
         <div className="wb-setting-row">
           <div>
-            <h3>手动更新 Cookie</h3>
-            <p>Cookie 长期有效；失效或未启用扫码服务时，可直接手动更新访问凭据。</p>
+            <h3>{hasPersonal ? "更新个人 Cookie" : "上传个人 Cookie"}</h3>
+            <p>
+              支持直接粘贴抓包工具复制的 <code>Copy as cURL</code>、完整请求头或纯 Cookie 字符串，系统会自动提取。
+            </p>
           </div>
           <WorkbenchButton
             variant="ghost"
@@ -346,56 +296,100 @@ function PlatformConnection() {
               setCookieOpen(true)
             }}
           >
-            手动更新
+            {hasPersonal ? "更新 Cookie" : "上传 Cookie"}
             <ArrowRightIcon size={14} />
           </WorkbenchButton>
         </div>
-        {binding?.bound && (
+
+        {quota?.cookieGuideUrl && (
           <div className="wb-setting-row">
             <div>
-              <h3>解除平台绑定</h3>
-              <p>停止使用当前扫码绑定，不移除常用桩与已有通知。</p>
+              <h3>如何抓取个人 Cookie（视频教程）</h3>
+              <p>只需抓一次包粘贴即可长期使用，完全不走微信协议、零风控。</p>
+            </div>
+            <a
+              href={quota.cookieGuideUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="wb-btn wb-btn-outline"
+            >
+              观看教程
+              <ExternalLinkIcon size={14} />
+            </a>
+          </div>
+        )}
+
+        {hasPersonal && (
+          <div className="wb-setting-row">
+            <div>
+              <h3>清除个人 Cookie</h3>
+              <p>移除当前保存的个人 Cookie 并切回公共池免费额度模式。</p>
             </div>
             <WorkbenchButton
               variant="ghost"
               disabled={!online}
               onClick={() => {
                 setFormError("")
-                setUnlinkOpen(true)
+                setClearOpen(true)
               }}
             >
-              解除绑定
+              清除 Cookie
             </WorkbenchButton>
           </div>
         )}
       </div>
+
       <div className="wb-settings-note">
         <ShieldCheckIcon size={17} />
-        <p>访问凭据只提交到当前服务，不在页面上回显。请勿公开或分享 Cookie。</p>
+        <p>
+          个人 Cookie 仅加密保存在服务端供你本人查询，不会在页面回显，也不会共享给他人。
+        </p>
       </div>
+
       <Dialog
         open={cookieOpen}
-        onOpenChange={(open) => !pending && setCookieOpen(open)}
+        onOpenChange={(open) => {
+          if (!pending) {
+            setCookieOpen(open)
+            if (!open) updatePageQuery({ connect: null }, true)
+          }
+        }}
       >
         <DialogContent className="workbench-dialog">
           <DialogHeader>
-            <DialogTitle>手动更新访问凭据</DialogTitle>
+            <DialogTitle>
+              {hasPersonal ? "更新个人 Cookie" : "上传个人 Cookie"}
+            </DialogTitle>
             <DialogDescription>
-              只更新当前账户的 Cookie，不影响其他用户。
+              直接粘贴 Copy as cURL、HTTP 请求头或 Cookie 字符串，系统会自动提取有效字段并验证。
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={saveCookie}>
             <Field>
-              <FieldLabel htmlFor="connection-cookie">Cookie</FieldLabel>
+              <FieldLabel htmlFor="connection-cookie">
+                Cookie / cURL 内容
+              </FieldLabel>
               <textarea
                 id="connection-cookie"
                 className="wb-input wb-textarea"
                 autoComplete="off"
                 value={cookie}
                 onChange={(event) => setCookie(event.target.value)}
-                placeholder="粘贴你有权使用的 Cookie"
+                placeholder="粘贴 curl 'https://ele.mocele.com/...' 或 wxopenid=...; info=..."
               />
             </Field>
+            {quota?.cookieGuideUrl && (
+              <p className="wb-field-hint">
+                不知道怎么获取？
+                <a
+                  href={quota.cookieGuideUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  点此查看抓包视频教程
+                </a>
+              </p>
+            )}
             {formError && (
               <p role="alert" className="wb-form-error">
                 {formError}
@@ -411,21 +405,22 @@ function PlatformConnection() {
                 取消
               </WorkbenchButton>
               <WorkbenchButton type="submit" busy={pending} disabled={!online}>
-                更新连接
+                保存并验证
               </WorkbenchButton>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
       <Dialog
-        open={unlinkOpen}
-        onOpenChange={(open) => !pending && setUnlinkOpen(open)}
+        open={clearOpen}
+        onOpenChange={(open) => !pending && setClearOpen(open)}
       >
         <DialogContent className="workbench-dialog">
           <DialogHeader>
-            <DialogTitle>解除平台绑定？</DialogTitle>
+            <DialogTitle>清除个人 Cookie？</DialogTitle>
             <DialogDescription>
-              之后需要重新扫码，才能再次通过绑定账户恢复登录。
+              清除后将切换为公共池免费额度模式，且空位提醒会暂停，直到重新上传个人 Cookie。
             </DialogDescription>
           </DialogHeader>
           {formError && (
@@ -437,7 +432,7 @@ function PlatformConnection() {
             <WorkbenchButton
               variant="outline"
               disabled={pending}
-              onClick={() => setUnlinkOpen(false)}
+              onClick={() => setClearOpen(false)}
             >
               取消
             </WorkbenchButton>
@@ -445,9 +440,9 @@ function PlatformConnection() {
               variant="destructive"
               busy={pending}
               disabled={!online}
-              onClick={() => void unlink()}
+              onClick={() => void removePersonalCookie()}
             >
-              确认解除
+              确认清除
             </WorkbenchButton>
           </DialogFooter>
         </DialogContent>

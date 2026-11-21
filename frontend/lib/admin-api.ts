@@ -9,6 +9,7 @@ import type {
   InviteCode,
   InviteCodePage,
   OperationsStatus,
+  PublicPoolCookie,
   RegistrationSettings,
   SystemException,
   TemporaryPasswordResponse,
@@ -205,5 +206,44 @@ export const adminApi = {
       `/api/admin/invites/${id}`,
       { method: "DELETE" },
       "删除邀请码失败"
+    ),
+  publicPool: () =>
+    request<PublicPoolCookie[]>(
+      "/api/admin/public-pool",
+      {},
+      "加载公共 Cookie 池失败"
+    ),
+  createPublicPoolCookie: (payload: {
+    label: string
+    cookie: string
+    enabled?: boolean
+  }) =>
+    request<PublicPoolCookie>(
+      "/api/admin/public-pool",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "新增公共 Cookie 失败"
+    ),
+  updatePublicPoolCookie: (
+    id: string,
+    payload: { label?: string; cookie?: string; enabled?: boolean }
+  ) =>
+    request<PublicPoolCookie>(
+      `/api/admin/public-pool/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "更新公共 Cookie 失败"
+    ),
+  deletePublicPoolCookie: (id: string) =>
+    request<void>(
+      `/api/admin/public-pool/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+      "删除公共 Cookie 失败"
     ),
 }

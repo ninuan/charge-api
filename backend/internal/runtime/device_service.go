@@ -17,7 +17,7 @@ func (m *Manager) Snapshot(userID string) (model.DashboardSnapshot, error) {
 	}
 	runtime.recordRequest()
 	m.recordMetric(userID, "request")
-	return runtime.store.Snapshot(), m.Save()
+	return m.attachQuota(userID, runtime.store.Snapshot()), m.Save()
 }
 
 func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pile, error) {
@@ -208,29 +208,41 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		snapshot := runtime.store.Snapshot()
 		snapshot.Refresh.Cached = true
 		snapshot.Refresh.Message = "管理员已暂停此账户的远端刷新，当前展示缓存数据"
-		return snapshot, nil
+		return m.attachQuota(userID, snapshot), nil
+	}
+	if !m.hasValidPersonalCookie(runtime) && m.PublicPoolAvailableCount() > 0 {
+		return m.refreshViaPublicPool(userID, runtime, runtime.client.HasPersonalCookie() && runtime.isPersonalCookieExpired())
 	}
 	remotePiles, err := runtime.refresh(force)
 	if err != nil {
 		info := runtime.store.Snapshot().Refresh
 		m.recordRefreshMetrics(userID, info)
 		if charger.IsAuthExpired(err) {
+			runtime.setPersonalCookieExpired(true)
 			m.recordMetric(userID, "cookie_error")
 			if notificationErr := m.notifyCredentialExpired(userID, time.Now().UTC()); notificationErr != nil {
 				err = errors.Join(err, fmt.Errorf("record expired credential notification: %w", notificationErr))
+			}
+			if m.PublicPoolAvailableCount() > 0 {
+				return m.refreshViaPublicPool(userID, runtime, true)
 			}
 		}
 		runtime.recordFailure(charger.IsAuthExpired(err))
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
+	runtime.setPersonalCookieExpired(false)
+	m.recordSharedPiles(userID, remotePiles)
 	snapshot := runtime.store.Snapshot()
 	if snapshot.Refresh.Cached {
 		m.recordMetric(userID, "cache")
 	} else {
 		m.recordRefreshMetrics(userID, snapshot.Refresh)
 	}
-	return snapshot, m.saveAndRecordRemotePiles(userID, remotePiles)
+	if err := m.saveAndRecordRemotePiles(userID, remotePiles); err != nil {
+		return model.DashboardSnapshot{}, err
+	}
+	return m.attachQuota(userID, snapshot), nil
 }
 
 func (m *Manager) RefreshWithYYB(userID string, force bool, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
@@ -264,7 +276,11 @@ func (m *Manager) RecoverRefreshWithYYB(userID string, yybClient YYBCodeClient, 
 	return snapshot, nil
 }
 
-func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSnapshot, error) {
+func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.DashboardSnapshot, error) {
+	cookie, err := charger.ExtractCookie(rawCookie)
+	if err != nil {
+		return model.DashboardSnapshot{}, err
+	}
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
 		return model.DashboardSnapshot{}, err
@@ -282,6 +298,7 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 	m.invalidateBackgroundCredentialValidation(userID)
 	user, _ := m.User(userID)
 	if !user.RefreshEnabled {
+		runtime.setPersonalCookieExpired(false)
 		snapshot := runtime.store.Snapshot()
 		snapshot.Refresh.Cached = true
 		snapshot.Refresh.Message = "Cookie 已保存；远端刷新当前已暂停，继续展示缓存数据"
@@ -289,7 +306,26 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		if err := m.Save(); err != nil {
 			return model.DashboardSnapshot{}, err
 		}
-		return snapshot, nil
+		return m.attachQuota(userID, snapshot), nil
+	}
+	if len(runtime.client.DeviceIDs()) == 0 {
+		if shared, _ := m.repository.SearchSharedPiles("", 1); len(shared) > 0 {
+			if _, probeErr := runtime.client.FetchPileWithCookie(shared[0].DeviceID, cookie); probeErr != nil {
+				_ = runtime.client.UpdateCookie(previous)
+				runtime.recordFailure(charger.IsAuthExpired(probeErr))
+				_ = m.Save()
+				return model.DashboardSnapshot{}, probeErr
+			}
+		}
+		runtime.setPersonalCookieExpired(false)
+		_ = m.resolveCredentialExpired(userID, time.Now().UTC())
+		snapshot := runtime.store.Snapshot()
+		snapshot.Refresh.Message = "个人 Cookie 已保存并生效，已解锁不限次刷新与空位提醒"
+		runtime.store.SetRefreshInfo(snapshot.Refresh)
+		if err := m.Save(); err != nil {
+			return model.DashboardSnapshot{}, err
+		}
+		return m.attachQuota(userID, snapshot), nil
 	}
 	remotePiles, err := runtime.refresh(true)
 	if err != nil {
@@ -305,9 +341,14 @@ func (m *Manager) UpdateCookie(userID string, cookie string) (model.DashboardSna
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
+	runtime.setPersonalCookieExpired(false)
+	m.recordSharedPiles(userID, remotePiles)
 	snapshot := runtime.store.Snapshot()
 	m.recordRefreshMetrics(userID, snapshot.Refresh)
-	return snapshot, m.saveAndRecordRemotePiles(userID, remotePiles)
+	if err := m.saveAndRecordRemotePiles(userID, remotePiles); err != nil {
+		return model.DashboardSnapshot{}, err
+	}
+	return m.attachQuota(userID, snapshot), nil
 }
 
 func (m *Manager) saveAndRecordRemotePiles(userID string, piles []model.Pile) error {

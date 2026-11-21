@@ -359,6 +359,17 @@ func (m *Manager) prepareReminderTarget(
 		state.QuotaUsed = 0
 	}
 
+	if !m.CanUseWatchReminders(target.userID) {
+		if state.PausedReason != watchPauseCredentialExpired {
+			state.PausedReason = watchPauseCredentialExpired
+			state.UpdatedAt = now
+			if err := m.repository.SaveWatchRefreshState(state); err != nil {
+				return state, false, err
+			}
+		}
+		return state, false, nil
+	}
+
 	inPowerOff, restoreAt, err := scheduledPowerOffWindow(now, settings)
 	if err != nil {
 		return model.WatchRefreshState{}, false, err

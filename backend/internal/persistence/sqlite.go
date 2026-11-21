@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 type Store struct {
 	db     *sql.DB
@@ -401,6 +401,9 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := s.ensureAnnouncements(); err != nil {
+		return err
+	}
+	if err := s.ensurePublicPoolAndSharedPiles(); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(

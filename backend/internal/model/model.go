@@ -148,6 +148,7 @@ type DashboardSnapshot struct {
 	UpdatedAt  time.Time         `json:"updatedAt"`
 	Statistics DashboardCounters `json:"statistics"`
 	Refresh    RefreshInfo       `json:"refresh"`
+	Quota      *UserRefreshQuota `json:"quota,omitempty"`
 }
 
 type DashboardCounters struct {
@@ -159,17 +160,78 @@ type DashboardCounters struct {
 }
 
 type RefreshInfo struct {
-	LastRemoteAt       *time.Time `json:"lastRemoteAt,omitempty"`
-	NextRemoteAt       *time.Time `json:"nextRemoteAt,omitempty"`
-	NextRetryAt        *time.Time `json:"nextRetryAt,omitempty"`
-	MinIntervalSeconds int        `json:"minIntervalSeconds"`
-	AttemptedDevices   int        `json:"attemptedDevices"`
-	SuccessfulDevices  int        `json:"successfulDevices"`
-	FailedDevices      int        `json:"failedDevices"`
-	SkippedDevices     int        `json:"skippedDevices"`
-	Cached             bool       `json:"cached"`
-	Partial            bool       `json:"partial"`
-	Message            string     `json:"message,omitempty"`
+	LastRemoteAt           *time.Time `json:"lastRemoteAt,omitempty"`
+	NextRemoteAt           *time.Time `json:"nextRemoteAt,omitempty"`
+	NextRetryAt            *time.Time `json:"nextRetryAt,omitempty"`
+	MinIntervalSeconds     int        `json:"minIntervalSeconds"`
+	AttemptedDevices       int        `json:"attemptedDevices"`
+	SuccessfulDevices      int        `json:"successfulDevices"`
+	FailedDevices          int        `json:"failedDevices"`
+	SkippedDevices         int        `json:"skippedDevices"`
+	Cached                 bool       `json:"cached"`
+	Partial                bool       `json:"partial"`
+	UsedPool               bool       `json:"usedPool,omitempty"`
+	PersonalCookieFallback bool       `json:"personalCookieFallback,omitempty"`
+	Message                string     `json:"message,omitempty"`
+}
+
+type PileCreateResponse struct {
+	Pile
+	RewardGranted     int               `json:"rewardGranted,omitempty"`
+	FromSharedCatalog bool              `json:"fromSharedCatalog,omitempty"`
+	Quota             *UserRefreshQuota `json:"quota,omitempty"`
+}
+
+type PublicPoolCookie struct {
+	ID                  string     `json:"id"`
+	Label               string     `json:"label"`
+	Enabled             bool       `json:"enabled"`
+	Status              string     `json:"status"` // "healthy" | "expired"
+	ConsecutiveFailures int        `json:"consecutiveFailures"`
+	LastUsedAt          *time.Time `json:"lastUsedAt,omitempty"`
+	LastError           string     `json:"lastError,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+}
+
+type PublicPoolCookieCreateRequest struct {
+	Label   string `json:"label"`
+	Cookie  string `json:"cookie"`
+	Enabled *bool  `json:"enabled,omitempty"`
+}
+
+type PublicPoolCookieUpdateRequest struct {
+	Label   *string `json:"label,omitempty"`
+	Cookie  *string `json:"cookie,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
+}
+
+type SharedPile struct {
+	DeviceID            string     `json:"deviceId"`
+	Number              string     `json:"number"`
+	Name                string     `json:"name"`
+	Address             string     `json:"address"`
+	OpenNum             int        `json:"openNum"`
+	ContributedByUserID string     `json:"contributedByUserId,omitempty"`
+	LastFetchedAt       *time.Time `json:"lastFetchedAt,omitempty"`
+	LastSnapshot        *Pile      `json:"lastSnapshot,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+}
+
+type UserRefreshQuota struct {
+	HasPersonalCookie          bool   `json:"hasPersonalCookie"`
+	PersonalCookieStatus       string `json:"personalCookieStatus"` // "none" | "valid" | "expired"
+	FreeDailyLimit             int    `json:"freeDailyLimit"`
+	FreeDailyUsed              int    `json:"freeDailyUsed"`
+	FreeDailyRemaining         int    `json:"freeDailyRemaining"`
+	BonusRemaining             int    `json:"bonusRemaining"`
+	TotalFreeRemaining         int    `json:"totalFreeRemaining"`
+	ContributedPileCount       int    `json:"contributedPileCount"`
+	PileContributionBonusQuota int    `json:"pileContributionBonusQuota"`
+	FreeUserWatchAllowed       bool   `json:"freeUserWatchAllowed"`
+	CookieGuideURL             string `json:"cookieGuideUrl,omitempty"`
+	PublicPoolAvailable        int    `json:"publicPoolAvailable"`
 }
 
 type PileUpsertRequest struct {
@@ -276,6 +338,11 @@ type RegistrationSettings struct {
 	ScheduledPowerOffEndMinute   int    `json:"scheduledPowerOffEndMinute"`
 	ScheduledPowerOffTimezone    string `json:"scheduledPowerOffTimezone"`
 	PowerRestoreJitterMinutes    int    `json:"powerRestoreJitterMinutes"`
+	FreeDailyRefreshQuota        int    `json:"freeDailyRefreshQuota"`
+	PileContributionBonusQuota   int    `json:"pileContributionBonusQuota"`
+	SharedPileCacheTTLSeconds    int    `json:"sharedPileCacheTTLSeconds"`
+	FreeUserWatchAllowed         bool   `json:"freeUserWatchAllowed"`
+	CookieGuideURL               string `json:"cookieGuideUrl"`
 }
 
 type WatchRuleMode string

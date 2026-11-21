@@ -234,8 +234,10 @@ func (s *Server) writeWatchError(w http.ResponseWriter, operation string, err er
 			return
 		}
 		writeCodedError(w, http.StatusConflict, "WATCH_POWER_OFF_ACTIVE", "当前处于计划断电时段，请在恢复供电后再开启提醒")
+	case errors.Is(err, appruntime.ErrPersonalCookieRequired):
+		writeCodedError(w, http.StatusForbidden, "PERSONAL_COOKIE_REQUIRED", "空位提醒目前仅对已配置个人 Cookie 的用户开放，请先前往账号页上传个人 Cookie。")
 	case errors.Is(err, appruntime.ErrWatchCredentialExpired):
-		writeCodedError(w, http.StatusConflict, "WATCH_CREDENTIAL_EXPIRED", "登录已过期，请先重新扫码后再开启提醒")
+		writeCodedError(w, http.StatusConflict, "WATCH_CREDENTIAL_EXPIRED", "个人 Cookie 已过期，请先在账号页更新个人 Cookie 后再开启提醒")
 	case errors.Is(err, appruntime.ErrWatchRecurringDisabled):
 		writeCodedError(w, http.StatusConflict, "WATCH_RECURRING_DISABLED", "固定时段提醒已停用，请开启临时提醒")
 	default:

@@ -272,8 +272,8 @@ func newWatchTestManager(t *testing.T) (*Manager, model.User, model.User) {
 	if err := repository.Save(persistence.State{
 		Version: stateVersion, Users: []model.User{owner, other},
 		UserStates: map[string]persistence.UserState{
-			owner.ID: {Piles: piles, DeviceIDs: []string{testWatchPileOne, testWatchPileTwo}},
-			other.ID: {},
+			owner.ID: {Piles: piles, DeviceIDs: []string{testWatchPileOne, testWatchPileTwo}, Cookie: "wxopenid=watch-owner; info=ok"},
+			other.ID: {Cookie: "wxopenid=watch-other; info=ok"},
 		},
 		Settings: settings,
 	}); err != nil {

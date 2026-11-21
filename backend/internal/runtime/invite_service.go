@@ -50,6 +50,13 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 	if settings.PowerRestoreJitterMinutes == 0 && legacyReminderSettings {
 		settings.PowerRestoreJitterMinutes = defaultPowerRestoreJitter
 	}
+	legacyPoolSettings := settings.SharedPileCacheTTLSeconds == 0
+	if legacyPoolSettings {
+		settings.FreeDailyRefreshQuota = defaultFreeDailyRefreshQuota
+		settings.PileContributionBonusQuota = defaultPileContributionBonus
+		settings.SharedPileCacheTTLSeconds = defaultSharedPileCacheTTL
+	}
+	settings.CookieGuideURL = strings.TrimSpace(settings.CookieGuideURL)
 	// Fixed-schedule reminders were retired in 1.5.2. Keep the persisted field
 	// for rollback compatibility, but never expose an enabled runtime setting.
 	settings.RecurringRemindersEnabled = false
@@ -58,6 +65,24 @@ func normalizeRegistrationSettings(settings model.RegistrationSettings) model.Re
 
 func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	settings.RecurringRemindersEnabled = false
+	if settings.SharedPileCacheTTLSeconds == 0 {
+		settings.SharedPileCacheTTLSeconds = defaultSharedPileCacheTTL
+	}
+	if settings.FreeDailyRefreshQuota < 0 || settings.FreeDailyRefreshQuota > 50 {
+		return fmt.Errorf("免费用户每日刷新额度需要在 0 到 50 之间")
+	}
+	if settings.PileContributionBonusQuota < 0 || settings.PileContributionBonusQuota > 20 {
+		return fmt.Errorf("贡献新桩奖励刷新次数需要在 0 到 20 之间")
+	}
+	if settings.SharedPileCacheTTLSeconds < 15 || settings.SharedPileCacheTTLSeconds > 600 {
+		return fmt.Errorf("全站桩状态共享缓存时长需要在 15 到 600 秒之间")
+	}
+	settings.CookieGuideURL = strings.TrimSpace(settings.CookieGuideURL)
+	if settings.CookieGuideURL != "" {
+		if len(settings.CookieGuideURL) > 512 || (!strings.HasPrefix(settings.CookieGuideURL, "https://") && !strings.HasPrefix(settings.CookieGuideURL, "http://")) {
+			return fmt.Errorf("Cookie 教程链接必须是有效的 http(s) 地址且不超过 512 字符")
+		}
+	}
 	if settings.DefaultDeviceLimit < 1 || settings.DefaultDeviceLimit > 100 {
 		return fmt.Errorf("默认设备额度需要在 1 到 100 之间")
 	}

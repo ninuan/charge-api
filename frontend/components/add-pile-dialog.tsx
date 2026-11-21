@@ -1,14 +1,16 @@
 "use client"
 
-import { LoaderCircleIcon, PlusIcon, ServerCogIcon } from "lucide-react"
+import {
+  DatabaseIcon,
+  PlusIcon,
+  SearchIcon,
+  ServerCogIcon,
+  SparklesIcon,
+} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import dynamic from "next/dynamic"
-import type { YybBinding } from "@/components/yyb-binding-flow"
 
-import { requestJSON, RequestError } from "@/lib/http"
 import { useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
-
 import { useCloseAppShellMenu } from "@/components/app-shell"
 import { WorkbenchButton as Button } from "@/components/workbench/surfaces"
 import {
@@ -29,73 +31,29 @@ import {
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
 import { useDashboard } from "@/lib/dashboard-context"
-import type { Pile } from "@/lib/types"
-
-const YybBindingFlow = dynamic(
-  () => import("@/components/yyb-binding-flow").then((m) => m.YybBindingFlow),
-  { ssr: false, loading: () => <p role="status">正在打开绑定…</p> }
-)
-const ManualCookieForm = dynamic(
-  () =>
-    import("@/components/manual-cookie-form").then((m) => m.ManualCookieForm),
-  { ssr: false, loading: () => <p role="status">正在打开凭据表单…</p> }
-)
+import type { Pile, SharedPile } from "@/lib/types"
 
 export function AddPileDialog({
   onAdded,
   disabled = false,
 }: { onAdded?: (pile: Pile) => void; disabled?: boolean } = {}) {
   const { currentUser } = useAuth()
-  const { addPile } = useDashboard()
+  const { snapshot, addPile, searchSharedPiles } = useDashboard()
   const closeAppShellMenu = useCloseAppShellMenu()
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<"catalog" | "contribute">("catalog")
   const online = useOnline()
-  const [step, setStep] = useState<"checking" | "form" | "binding" | "error">(
-    "checking"
-  )
-  const [binding, setBinding] = useState<YybBinding | null>(null)
-  const [bindingRequired, setBindingRequired] = useState(false)
-  const [rescanRequired, setRescanRequired] = useState(false)
+
+  const [catalogQuery, setCatalogQuery] = useState("")
+  const [catalogItems, setCatalogItems] = useState<SharedPile[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [addingSharedId, setAddingSharedId] = useState<string | null>(null)
+
   const [error, setError] = useState("")
-  const [retry, setRetry] = useState(0)
-  const [manual, setManual] = useState(false)
-  const submitLock = useRef(false)
-  const numberInput = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const controller = new AbortController()
-    requestJSON<YybBinding>(
-      "/api/session/yyb-binding",
-      { signal: controller.signal },
-      "暂时无法检查平台连接，请重试。"
-    )
-      .then((next) => {
-        if (controller.signal.aborted) return
-        // The cached recovery status does not tell us whether the current
-        // charging credential still works. Let the add endpoint verify it.
-        const required = next.scanEnabled === true && !next.bound
-        setBinding(next)
-        setBindingRequired(required)
-        setRescanRequired(false)
-        setStep(required ? "binding" : "form")
-        setError("")
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : "暂时无法检查平台连接，请重试。"
-        )
-        setStep("error")
-      })
-    return () => controller.abort()
-  }, [open, retry])
-  useEffect(() => {
-    if (open && step === "form") numberInput.current?.focus()
-  }, [open, step])
   const [advanced, setAdvanced] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const submitLock = useRef(false)
+  const numberInput = useRef<HTMLInputElement>(null)
   const [form, setForm] = useState({
     id: "",
     name: "",
@@ -104,20 +62,75 @@ export function AddPileDialog({
     status: "在线",
     address: "",
   })
+
+  const ownedIds = new Set(snapshot.piles.map((p) => p.id))
+  const bonusQuota = snapshot.quota?.pileContributionBonusQuota ?? 2
+
+  useEffect(() => {
+    if (!open || mode !== "catalog") return
+    let active = true
+    const timer = window.setTimeout(() => {
+      setCatalogLoading(true)
+      searchSharedPiles(catalogQuery)
+        .then((items) => {
+          if (active) setCatalogItems(items)
+        })
+        .catch(() => {
+          if (active) setCatalogItems([])
+        })
+        .finally(() => {
+          if (active) setCatalogLoading(false)
+        })
+    }, 150)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [open, mode, catalogQuery, searchSharedPiles])
+
+  useEffect(() => {
+    if (open && mode === "contribute") numberInput.current?.focus()
+  }, [open, mode])
+
   const change = (name: keyof typeof form, value: string | number) =>
     setForm((current) => ({ ...current, [name]: value }))
+
   const handleOpenChange = (next: boolean) => {
     if (next) {
-      setStep("checking")
       setError("")
     }
     setOpen(next)
     if (!next) closeAppShellMenu()
   }
 
+  async function addFromCatalog(item: SharedPile) {
+    if (addingSharedId || !online) return
+    setAddingSharedId(item.deviceId)
+    setError("")
+    try {
+      const added = await addPile({
+        id: item.deviceId,
+        name: item.name || `充电桩 ${item.number || item.deviceId.slice(-6)}`,
+        number: item.number,
+        openNum: item.openNum || 10,
+        status: "在线",
+        address: item.address || "",
+      })
+      handleOpenChange(false)
+      notify.success("已从公共桩库添加到常用列表")
+      onAdded?.(added)
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "添加失败，请稍后重试。"
+      )
+    } finally {
+      setAddingSharedId(null)
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (submitLock.current || bindingRequired || !navigator.onLine) return
+    if (submitLock.current || !navigator.onLine) return
     submitLock.current = true
     setError("")
     const id = form.id.trim()
@@ -141,7 +154,16 @@ export function AddPileDialog({
         address: "",
       })
       handleOpenChange(false)
-      notify.success("充电桩已添加")
+      if (added.rewardGranted && added.rewardGranted > 0) {
+        notify.success(
+          `新桩收录成功！奖励 +${added.rewardGranted} 次永久刷新额度`,
+          { description: "奖励次数不会跨天清零，用完即止。" }
+        )
+      } else if (added.fromSharedCatalog) {
+        notify.success("该桩已在公共库中，已为你添加到常用列表")
+      } else {
+        notify.success("充电桩已添加")
+      }
       onAdded?.(added)
     } catch (reason) {
       setError(
@@ -149,15 +171,6 @@ export function AddPileDialog({
           ? reason.message
           : "添加充电桩失败，请稍后重试。"
       )
-      if (
-        reason instanceof RequestError &&
-        ["YYB_BINDING_REQUIRED", "YYB_RESCAN_REQUIRED"].includes(
-          reason.code ?? ""
-        )
-      ) {
-        setBindingRequired(true)
-        setRescanRequired(reason.code === "YYB_RESCAN_REQUIRED")
-      }
     } finally {
       submitLock.current = false
       setSubmitting(false)
@@ -178,196 +191,199 @@ export function AddPileDialog({
         <DialogHeader className="pr-7">
           <DialogTitle className="flex items-center gap-2">
             <ServerCogIcon className="size-5" />
-            {step === "binding"
-              ? rescanRequired
-                ? "重新授权充电平台"
-                : "添加前，先绑定微信"
-              : "添加充电桩"}
+            添加充电桩
           </DialogTitle>
           <DialogDescription>
-            当前账户最多添加 {currentUser?.deviceLimit ?? 10}{" "}
-            台设备。添加时会检查设备是否可用。
+            可直接从全站公共桩库一键添加；如果公共库里还没有，录入新桩可获赠{" "}
+            <strong>+{bonusQuota} 次</strong> 永久刷新额度（用完即止）。
           </DialogDescription>
         </DialogHeader>
-        {binding?.scanEnabled && (
-          <p className="text-xs text-muted-foreground">
-            {rescanRequired
-              ? "平台登录已失效，需要重新扫码授权。"
-              : bindingRequired
-                ? "1. 绑定微信 → 2. 添加充电桩"
-                : "已保存平台绑定，添加时会验证登录状态。"}
-          </p>
-        )}
-        {!online && (
-          <p role="alert" className="text-sm text-destructive">
-            当前离线，请恢复连接后重试。
-          </p>
-        )}
-        {step === "checking" && <p role="status">正在检查平台连接…</p>}
-        {step === "error" && (
+
+        <div className="wb-seg-rail" role="tablist" aria-label="添加方式">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "catalog"}
+            className={`wb-seg-btn ${mode === "catalog" ? "wb-seg-active" : ""}`}
+            onClick={() => {
+              setMode("catalog")
+              setError("")
+            }}
+          >
+            <DatabaseIcon size={14} />
+            从公共桩库添加
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "contribute"}
+            className={`wb-seg-btn ${mode === "contribute" ? "wb-seg-active" : ""}`}
+            onClick={() => {
+              setMode("contribute")
+              setError("")
+            }}
+          >
+            <SparklesIcon size={14} />
+            录入新桩 (+{bonusQuota} 次)
+          </button>
+        </div>
+
+        {mode === "catalog" ? (
           <div className="space-y-3">
-            <p role="alert">{error}</p>
-            <Button
-              disabled={!online}
-              onClick={() => {
-                setStep("checking")
-                setRetry((value) => value + 1)
-              }}
-            >
-              重新检查
-            </Button>
-          </div>
-        )}
-        {open && step === "binding" && (
-          <>
-            <YybBindingFlow
-              continueLabel="继续添加充电桩"
-              onBack={
-                form.number || form.id || form.name
-                  ? () => setStep("form")
-                  : undefined
-              }
-              onContinue={(next) => {
-                setBinding(next)
-                setBindingRequired(false)
-                setRescanRequired(false)
-                setError("")
-                setStep("form")
-              }}
-            />
-          </>
-        )}
-        {step === "form" && (
-          <>
+            <div className="relative">
+              <SearchIcon
+                size={15}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 opacity-60"
+              />
+              <Input
+                value={catalogQuery}
+                onChange={(e) => setCatalogQuery(e.target.value)}
+                placeholder="按桩名、桩号或位置搜索公共桩库…"
+                className="pl-9"
+              />
+            </div>
+
+            {catalogLoading ? (
+              <p className="py-6 text-center text-sm opacity-70">
+                正在搜索公共桩库…
+              </p>
+            ) : catalogItems.length === 0 ? (
+              <div className="rounded-lg border p-4 text-center text-sm">
+                <p className="opacity-75">公共桩库中暂无匹配的充电桩。</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={() => setMode("contribute")}
+                >
+                  <SparklesIcon size={14} />
+                  去录入这个新桩（+{bonusQuota} 次永久额度）
+                </Button>
+              </div>
+            ) : (
+              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                {catalogItems.map((item) => {
+                  const owned = ownedIds.has(item.deviceId)
+                  return (
+                    <div
+                      key={item.deviceId}
+                      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">
+                          {item.name || `充电桩 ${item.number || item.deviceId.slice(-6)}`}
+                        </div>
+                        <div className="truncate text-xs opacity-70">
+                          桩号 {item.number || "—"} · {item.openNum || 0} 口
+                          {item.address ? ` · ${item.address}` : ""}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant={owned ? "ghost" : "outline"}
+                        disabled={owned || !online || addingSharedId === item.deviceId}
+                        busy={addingSharedId === item.deviceId}
+                        onClick={() => void addFromCatalog(item)}
+                      >
+                        {owned ? "已添加" : "添加"}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             {error && (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-destructive text-sm">
                 {error}
               </p>
             )}
-            {bindingRequired && (
-              <div className="space-y-2 border-b pb-4">
-                <p>
-                  {rescanRequired
-                    ? "平台登录无法自动恢复，请重新扫码授权后继续添加。"
-                    : "添加前需要先完成微信绑定。"}
-                </p>
-                <Button disabled={!online} onClick={() => setStep("binding")}>
-                  去绑定 / 重新扫码
-                </Button>
-              </div>
-            )}
-            {binding?.scanEnabled !== true && (
-              <div className="space-y-3">
-                <Button
-                  variant="ghost"
-                  onClick={() => setManual((value) => !value)}
-                >
-                  手动设置 Cookie
-                </Button>
-                {manual && <ManualCookieForm />}
-              </div>
-            )}
-            <form onSubmit={submit}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="pile-number">桩号</FieldLabel>
-                  <Input
-                    ref={numberInput}
-                    id="pile-number"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={form.number}
-                    onChange={(event) => change("number", event.target.value)}
-                    placeholder="例如 61034278"
-                  />
-                  <FieldDescription>
-                    输入充电桩上二维码上方或小程序中显示的桩号。
-                  </FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="pile-name">显示名称</FieldLabel>
-                  <Input
-                    id="pile-name"
-                    value={form.name}
-                    onChange={(event) => change("name", event.target.value)}
-                    placeholder="例如：松园 3 号楼北侧"
-                  />
-                </Field>
-                <Button
+          </div>
+        ) : (
+          <form onSubmit={submit} className="space-y-4">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="pile-number">桩号（推荐）</FieldLabel>
+                <Input
+                  ref={numberInput}
+                  id="pile-number"
+                  inputMode="numeric"
+                  value={form.number}
+                  onChange={(e) => change("number", e.target.value)}
+                  placeholder="例如：61034278"
+                />
+                <FieldDescription>
+                  输入桩身二维码下方的数字桩号即可，系统会自动校验并收录到公共桩库。
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="pile-name">常用名称（可选）</FieldLabel>
+                <Input
+                  id="pile-name"
+                  value={form.name}
+                  onChange={(e) => change("name", e.target.value)}
+                  placeholder="例如：北门车棚 3 号桩"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="pile-address">位置备注（可选）</FieldLabel>
+                <Input
+                  id="pile-address"
+                  value={form.address}
+                  onChange={(e) => change("address", e.target.value)}
+                  placeholder="例如：1 号楼东侧"
+                />
+              </Field>
+              <div>
+                <button
                   type="button"
-                  variant="ghost"
-                  className="justify-start px-0"
-                  onClick={() => setAdvanced((value) => !value)}
+                  className="text-xs underline opacity-75"
+                  onClick={() => setAdvanced((prev) => !prev)}
                 >
-                  {advanced ? "收起高级字段" : "填写设备长 ID、地址等高级字段"}
-                </Button>
-                {advanced && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor="pile-id">设备长 ID</FieldLabel>
-                      <Input
-                        id="pile-id"
-                        inputMode="numeric"
-                        value={form.id}
-                        onChange={(event) => change("id", event.target.value)}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="pile-ports">充电口数量</FieldLabel>
-                      <Input
-                        id="pile-ports"
-                        type="number"
-                        min="1"
-                        max="20"
-                        value={form.openNum}
-                        onChange={(event) =>
-                          change("openNum", Number(event.target.value))
-                        }
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="pile-status">设备状态</FieldLabel>
-                      <Input
-                        id="pile-status"
-                        value={form.status}
-                        onChange={(event) =>
-                          change("status", event.target.value)
-                        }
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="pile-address">安装地址</FieldLabel>
-                      <Input
-                        id="pile-address"
-                        value={form.address}
-                        onChange={(event) =>
-                          change("address", event.target.value)
-                        }
-                      />
-                    </Field>
-                  </div>
-                )}
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => handleOpenChange(false)}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={submitting || bindingRequired || !online}
-                  >
-                    {submitting && (
-                      <LoaderCircleIcon className="motion-safe:animate-spin" />
-                    )}
-                    {submitting ? "添加中…" : "确认添加"}
-                  </Button>
-                </DialogFooter>
-              </FieldGroup>
-            </form>
-          </>
+                  {advanced ? "收起高级选项" : "没有短桩号？填写设备长 ID"}
+                </button>
+              </div>
+              {advanced && (
+                <Field>
+                  <FieldLabel htmlFor="pile-id">设备长 ID（可选）</FieldLabel>
+                  <Input
+                    id="pile-id"
+                    inputMode="numeric"
+                    value={form.id}
+                    onChange={(e) => change("id", e.target.value)}
+                    placeholder="例如：2601201412385560001"
+                  />
+                </Field>
+              )}
+            </FieldGroup>
+
+            {error && (
+              <p role="alert" className="text-destructive text-sm">
+                {error}
+              </p>
+            )}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onClick={() => handleOpenChange(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="submit"
+                busy={submitting}
+                disabled={
+                  !online ||
+                  !currentUser?.refreshEnabled ||
+                  (!form.number.trim() && !form.id.trim())
+                }
+              >
+                校验并收录
+              </Button>
+            </DialogFooter>
+          </form>
         )}
       </DialogContent>
     </Dialog>

@@ -20,6 +20,7 @@ import {
   ZapIcon,
 } from "lucide-react"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   Fragment,
@@ -195,6 +196,7 @@ function WorkbenchContent() {
     snapshot,
     streamState,
     refreshFromCapture,
+    refreshPile,
     reorderPiles,
     fetchSnapshot,
   } = useDashboard()
@@ -204,6 +206,7 @@ function WorkbenchContent() {
   const online = useOnline()
 
   const [refreshing, setRefreshing] = useState(false)
+  const [refreshingPileId, setRefreshingPileId] = useState<string | null>(null)
   const [ordering, setOrdering] = useState(false)
   const [reordering, setReordering] = useState(false)
   const [refreshError, setRefreshError] = useState("")
@@ -311,6 +314,35 @@ function WorkbenchContent() {
     }
   }
 
+  async function refreshSinglePile(pile: Pile) {
+    if (refreshingPileId || !online) return
+    setRefreshingPileId(pile.id)
+    setRefreshError("")
+    try {
+      const result = await refreshPile(pile.id)
+      if (result.refresh.personalCookieFallback) {
+        notify.warning("个人 Cookie 已失效，已自动降级用公共池刷新", {
+          description: "请尽快前往账号页更新个人 Cookie。",
+        })
+      } else if (result.refresh.cached) {
+        notify.success("已同步全站最近状态（未消耗额度）")
+      } else {
+        notify.success(`${pile.name || pile.number} 状态已更新`, {
+          description: result.refresh.message || undefined,
+        })
+      }
+    } catch (reason) {
+      if (reason instanceof RequestError && reason.status === 401) {
+        clearSession()
+        router.replace("/login")
+        return
+      }
+      notify.error(reason, { title: "单桩刷新失败" })
+    } finally {
+      setRefreshingPileId(null)
+    }
+  }
+
   async function move(id: string, direction: number) {
     const ids = snapshot.piles.map((p) => p.id)
     const index = ids.indexOf(id)
@@ -339,8 +371,27 @@ function WorkbenchContent() {
     }
   }
 
+  const quota = snapshot.quota
+  const quotaLabel =
+    quota?.personalCookieStatus === "valid"
+      ? "个人 Cookie · 不限次"
+      : quota?.personalCookieStatus === "expired"
+        ? `Cookie 已失效 · 降级余 ${quota.totalFreeRemaining} 次`
+        : quota
+          ? `免费余 ${quota.freeDailyRemaining} · 奖励 ${quota.bonusRemaining}`
+          : null
+
   const actions = (
     <>
+      {quotaLabel && (
+        <Link
+          href="/account?tab=connection"
+          className="wb-btn wb-btn-ghost"
+          title="查看刷新额度或上传个人 Cookie"
+        >
+          {quotaLabel}
+        </Link>
+      )}
       <WorkbenchButton
         variant="outline"
         busy={refreshing}
@@ -348,7 +399,7 @@ function WorkbenchContent() {
         onClick={() => void refresh()}
       >
         <RefreshCwIcon size={14} />
-        刷新状态
+        刷新全部
       </WorkbenchButton>
       <AddPileDialog
         disabled={!online || initialLoading}
@@ -630,6 +681,23 @@ function WorkbenchContent() {
                         <span className="wb-mono wb-pile-code">
                           {pile.number || pile.id.slice(-8)}
                         </span>
+                        <WorkbenchButton
+                          variant="ghost"
+                          className="wb-icon-button"
+                          aria-label={`刷新 ${pile.name || pile.number}`}
+                          title="刷新此桩（未命中全站缓存消耗 1 次额度）"
+                          busy={refreshingPileId === pile.id}
+                          disabled={
+                            !online ||
+                            !currentUser?.refreshEnabled ||
+                            refreshing ||
+                            (refreshingPileId !== null &&
+                              refreshingPileId !== pile.id)
+                          }
+                          onClick={() => void refreshSinglePile(pile)}
+                        >
+                          <RefreshCwIcon size={13} />
+                        </WorkbenchButton>
                       </div>
                       <p className="wb-card-addr">
                         <MapPinIcon size={12} aria-hidden="true" />

@@ -240,6 +240,9 @@ func completedTime(preferred, fallback time.Time) time.Time {
 }
 
 func (m *Manager) createWatchRule(userID string, request model.WatchRuleCreateRequest, wakeScheduler bool) (model.WatchRule, error) {
+	if !m.CanUseWatchReminders(userID) {
+		return model.WatchRule{}, ErrPersonalCookieRequired
+	}
 	m.watchMu.Lock()
 	defer m.watchMu.Unlock()
 

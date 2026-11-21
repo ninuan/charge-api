@@ -131,12 +131,8 @@ func main() {
 	if password == "" {
 		password = os.Getenv("CHARGE_ADMIN_PASSWORD")
 	}
-	yybClient, err := yybClientFromEnv(os.Getenv)
-	if err != nil {
-		log.Fatalf("configure yyb client: %v", security.SanitizeLogText(err.Error(), 1024))
-	}
-	if yybClient != nil {
-		log.Printf("yyb sidecar integration enabled")
+	if strings.TrimSpace(os.Getenv("YYB_BASE_URL")) != "" {
+		log.Printf("yyb sidecar integration has been retired; ignoring YYB_BASE_URL")
 	}
 	wxPusherClient, err := wxPusherClientFromEnv(os.Getenv)
 	if err != nil {
@@ -195,9 +191,6 @@ func main() {
 	sessions := auth.NewPersistentSessionManager(7*24*time.Hour, repository)
 	defer sessions.Close()
 	server := api.NewServer(manager, sessions, auth.NewAuthGuard())
-	if yybClient != nil {
-		server.SetYYBIntegration(yybClient, moceleClientFromEnv(os.Getenv))
-	}
 	if wxPusherClient != nil {
 		server.SetWxPusherIntegration(wxPusherClient)
 	}

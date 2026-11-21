@@ -99,8 +99,14 @@ function RemindersContent() {
         .toLocaleLowerCase()
         .includes(query.trim().toLocaleLowerCase())
     })
+  const quota = snapshot.quota
+  const watchRequiresPersonalCookie =
+    !!quota &&
+    !quota.freeUserWatchAllowed &&
+    quota.personalCookieStatus !== "valid"
   const disabled =
     !online ||
+    watchRequiresPersonalCookie ||
     !overview?.backgroundRemindersEnabled ||
     !overview.accountRefreshEnabled ||
     !snapshot.piles.length
@@ -165,6 +171,25 @@ function RemindersContent() {
       }
     >
       <div className="wb-standard-page wb-reminders-page">
+        {watchRequiresPersonalCookie && (
+          <div role="status" className="wb-state-banner wb-banner-warning">
+            <div>
+              <strong>空位提醒仅对已配置个人 Cookie 的用户开放</strong>
+              <span>
+                {quota?.personalCookieStatus === "expired"
+                  ? "你的个人 Cookie 已失效，更新后即可恢复后台空位提醒。"
+                  : "上传个人 Cookie 即可解锁不限次刷新与实时空位推送。"}
+              </span>
+            </div>
+            <Link
+              href="/account?tab=connection&connect=1"
+              className="wb-btn wb-btn-outline"
+            >
+              去配置 Cookie
+              <ArrowRightIcon size={14} />
+            </Link>
+          </div>
+        )}
         {overview && (
           <div className="wb-quota-ribbon">
             <div>

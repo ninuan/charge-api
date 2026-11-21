@@ -31,6 +31,7 @@ import type {
   InviteCode,
   InviteCodePage,
   OperationsStatus,
+  PublicPoolCookie,
   RegistrationSettings,
 } from "@/lib/types"
 import {
@@ -316,6 +317,9 @@ const numericSettings: [keyof RegistrationSettings, string, number, number][] =
     ["portHistoryRetentionDays", "提醒状态事件保留 / 天", 1, 365],
     ["notificationRetentionDays", "已解决通知保留 / 天", 7, 365],
     ["powerRestoreJitterMinutes", "恢复供电后错峰 / 分钟", 0, 60],
+    ["freeDailyRefreshQuota", "免费用户每日刷新额度 / 次", 0, 50],
+    ["pileContributionBonusQuota", "贡献新桩奖励永久次数 / 次", 0, 20],
+    ["sharedPileCacheTTLSeconds", "全站桩状态共享缓存 / 秒", 15, 600],
   ]
 export function WorkbenchPolicies() {
   const { data, error, reload, setData } = useRemote<RegistrationSettings>(
@@ -529,6 +533,32 @@ function PolicyForm({
         {input("portHistoryRetentionDays")}
         {input("notificationRetentionDays")}
       </div>
+      <SectionHeading
+        title="公共 Cookie 池与免费额度"
+        description="免费用户共享公共池查询；贡献全站新桩后自动发放永不过期的额外刷新次数。"
+      />
+      {toggle(
+        "freeUserWatchAllowed",
+        "允许免费用户开启空位提醒",
+        "关闭时，仅已提供个人 Cookie 的用户可以创建和运行后台空位提醒。"
+      )}
+      <div className="wb-form-grid">
+        {input("freeDailyRefreshQuota")}
+        {input("pileContributionBonusQuota")}
+        {input("sharedPileCacheTTLSeconds")}
+        <Field>
+          <FieldLabel htmlFor="policy-cookieGuideUrl">
+            Cookie 抓包视频教程链接（可选）
+          </FieldLabel>
+          <Input
+            id="policy-cookieGuideUrl"
+            value={draft.cookieGuideUrl ?? ""}
+            onChange={(event) => change("cookieGuideUrl", event.target.value)}
+            placeholder="https://www.bilibili.com/video/..."
+          />
+        </Field>
+      </div>
+      <PublicCookiePoolManager online={online} />
       {error && (
         <p className="wb-form-error" role="alert">
           {error}
@@ -590,6 +620,201 @@ function PolicyForm({
         </DialogContent>
       </Dialog>
     </form>
+  )
+}
+
+function PublicCookiePoolManager({ online }: { online: boolean }) {
+  const { data, error, reload } = useRemote<PublicPoolCookie[]>(
+    adminApi.publicPool
+  )
+  const [addOpen, setAddOpen] = useState(false)
+  const [label, setLabel] = useState("")
+  const [cookie, setCookie] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [formError, setFormError] = useState("")
+
+  async function addPoolCookie(event: React.FormEvent) {
+    event.preventDefault()
+    if (!label.trim() || !cookie.trim()) {
+      setFormError("请填写备注名和 Cookie（支持直接粘贴 Copy as cURL）。")
+      return
+    }
+    setBusy(true)
+    setFormError("")
+    try {
+      await adminApi.createPublicPoolCookie({
+        label: label.trim(),
+        cookie: cookie.trim(),
+      })
+      setLabel("")
+      setCookie("")
+      setAddOpen(false)
+      await reload()
+      notify.success("公共池 Cookie 已添加")
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "添加失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleEnabled(item: PublicPoolCookie) {
+    try {
+      await adminApi.updatePublicPoolCookie(item.id, {
+        enabled: !item.enabled,
+      })
+      await reload()
+      notify.success(item.enabled ? "已停用该公共 Cookie" : "已启用该公共 Cookie")
+    } catch (reason) {
+      notify.error(reason instanceof Error ? reason.message : "更新失败")
+    }
+  }
+
+  async function removeItem(item: PublicPoolCookie) {
+    try {
+      await adminApi.deletePublicPoolCookie(item.id)
+      await reload()
+      notify.success("已删除公共 Cookie")
+    } catch (reason) {
+      notify.error(reason instanceof Error ? reason.message : "删除失败")
+    }
+  }
+
+  const items = data ?? []
+
+  return (
+    <div className="wb-grouped-list" style={{ marginTop: "1rem" }}>
+      <div className="wb-setting-row">
+        <div>
+          <h3>公共 Cookie 池（{items.filter((i) => i.enabled && i.status === "healthy").length} / {items.length} 可用）</h3>
+          <p>
+            免费用户刷新与新桩校验将轮询使用池内可用 Cookie；任一失效时自动熔断并告警管理员。
+          </p>
+        </div>
+        <WorkbenchButton
+          type="button"
+          variant="outline"
+          disabled={!online}
+          onClick={() => {
+            setFormError("")
+            setAddOpen(true)
+          }}
+        >
+          <PlusIcon size={14} />
+          添加公共 Cookie
+        </WorkbenchButton>
+      </div>
+      {error && <WorkbenchError message={error} retry={() => void reload()} />}
+      {items.length === 0 ? (
+        <div className="wb-setting-row">
+          <p>暂无公共池 Cookie，请至少添加 1~2 个长效 Cookie 以启用免费用户刷新。</p>
+        </div>
+      ) : (
+        items.map((item) => (
+          <div key={item.id} className="wb-setting-row">
+            <div>
+              <h3>
+                {item.label}{" "}
+                <StatusPill
+                  tone={
+                    !item.enabled
+                      ? "neutral"
+                      : item.status === "healthy"
+                        ? "idle"
+                        : "warning"
+                  }
+                >
+                  {!item.enabled
+                    ? "已停用"
+                    : item.status === "healthy"
+                      ? "正常"
+                      : "已失效"}
+                </StatusPill>
+              </h3>
+              <p>
+                {item.lastUsedAt
+                  ? `最近使用 ${formatSnapshotTime(item.lastUsedAt, true)}`
+                  : "尚未使用"}
+                {item.lastError ? ` · ${item.lastError}` : ""}
+              </p>
+            </div>
+            <div className="wb-row-actions">
+              <Switch
+                checked={item.enabled}
+                disabled={!online}
+                onCheckedChange={() => void toggleEnabled(item)}
+                aria-label={`切换 ${item.label}`}
+              />
+              <WorkbenchButton
+                type="button"
+                variant="ghost"
+                disabled={!online}
+                onClick={() => void removeItem(item)}
+              >
+                <Trash2Icon size={14} />
+                删除
+              </WorkbenchButton>
+            </div>
+          </div>
+        ))
+      )}
+
+      <Dialog open={addOpen} onOpenChange={(open) => !busy && setAddOpen(open)}>
+        <DialogContent className="workbench-dialog">
+          <DialogHeader>
+            <DialogTitle>添加公共 Cookie</DialogTitle>
+            <DialogDescription>
+              支持直接粘贴抓包工具复制的 Copy as cURL、请求头或纯 Cookie 字符串。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="wb-form-stack">
+            <Field>
+              <FieldLabel htmlFor="pool-cookie-label">备注名</FieldLabel>
+              <Input
+                id="pool-cookie-label"
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                placeholder="例如：手机号 1 / 备用号 2"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="pool-cookie-value">Cookie / cURL</FieldLabel>
+              <textarea
+                id="pool-cookie-value"
+                className="wb-input wb-textarea"
+                autoComplete="off"
+                value={cookie}
+                onChange={(event) => setCookie(event.target.value)}
+                placeholder="粘贴 curl 'https://ele.mocele.com/...' 或 wxopenid=...; info=..."
+              />
+            </Field>
+            {formError && (
+              <p role="alert" className="wb-form-error">
+                {formError}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <WorkbenchButton
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setAddOpen(false)}
+            >
+              取消
+            </WorkbenchButton>
+            <WorkbenchButton
+              type="button"
+              busy={busy}
+              disabled={!online}
+              onClick={(event) => void addPoolCookie(event)}
+            >
+              保存入池
+            </WorkbenchButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }
 

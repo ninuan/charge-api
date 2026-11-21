@@ -48,7 +48,55 @@ export interface RefreshInfo {
   skippedDevices: number
   cached: boolean
   partial: boolean
+  usedPool?: boolean
+  personalCookieFallback?: boolean
   message?: string
+}
+
+export interface UserRefreshQuota {
+  hasPersonalCookie: boolean
+  personalCookieStatus: "none" | "valid" | "expired"
+  freeDailyLimit: number
+  freeDailyUsed: number
+  freeDailyRemaining: number
+  bonusRemaining: number
+  totalFreeRemaining: number
+  contributedPileCount: number
+  pileContributionBonusQuota: number
+  freeUserWatchAllowed: boolean
+  cookieGuideUrl?: string
+  publicPoolAvailable: number
+}
+
+export interface SharedPile {
+  deviceId: string
+  number: string
+  name: string
+  address: string
+  openNum: number
+  contributedByUserId?: string
+  lastFetchedAt?: string
+  lastSnapshot?: Pile
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PileCreateResponse extends Pile {
+  rewardGranted?: number
+  fromSharedCatalog?: boolean
+  quota?: UserRefreshQuota
+}
+
+export interface PublicPoolCookie {
+  id: string
+  label: string
+  enabled: boolean
+  status: "healthy" | "expired"
+  consecutiveFailures: number
+  lastUsedAt?: string
+  lastError?: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface DashboardSnapshot {
@@ -56,6 +104,7 @@ export interface DashboardSnapshot {
   updatedAt: string
   statistics: DashboardCounters
   refresh: RefreshInfo
+  quota?: UserRefreshQuota
 }
 
 export type UserRole = "admin" | "user"
@@ -167,6 +216,11 @@ export interface RegistrationSettings {
   scheduledPowerOffEndMinute: number
   scheduledPowerOffTimezone: string
   powerRestoreJitterMinutes: number
+  freeDailyRefreshQuota?: number
+  pileContributionBonusQuota?: number
+  sharedPileCacheTTLSeconds?: number
+  freeUserWatchAllowed?: boolean
+  cookieGuideUrl?: string
 }
 
 export interface InviteCode {
