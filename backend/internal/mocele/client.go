@@ -73,10 +73,11 @@ func (c *Client) ExchangeCode(ctx context.Context, deviceID string, code string)
 	if err != nil {
 		return CookieResult{}, err
 	}
+	secureCookie := req.URL.Scheme == "https"
 	jar.SetCookies(req.URL, []*http.Cookie{
-		{Name: "deviceid", Value: deviceID},
-		{Name: "org", Value: c.org},
-		{Name: "openindex", Value: c.openIndex},
+		{Name: "deviceid", Value: deviceID, Secure: secureCookie},
+		{Name: "org", Value: c.org, Secure: secureCookie},
+		{Name: "openindex", Value: c.openIndex, Secure: secureCookie},
 	})
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -111,8 +112,24 @@ func (c *Client) exchangeHTTPClient() (*http.Client, http.CookieJar, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("create autologin cookie jar: %w", err)
 	}
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse mocele base url: %w", err)
+	}
 	client := *c.http
 	client.Jar = jar
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		if !strings.EqualFold(req.URL.Host, base.Host) {
+			return fmt.Errorf("redirect host %q is not allowed", req.URL.Host)
+		}
+		if req.URL.Scheme != "https" && base.Scheme == "https" {
+			return fmt.Errorf("redirect scheme downgrade to %q is not allowed", req.URL.Scheme)
+		}
+		return nil
+	}
 	return &client, jar, nil
 }
 

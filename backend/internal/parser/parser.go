@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -108,6 +109,9 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 	openNum := raw.OpenNum
 	if openNum <= 0 {
 		openNum = 10
+	}
+	if openNum > 64 {
+		return model.Pile{}, fmt.Errorf("远端接口返回端口数异常: %d", openNum)
 	}
 	online := statusIsOnline(raw.Status)
 
@@ -384,7 +388,7 @@ func parseRequestHeaders(raw string) (string, map[string]string) {
 		}
 		key = strings.TrimSpace(key)
 		if shouldForwardHeader(key) {
-			headers[key] = strings.TrimSpace(value)
+			headers[textproto.CanonicalMIMEHeaderKey(key)] = strings.TrimSpace(value)
 		}
 	}
 

@@ -120,6 +120,22 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 			delete(m.sessions, session.Token)
 			return Session{}, err
 		}
+		// Keep in-memory cache in sync with SQLite eviction (including sessions
+		// cached before a restart-evicted limit was hit).
+		if records, err := m.store.ListUserSessions(userID); err == nil {
+			active := make(map[string]struct{}, len(records))
+			for _, record := range records {
+				active[string(record.TokenHash)] = struct{}{}
+			}
+			for token, cached := range m.sessions {
+				if cached.UserID != userID {
+					continue
+				}
+				if _, ok := active[string(hashSessionToken(token))]; !ok {
+					delete(m.sessions, token)
+				}
+			}
+		}
 	}
 	return session, nil
 }
@@ -246,12 +262,12 @@ func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView,
 
 func (m *SessionManager) DeleteOthers(userID, currentToken string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	for token, session := range m.sessions {
 		if session.UserID == userID && token != currentToken {
 			delete(m.sessions, token)
 		}
 	}
-	m.mu.Unlock()
 	if m.store != nil {
 		return m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken))
 	}

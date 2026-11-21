@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"sort"
@@ -106,7 +107,12 @@ func newClient(requests []parser.CaptureRequest, preload bool) *Client {
 	}
 
 	return &Client{
-		httpClient:     &http.Client{Timeout: 12 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 12 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		template:       template,
 		requests:       requestMap,
 		order:          order,
@@ -692,7 +698,7 @@ func withCookieValue(raw string, key string, value string) string {
 func cloneHeaders(headers map[string]string) map[string]string {
 	clone := make(map[string]string, len(headers))
 	for key, value := range headers {
-		clone[key] = value
+		clone[textproto.CanonicalMIMEHeaderKey(key)] = value
 	}
 	return clone
 }

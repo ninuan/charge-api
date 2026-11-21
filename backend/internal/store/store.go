@@ -213,11 +213,25 @@ func (s *DashboardStore) snapshotLocked() model.DashboardSnapshot {
 		}
 	}
 
+	refreshCopy := s.refresh
+	if s.refresh.LastRemoteAt != nil {
+		v := *s.refresh.LastRemoteAt
+		refreshCopy.LastRemoteAt = &v
+	}
+	if s.refresh.NextRemoteAt != nil {
+		v := *s.refresh.NextRemoteAt
+		refreshCopy.NextRemoteAt = &v
+	}
+	if s.refresh.NextRetryAt != nil {
+		v := *s.refresh.NextRetryAt
+		refreshCopy.NextRetryAt = &v
+	}
+
 	return model.DashboardSnapshot{
 		Piles:      piles,
 		UpdatedAt:  time.Now(),
 		Statistics: stats,
-		Refresh:    s.refresh,
+		Refresh:    refreshCopy,
 	}
 }
 

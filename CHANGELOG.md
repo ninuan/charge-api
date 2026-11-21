@@ -2,6 +2,26 @@
 
 本文件记录面向使用者的重要变化。版本号遵循语义化版本规则。
 
+## 1.5.5 - 2026-11-21
+
+### 安全与并发修复
+- 隔离后台共享刷新航班中的跨用户错误、凭据过期、配额耗尽与退避状态，仅复用成功的充电桩快照。
+- 将 `ChangePassword` 的 Argon2id 计算移出全局写锁并接入 `AuthGuard` 限流锁定；`UserRuntime.refresh` 释放运行时锁后再发起上游 HTTP 请求，消除全局锁阻塞。
+- 新增认证接口 Argon2id 并发上限，防止高并发登录/注册/改密导致的内存峰值与并发撞库绕过；修复 `AuthGuard.RecordSuccess` 重置同 IP 其他账号失败计数的问题，并均等化禁用账号登录耗时。
+- 修复 `DeleteOthers` 会话撤销竞态与重启后 5 会话上限缓存不同步导致的幽灵会话问题，`ListUserSessions` 过滤已过期记录。
+- 服务端在 `requireUser` 强制拦截 `MustChangePassword` 未修改临时密码的业务与管理请求。
+- 规范化 HTTP/2 小写抓包请求头避免模板 Cookie 残留与随机覆盖；限制上游响应 `opennum` 上限防止 OOM；收紧 `charger`/`mocele` 客户端重定向与 `Secure` Cookie；解密前校验 AES-GCM nonce 长度；`randomID` 改用 `crypto/rand`。
+- 修复 `lastRemoteFetch` 字段地址暴露引发的数据竞争；修复取消/完成临时提醒重置当日刷新配额及创建提醒绕过每日配额的问题。
+- 修复 `RegisterUser` 与 `DeleteInvite` 并发竞态、`AddPileWithYYB` 绕过刷新开关与设备上限、禁用已连 SSE 用户泄露订阅 channel、单用户占满 QR 槽位与 WxPusher 测试重查缺少冷却等问题。
+- SSE 响应 `SIGTERM` 立即优雅退出；CORS 预检补齐 `PUT`；禁用静态目录自动列表；修复管理员修改自身设置误清 Cookie 及 `PATCH /api/piles/{id}` 缺少字段长度校验；排除免打扰/取消态误计 WxPusher 内部故障。
+
+### 前端与运维脚本加固
+- 修复前端 SSE 进入 `CLOSED` 后无法重连、通知单条已读双减未读计数及长生命周期 `AbortSignal` 监听未释放问题。
+- 加固 `scripts/security_check.sh`（移除 `bash -c`、Cookie 经标准输入传递、扫描 `-wal` 并防静默假通过、精确回环端口白名单）。
+- 加固 `scripts/backup_db.sh`（参数校验、临时暂存与完整性校验、`.timeout 5000` 及保留 `-wal`/`-shm` 属主）。
+- 加固 `scripts/deploy.sh` 与 `scripts/deploy_git.sh`（前后端构建完成后再原子切换、严格健康检查与失败自动回滚 `charge-server.prev`）。
+- CI 锁定 `govulncheck@v1.1.4`、关闭 `checkout` 凭据持久化、仅 PR 取消并发；修正 `examples/dev.env.example` 旧端口与占位密钥。
+
 ## 1.5.4 - 2026-11-19
 
 - 全新空间硬件视觉与交互重构：统一冷中性色与信号橙语义体系、双列充电桩硬件卡片与凹陷插口阵列、右侧非模态悬浮详情检查器、浅色/深色双主题、`⌘K` 快速定位、居中式二级页面与分组设置列表，并支持「减少动态效果」无障碍模式。

@@ -260,7 +260,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setStreamState("error")
       }
     })
-    stream.onerror = () => setStreamState("error")
+    stream.onerror = () => {
+      if (stream.readyState === EventSource.CLOSED) {
+        stream.close()
+        if (streamRef.current === stream) {
+          streamRef.current = null
+        }
+      }
+      setStreamState("error")
+    }
   }, [applySnapshot])
 
   const connectStream = useCallback(() => {

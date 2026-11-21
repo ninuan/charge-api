@@ -342,13 +342,15 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 			if err := s.sessions.DeleteUser(userID); err != nil {
 				log.Printf("revoke sessions for user %s: %v", userID, security.SanitizeLogText(err.Error(), 1024))
 				s.recordAdminAudit(admin, adminUserUpdateAction(req), "user", userID, targetLabel, "failure")
-				clearSessionCookie(w, r)
+				if userID == admin.ID {
+					clearSessionCookie(w, r)
+				}
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "用户已更新，但撤销旧登录状态失败"})
 				return
 			}
-		}
-		if userID == admin.ID {
-			clearSessionCookie(w, r)
+			if userID == admin.ID {
+				clearSessionCookie(w, r)
+			}
 		}
 		s.recordAdminAudit(admin, adminUserUpdateAction(req), "user", userID, user.Username, "success")
 		writeJSON(w, http.StatusOK, user)

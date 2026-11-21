@@ -23,10 +23,24 @@ func (s *Server) rememberQR(id, userID string) bool {
 		s.qrSessions = make(map[string]*ownedQRSession)
 	}
 	now := time.Now()
+	var oldestUserKey string
+	var oldestUserExpires time.Time
+	userCount := 0
 	for key, entry := range s.qrSessions {
 		if now.After(entry.expires) {
 			delete(s.qrSessions, key)
+			continue
 		}
+		if entry.userID == userID {
+			userCount++
+			if !entry.confirming && entry.result == nil && (oldestUserKey == "" || entry.expires.Before(oldestUserExpires)) {
+				oldestUserKey = key
+				oldestUserExpires = entry.expires
+			}
+		}
+	}
+	if userCount >= 5 && oldestUserKey != "" && oldestUserKey != id {
+		delete(s.qrSessions, oldestUserKey)
 	}
 	// Never transfer an existing sidecar session between users, even if upstream
 	// accidentally returns a duplicate ID. Bound memory without evicting live work.

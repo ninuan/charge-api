@@ -25,6 +25,17 @@ func StaticHandler(directory string) http.Handler {
 			name = path.Join(name, "index.html")
 		}
 		if !strings.HasSuffix(name, ".html") {
+			file, err := root.Open(name)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			info, statErr := file.Stat()
+			_ = file.Close()
+			if statErr != nil || info.IsDir() {
+				http.NotFound(w, r)
+				return
+			}
 			files.ServeHTTP(w, r)
 			return
 		}

@@ -124,16 +124,46 @@ func (m *Manager) CreateWatchRuleWithInitialCheck(userID string, request model.W
 	// whether a background task is actually needed.
 	m.recordMetric(userID, "watch_initial_check")
 	m.invalidateBackgroundPileCache(userID, rule.DeviceID)
-	refresh, refreshErr := m.refreshWatchedPileWithDelivery(userID, rule.DeviceID, nil, false)
+	settings := normalizeRegistrationSettings(m.Settings())
+	now := m.reminderSchedulerNow()
+	quotaDate, _ := reminderQuotaDate(now, settings.ScheduledPowerOffTimezone)
+	initialState, _, _ := m.repository.LoadWatchRefreshState(userID, rule.DeviceID)
+	todayQuotaUsed := 0
+	if initialState.QuotaDate == quotaDate {
+		todayQuotaUsed = initialState.QuotaUsed
+	}
+	beforeInitialRemote := func() error {
+		if quotaDate == "" || settings.WatchDailyRefreshQuota <= 0 {
+			return nil
+		}
+		used, quotaErr := m.repository.WatchRefreshQuotaUsed(userID, quotaDate)
+		if quotaErr != nil {
+			return quotaErr
+		}
+		if used >= settings.WatchDailyRefreshQuota {
+			return ErrWatchQuotaExceeded
+		}
+		return nil
+	}
+	refresh, refreshErr := m.refreshWatchedPileWithDelivery(userID, rule.DeviceID, beforeInitialRemote, false)
+	if refresh.Attempted && quotaDate != "" {
+		todayQuotaUsed++
+	}
 	if refreshErr != nil || refresh.Skipped {
 		if charger.IsAuthExpired(refreshErr) {
 			_, _ = m.repository.DeleteWatchRule(userID, rule.ID)
-			_ = m.repository.DeleteWatchRefreshState(userID, rule.DeviceID)
+			_ = m.clearWatchRefreshStatePreservingTodayQuota(userID, rule.DeviceID, now)
 			return model.WatchRuleCreateResult{}, ErrWatchCredentialExpired
 		}
 		attemptedAt := m.reminderSchedulerNow().UTC().Truncate(time.Second)
 		nextAttemptAt := attemptedAt.Add(initialReminderFailureBackoff)
-		if refresh.NextRetryAt != nil && refresh.NextRetryAt.After(nextAttemptAt) {
+		pausedReason := watchPauseBackoff
+		if errors.Is(refreshErr, ErrWatchQuotaExceeded) {
+			pausedReason = watchPauseQuota
+			if nextQuotaAt, err := nextReminderQuotaDay(attemptedAt, settings.ScheduledPowerOffTimezone); err == nil {
+				nextAttemptAt = nextQuotaAt
+			}
+		} else if refresh.NextRetryAt != nil && refresh.NextRetryAt.After(nextAttemptAt) {
 			nextAttemptAt = *refresh.NextRetryAt
 		}
 		failures := 0
@@ -145,11 +175,16 @@ func (m *Manager) CreateWatchRuleWithInitialCheck(userID string, request model.W
 		if err := m.repository.SaveWatchRefreshState(model.WatchRefreshState{
 			UserID: rule.UserID, DeviceID: rule.DeviceID,
 			NextAttemptAt: nextAttemptAt, LastAttemptAt: lastAttemptAt,
-			ConsecutiveFailures: failures, PausedReason: watchPauseBackoff, UpdatedAt: attemptedAt,
+			ConsecutiveFailures: failures, PausedReason: pausedReason,
+			QuotaDate: quotaDate, QuotaUsed: todayQuotaUsed, UpdatedAt: attemptedAt,
 		}); err != nil {
 			return model.WatchRuleCreateResult{}, fmt.Errorf("save initial watch retry: %w", err)
 		}
-		result.Message = "暂时没有更新到充电桩状态，系统稍后会自动重试。"
+		if errors.Is(refreshErr, ErrWatchQuotaExceeded) {
+			result.Message = "今日后台刷新次数已达上限，将于明日恢复检查。"
+		} else {
+			result.Message = "暂时没有更新到充电桩状态，系统稍后会自动重试。"
+		}
 		m.wakeReminderScheduler()
 		return result, nil
 	}
@@ -160,8 +195,9 @@ func (m *Manager) CreateWatchRuleWithInitialCheck(userID string, request model.W
 			return model.WatchRuleCreateResult{}, fmt.Errorf("load first background watch state: %w", err)
 		}
 		if ok {
-			settings := normalizeRegistrationSettings(m.Settings())
 			state.NextAttemptAt = refresh.FetchedAt.Add(time.Duration(settings.WatchRefreshIntervalMinutes) * time.Minute)
+			state.QuotaDate = quotaDate
+			state.QuotaUsed = todayQuotaUsed
 			state.UpdatedAt = completedTime(refresh.FetchedAt, m.reminderSchedulerNow())
 			if saveErr := m.repository.SaveWatchRefreshState(state); saveErr != nil {
 				return model.WatchRuleCreateResult{}, fmt.Errorf("schedule first background watch check: %w", saveErr)
@@ -178,7 +214,17 @@ func (m *Manager) CreateWatchRuleWithInitialCheck(userID string, request model.W
 		}
 		return model.WatchRuleCreateResult{}, fmt.Errorf("remove immediately satisfied watch rule: %w", err)
 	}
-	_ = m.repository.DeleteWatchRefreshState(userID, rule.DeviceID)
+	if quotaDate != "" && todayQuotaUsed > 0 {
+		ts := completedTime(refresh.FetchedAt, now)
+		_ = m.repository.SaveWatchRefreshState(model.WatchRefreshState{
+			UserID: rule.UserID, DeviceID: rule.DeviceID,
+			NextAttemptAt: ts,
+			QuotaDate:     quotaDate, QuotaUsed: todayQuotaUsed,
+			UpdatedAt: ts,
+		})
+	} else {
+		_ = m.clearWatchRefreshStatePreservingTodayQuota(userID, rule.DeviceID, now)
+	}
 	result.Rule = nil
 	result.IdlePortIDs = idlePortIDs
 	result.BackgroundScheduled = false
@@ -323,7 +369,7 @@ func (m *Manager) UpdateWatchRule(userID, ruleID string, request model.WatchRule
 			rule.CompletedAt = &now
 			rule.CompletionReason = model.WatchCompletionCancelled
 			rule.UpdatedAt = now
-			_ = m.repository.DeleteWatchRefreshState(userID, rule.DeviceID)
+			_ = m.clearWatchRefreshStatePreservingTodayQuota(userID, rule.DeviceID, now)
 			m.wakeReminderScheduler()
 			return rule, nil
 		}

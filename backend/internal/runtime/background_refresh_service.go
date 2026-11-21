@@ -204,15 +204,40 @@ func (m *Manager) loadWatchedPile(
 		flight.waiters++
 		coordinator.mu.Unlock()
 		<-flight.done
+		if flight.err == nil && !flight.result.Skipped {
+			result := cloneWatchedPileRefreshResult(flight.result)
+			result.Attempted = false
+			result.Coalesced = true
+			if !validationDue {
+				// The shared flight may have used another user's credential. Its pile
+				// status is reusable, but its credential result is not attributable to
+				// this waiter.
+				result.CredentialValidated = false
+			}
+			return result, nil
+		}
+		// Never propagate another user's auth expiry, quota exhaustion,
+		// disabled state, or backoff across a shared flight; fall back to an
+		// isolated fetch using this user's own runtime and preconditions.
+		if !validationDue {
+			result, fetchErr := fetchWatchedPile(runtime, deviceID, beforeRemoteRequest)
+			if fetchErr == nil && !result.Skipped {
+				coordinator.mu.Lock()
+				result.FetchedAt = coordinator.now()
+				result.CredentialValidated = true
+				result.Pile = cloneBackgroundPile(result.Pile)
+				coordinator.cache[deviceID] = backgroundPileCacheEntry{
+					pile:      cloneBackgroundPile(result.Pile),
+					fetchedAt: result.FetchedAt,
+				}
+				coordinator.credentialValidatedAt[credentialKey] = result.FetchedAt
+				coordinator.mu.Unlock()
+			}
+			return result, fetchErr
+		}
 		result := cloneWatchedPileRefreshResult(flight.result)
 		result.Attempted = false
 		result.Coalesced = true
-		if !validationDue {
-			// The shared flight may have used another user's credential. Its pile
-			// status is reusable, but its credential result is not attributable to
-			// this waiter.
-			result.CredentialValidated = false
-		}
 		return result, flight.err
 	}
 	flight := &backgroundPileFlight{done: make(chan struct{})}

@@ -646,7 +646,7 @@ func (s *Store) WxPusherOperationsStatus(since time.Time) (model.WxPusherOperati
 			COALESCE(SUM(CASE WHEN created_at>=? AND accepted_at IS NOT NULL THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN created_at>=? AND provider_succeeded_at IS NOT NULL THEN 1 ELSE 0 END), 0),
 			MAX(accepted_at), MAX(provider_succeeded_at),
-			MAX(CASE WHEN last_error_code<>'' THEN updated_at END)
+			MAX(CASE WHEN last_error_code<>'' AND status NOT IN ('suppressed','cancelled') THEN updated_at END)
 		FROM notification_deliveries
 		WHERE channel=?
 	`, since.UTC().Unix(), since.UTC().Unix(), since.UTC().Unix(), wxPusherChannel).Scan(
@@ -676,7 +676,7 @@ func (s *Store) WxPusherOperationsStatus(since time.Time) (model.WxPusherOperati
 	errorRows, err := s.db.Query(`
 		SELECT user_id, last_error_code
 		FROM notification_deliveries
-		WHERE channel=? AND updated_at>=? AND last_error_code<>''
+		WHERE channel=? AND updated_at>=? AND last_error_code<>'' AND status NOT IN ('suppressed','cancelled')
 		ORDER BY updated_at DESC, id DESC
 	`, wxPusherChannel, since.UTC().Unix())
 	if err != nil {

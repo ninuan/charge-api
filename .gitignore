@@ -64,3 +64,4 @@ docs/plans/*
 !docs/plans/2026-09-16-v1.5.4-performance-and-announcements.md
 
 !docs/openapi/charge-console-v1.5.4.yaml
+!docs/openapi/charge-console-v1.5.5.yaml

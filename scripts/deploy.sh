@@ -135,8 +135,15 @@ log "Create remote directory"
 run_ssh "mkdir -p $remote_path_quoted"
 
 log "Sync project files"
+if [[ ! "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/@-]+$ || "$DEPLOY_PATH" == "/" ]]; then
+  echo "Invalid DEPLOY_PATH: $DEPLOY_PATH" >&2
+  exit 1
+fi
+
 rsync_args=(
   -az
+  --no-owner
+  --no-group
   --delete
   --exclude ".git/"
   --exclude ".local/"
@@ -182,6 +189,16 @@ pnpm_fetch_timeout=$pnpm_fetch_timeout_quoted
 pnpm_fetch_retries=$pnpm_fetch_retries_quoted
 pnpm_network_concurrency=$pnpm_network_concurrency_quoted
 bash scripts/check_frontend_sources.sh
+for tool in go node pnpm rsync curl; do
+  if ! command -v "\$tool" >/dev/null 2>&1; then
+    echo "服务器缺少 \$tool，请先按 README「部署同步 - 服务器构建环境」安装后重试" >&2
+    exit 1
+  fi
+done
+if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 9) ? 0 : 1)'; then
+  echo "服务器 Node 版本过低（\$(node --version)），Next 16 需要 >= 20.9，建议安装 Node 22" >&2
+  exit 1
+fi
 cd frontend
 # 必须用专用旗标而不是 --config.<key>：后者把值按字符串塞进配置，
 # network-concurrency 在 pnpm 内部有数字类型校验，冷 store 首装会直接报错。
@@ -195,16 +212,20 @@ if [[ -n "\$npm_registry" ]]; then
 fi
 echo "Install frontend dependencies (timeout: \${pnpm_fetch_timeout}ms, retries: \$pnpm_fetch_retries, concurrency: \$pnpm_network_concurrency)"
 pnpm "\${pnpm_config_args[@]}" install --frozen-lockfile --prefer-offline --reporter=append-only
-pnpm run build:static
+pnpm exec next build
 cd ../backend
 go build -o charge-server.new ./cmd/server
+if [[ -f charge-server ]]; then
+  cp -p charge-server charge-server.prev
+fi
+rsync -a --delete ../frontend/out/ ../frontend/dist/
 mv charge-server.new charge-server
 service_name=$service_name_quoted
 health_url=$health_url_quoted
 sudo systemctl restart "\$service_name"
 health_ready=0
 for _ in {1..15}; do
-  if curl --silent --fail --max-time 2 "\$health_url" >/dev/null; then
+  if sudo systemctl is-active --quiet "\$service_name" && curl --silent --fail --max-time 2 "\$health_url" | grep -q '"status":"ok"'; then
     health_ready=1
     break
   fi
@@ -214,8 +235,14 @@ if [[ "\$health_ready" -ne 1 ]]; then
   echo "Charge health check failed after restart. Recent service diagnostics:" >&2
   sudo systemctl --no-pager --full status "\$service_name" || true
   sudo journalctl -u "\$service_name" -n 80 --no-pager || true
+  if [[ -f charge-server.prev ]]; then
+    echo "Rolling back charge-server to previous binary..." >&2
+    mv -f charge-server.prev charge-server
+    sudo systemctl restart "\$service_name" || true
+  fi
   exit 1
 fi
+rm -f charge-server.prev
 echo "Remote service is healthy: \$health_url"
 REMOTE
 

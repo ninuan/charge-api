@@ -50,6 +50,7 @@ type Server struct {
 	healthMu            sync.RWMutex
 	healthDegradations  map[string]string
 	streams             streamLimits
+	authSem             chan struct{}
 	qrMu                sync.Mutex
 	bindingBusy         map[string]bool
 	qrSessions          map[string]*ownedQRSession
@@ -105,6 +106,20 @@ func NewServer(
 		authGuard:          authGuard,
 		captcha:            auth.NewCaptchaStore(),
 		healthDegradations: make(map[string]string),
+		authSem:            make(chan struct{}, 4),
+	}
+}
+
+func (s *Server) acquireAuthSlot(w http.ResponseWriter) (func(), bool) {
+	if s.authSem == nil {
+		return func() {}, true
+	}
+	select {
+	case s.authSem <- struct{}{}:
+		return func() { <-s.authSem }, true
+	default:
+		writeRateLimit(w, 2*time.Second, "认证请求繁忙，请稍后再试")
+		return nil, false
 	}
 }
 
@@ -288,7 +303,20 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (model.Curr
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "user disabled or removed"})
 		return model.CurrentUser{}, false
 	}
+	if user.MustChangePassword && !allowedWhenPasswordChangeRequired(r.URL.Path) {
+		writeCodedError(w, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "请先修改临时密码后再继续操作")
+		return model.CurrentUser{}, false
+	}
 	return user, true
+}
+
+func allowedWhenPasswordChangeRequired(path string) bool {
+	switch path {
+	case "/api/auth/me", "/api/auth/password", "/api/auth/logout", "/api/auth/sessions", "/api/auth/sessions/others":
+		return true
+	default:
+		return false
+	}
 }
 
 func sessionClientInfo(r *http.Request) auth.SessionClientInfo {
@@ -500,14 +528,13 @@ func clientIP(r *http.Request) string {
 	}
 	parsed := net.ParseIP(host)
 	if parsed != nil && parsed.IsLoopback() {
-		// X-Real-IP 由反向代理用 proxy_set_header 覆写，客户端无法影响。
-		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		// X-Real-IP 由反向代理用 proxy_set_header 覆写，客户端无法影响；仅采纳合法 IP。
+		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(realIP) != nil {
 			return realIP
 		}
 		// nginx 的 $proxy_add_x_forwarded_for 把真实对端追加在客户端提交的
-		// X-Forwarded-For 之后，因此只有最右一段可信；取最左会让限流和登录
-		// 失败锁定被任意伪造的头绕过。
-		if forwarded := rightmostForwardedFor(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+		// X-Forwarded-For 之后，因此只有最右一段可信；需遍历所有同名头避免多行头绕过。
+		if forwarded := rightmostForwardedFor(r.Header.Values("X-Forwarded-For")); forwarded != "" {
 			return forwarded
 		}
 	}
@@ -517,11 +544,13 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func rightmostForwardedFor(header string) string {
-	parts := strings.Split(header, ",")
-	for i := len(parts) - 1; i >= 0; i-- {
-		if value := strings.TrimSpace(parts[i]); value != "" {
-			return value
+func rightmostForwardedFor(headers []string) string {
+	for h := len(headers) - 1; h >= 0; h-- {
+		parts := strings.Split(headers[h], ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			if value := strings.TrimSpace(parts[i]); net.ParseIP(value) != nil {
+				return value
+			}
 		}
 	}
 	return ""

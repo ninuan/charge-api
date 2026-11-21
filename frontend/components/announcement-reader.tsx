@@ -119,7 +119,9 @@ export function AnnouncementReader({
     setError("")
     const current = version.current
     try {
-      await announcementRequest(`/api/announcements/${data.id}/acknowledge`, {
+      await announcementRequest(
+        `/api/announcements/${encodeURIComponent(data.id)}/acknowledge`,
+        {
         method: "POST",
         body: JSON.stringify({
           version: data.version,

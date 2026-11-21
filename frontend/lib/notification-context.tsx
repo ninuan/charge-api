@@ -158,6 +158,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const markRead = useCallback(
     async (notificationId: string) => {
       const updated = await watchApi.markNotificationRead(notificationId)
+      const wasUnread =
+        notificationUnreadStateRef.current.get(updated.id) ??
+        items.some(
+          (notification) =>
+            notification.id === notificationId && !notification.readAt
+        )
       notificationUnreadStateRef.current.set(updated.id, false)
       setItems((current) =>
         statusRef.current === "unread"
@@ -166,14 +172,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
               notification.id === updated.id ? updated : notification
             )
       )
-      setUnreadCount((current) =>
-        items.some(
-          (notification) =>
-            notification.id === notificationId && !notification.readAt
-        )
-          ? Math.max(0, current - 1)
-          : current
-      )
+      if (wasUnread) {
+        setUnreadCount((current) => Math.max(0, current - 1))
+      }
     },
     [items]
   )

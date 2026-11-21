@@ -187,16 +187,20 @@ if [[ -n "\$npm_registry" ]]; then
 fi
 echo "Install frontend dependencies (timeout: \${pnpm_fetch_timeout}ms, retries: \$pnpm_fetch_retries, concurrency: \$pnpm_network_concurrency)"
 pnpm "\${pnpm_config_args[@]}" install --frozen-lockfile --prefer-offline --reporter=append-only
-pnpm run build:static
+pnpm exec next build
 cd ../backend
 go build -o charge-server.new ./cmd/server
+if [[ -f charge-server ]]; then
+  cp -p charge-server charge-server.prev
+fi
+rsync -a --delete ../frontend/out/ ../frontend/dist/
 mv charge-server.new charge-server
 service_name=$service_name_quoted
 health_url=$health_url_quoted
 sudo systemctl restart "\$service_name"
 health_ready=0
 for _ in {1..15}; do
-  if curl --silent --fail --max-time 2 "\$health_url" >/dev/null; then
+  if sudo systemctl is-active --quiet "\$service_name" && curl --silent --fail --max-time 2 "\$health_url" | grep -q '"status":"ok"'; then
     health_ready=1
     break
   fi
@@ -206,8 +210,14 @@ if [[ "\$health_ready" -ne 1 ]]; then
   echo "Charge health check failed after restart. Recent service diagnostics:" >&2
   sudo systemctl --no-pager --full status "\$service_name" || true
   sudo journalctl -u "\$service_name" -n 80 --no-pager || true
+  if [[ -f charge-server.prev ]]; then
+    echo "Rolling back charge-server to previous binary..." >&2
+    mv -f charge-server.prev charge-server
+    sudo systemctl restart "\$service_name" || true
+  fi
   exit 1
 fi
+rm -f charge-server.prev
 echo "Remote service is healthy: \$health_url"
 REMOTE
 

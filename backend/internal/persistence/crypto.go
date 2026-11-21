@@ -68,6 +68,9 @@ func (c *secretCipher) decryptWithAAD(aad string, nonce []byte, ciphertext []byt
 	if len(ciphertext) == 0 {
 		return nil, nil
 	}
+	if len(nonce) != c.aead.NonceSize() {
+		return nil, fmt.Errorf("decrypt secret for %s: invalid nonce size %d", aad, len(nonce))
+	}
 	plaintext, err := c.aead.Open(nil, nonce, ciphertext, []byte(aad))
 	if err != nil {
 		return nil, fmt.Errorf("decrypt secret for %s: %w", aad, err)

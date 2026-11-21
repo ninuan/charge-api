@@ -215,6 +215,7 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           handler,
+		BaseContext:       func(net.Listener) context.Context { return schedulerCtx },
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		IdleTimeout:       90 * time.Second,

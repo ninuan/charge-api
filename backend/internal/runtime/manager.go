@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -345,28 +347,34 @@ func newUserRuntime(requests []parser.CaptureRequest, state persistence.UserStat
 
 func (r *UserRuntime) refresh(force bool) ([]model.Pile, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	r.stats.RefreshRequests++
 	now := time.Now()
 	if !force && !r.lastRemoteFetch.IsZero() && now.Sub(r.lastRemoteFetch) < r.minInterval {
-		next := r.lastRemoteFetch.Add(r.minInterval)
+		lastRemoteAt := r.lastRemoteFetch
+		next := lastRemoteAt.Add(r.minInterval)
 		r.stats.CachedRefreshes++
 		r.store.SetRefreshInfo(model.RefreshInfo{
-			LastRemoteAt:       &r.lastRemoteFetch,
+			LastRemoteAt:       &lastRemoteAt,
 			NextRemoteAt:       &next,
 			MinIntervalSeconds: int(r.minInterval.Seconds()),
 			Cached:             true,
 			Message:            "刷新间隔内，已返回缓存数据",
 		})
+		r.mu.Unlock()
 		return nil, nil
 	}
+	r.mu.Unlock()
 
 	result := r.client.FetchPiles(force)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if result.Attempted > 0 {
-		r.lastRemoteFetch = time.Now()
+		fetchedAt := time.Now()
+		r.lastRemoteFetch = fetchedAt
 		r.stats.RemoteFetches += result.Attempted
-		r.stats.LastRemoteFetchAt = &r.lastRemoteFetch
+		lastFetchCopy := fetchedAt
+		r.stats.LastRemoteFetchAt = &lastFetchCopy
 	}
 	if len(result.Piles) > 0 {
 		r.store.MergeCapturePiles(result.Piles)
@@ -456,7 +464,17 @@ func (r *UserRuntime) recordRemoteOK(at time.Time) {
 func (r *UserRuntime) statsSnapshot() model.TrafficStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.stats
+	return cloneTrafficStats(r.stats)
+}
+
+func cloneTrafficStats(stats model.TrafficStats) model.TrafficStats {
+	clone := stats
+	clone.LastRequestAt = cloneTimePointer(stats.LastRequestAt)
+	clone.LastRemoteFetchAt = cloneTimePointer(stats.LastRemoteFetchAt)
+	clone.LastRemoteOKAt = cloneTimePointer(stats.LastRemoteOKAt)
+	clone.LastFailedAt = cloneTimePointer(stats.LastFailedAt)
+	clone.LastAuthFailureAt = cloneTimePointer(stats.LastAuthFailureAt)
+	return clone
 }
 
 func (r *UserRuntime) recoveryDiagnosticsSnapshot() []model.RecoveryDiagnostic {
@@ -481,12 +499,16 @@ func (r *UserRuntime) state() persistence.UserState {
 		Refresh:             snapshot.Refresh,
 		DeviceIDs:           r.client.DeviceIDs(),
 		Cookie:              r.client.Cookie(),
-		Stats:               r.stats,
+		Stats:               cloneTrafficStats(r.stats),
 		YYBBinding:          cloneYYBBinding(r.yybBinding),
 		RecoveryDiagnostics: cloneRecoveryDiagnostics(r.recoveryDiagnostics),
 	}
 }
 
 func randomID(prefix string) string {
-	return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+	buf := make([]byte, 12)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(buf))
 }

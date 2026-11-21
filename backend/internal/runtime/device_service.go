@@ -96,9 +96,18 @@ func (m *Manager) AddPileWithYYB(userID string, req model.PileUpsertRequest, yyb
 	req.ID = strings.TrimSpace(req.ID)
 	req.Number = strings.TrimSpace(req.Number)
 	if req.ID == "" && req.Number != "" {
-		resolvedID, err := runtime.client.ResolveDeviceIDByNumber(req.Number)
-		if err != nil {
-			return model.Pile{}, err
+		user, _ := m.User(userID)
+		if !user.RefreshEnabled {
+			return model.Pile{}, fmt.Errorf("管理员已暂停此账户的远端刷新，暂时无法验证新设备")
+		}
+		if user.DeviceLimit > 0 && len(runtime.client.DeviceIDs()) >= user.DeviceLimit {
+			return model.Pile{}, fmt.Errorf("当前账户最多添加 %d 台充电桩", user.DeviceLimit)
+		}
+		runtime.refreshMu.Lock()
+		resolvedID, resolveErr := runtime.client.ResolveDeviceIDByNumber(req.Number)
+		runtime.refreshMu.Unlock()
+		if resolveErr != nil {
+			return model.Pile{}, resolveErr
 		}
 		req.ID = resolvedID
 	}
@@ -333,8 +342,10 @@ func (m *Manager) Subscribe(userID string) (chan model.DashboardSnapshot, error)
 }
 
 func (m *Manager) Unsubscribe(userID string, ch chan model.DashboardSnapshot) {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
+	m.mu.RLock()
+	runtime := m.runtimes[userID]
+	m.mu.RUnlock()
+	if runtime == nil {
 		return
 	}
 	runtime.store.Unsubscribe(ch)

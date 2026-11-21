@@ -60,36 +60,44 @@ func publicUser(user model.User) model.CurrentUser {
 }
 
 func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) (model.CurrentUser, error) {
-	m.mu.Lock()
+	m.mu.RLock()
 	user, ok := m.users[userID]
-	if !ok {
-		m.mu.Unlock()
+	m.mu.RUnlock()
+	if !ok || !user.Enabled {
 		return model.CurrentUser{}, fmt.Errorf("用户不存在")
 	}
-	valid, _ := auth.VerifyPassword(currentPassword, user.PasswordHash)
+	originalHash := user.PasswordHash
+	valid, _ := auth.VerifyPassword(currentPassword, originalHash)
 	if !valid {
-		m.mu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("当前密码错误")
 	}
 	if err := validateNewPassword(newPassword); err != nil {
-		m.mu.Unlock()
 		return model.CurrentUser{}, err
 	}
 	hash, err := auth.HashPassword(newPassword)
 	if err != nil {
-		m.mu.Unlock()
 		return model.CurrentUser{}, err
 	}
-	user.PasswordHash = hash
-	user.MustChangePassword = false
-	user.UpdatedAt = time.Now()
-	m.users[userID] = user
+	m.mu.Lock()
+	current, ok := m.users[userID]
+	if !ok || !current.Enabled {
+		m.mu.Unlock()
+		return model.CurrentUser{}, fmt.Errorf("用户不存在")
+	}
+	if current.PasswordHash != originalHash {
+		m.mu.Unlock()
+		return model.CurrentUser{}, fmt.Errorf("密码已被其他操作更新，请重试")
+	}
+	current.PasswordHash = hash
+	current.MustChangePassword = false
+	current.UpdatedAt = time.Now()
+	m.users[userID] = current
 	m.mu.Unlock()
 	if err := m.Save(); err != nil {
 		return model.CurrentUser{}, err
 	}
 	m.cleanupInitialPasswordFile(userID)
-	return publicUser(user), nil
+	return publicUser(current), nil
 }
 
 func (m *Manager) AdminUserDetail(userID string) (model.AdminUserDetail, error) {
@@ -173,6 +181,7 @@ func (m *Manager) Authenticate(username string, password string) (model.CurrentU
 		return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
 	}
 	if !matched.Enabled {
+		auth.VerifyDummyPassword(password)
 		return model.CurrentUser{}, fmt.Errorf("用户已被禁用")
 	}
 
@@ -509,9 +518,10 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 	}
 	if usedInviteID != "" {
 		m.mu.Lock()
-		invite := m.invites[usedInviteID]
-		invite.UsedCount++
-		m.invites[usedInviteID] = invite
+		if invite, ok := m.invites[usedInviteID]; ok {
+			invite.UsedCount++
+			m.invites[usedInviteID] = invite
+		}
 		m.mu.Unlock()
 		if err := m.Save(); err != nil {
 			return model.CurrentUser{}, err

@@ -109,11 +109,9 @@ export async function request<T>(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const external = rest.signal
+  const forwardAbort = () => controller.abort()
   if (external?.aborted) controller.abort()
-  else
-    external?.addEventListener("abort", () => controller.abort(), {
-      once: true,
-    })
+  else external?.addEventListener("abort", forwardAbort, { once: true })
 
   let response: Response
   try {
@@ -128,6 +126,7 @@ export async function request<T>(
     throw error
   } finally {
     clearTimeout(timer)
+    external?.removeEventListener("abort", forwardAbort)
   }
 
   if (!response.ok && response.status !== 204) {

@@ -21,7 +21,7 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#架构与安全">架构与安全</a> ·
   <a href="#生产部署">生产部署</a> ·
-  <a href="docs/openapi/charge-console-v1.5.4.yaml">OpenAPI</a> ·
+  <a href="docs/openapi/charge-console-v1.5.5.yaml">OpenAPI</a> ·
   <a href="CHANGELOG.md">更新日志</a>
 </p>
 
@@ -178,7 +178,7 @@ frontend/
   lib/                   API 客户端、上下文与领域逻辑
   e2e/                   Playwright 端到端测试
 
-docs/openapi/            版本化 OpenAPI 契约（当前 v1.5.4）
+docs/openapi/            版本化 OpenAPI 契约（当前 v1.5.5）
 deploy/systemd/          服务与 SQLite 在线备份模板
 scripts/                 开发、校验、安全检查与部署脚本
 ```
@@ -199,7 +199,7 @@ pnpm --dir frontend test:e2e
 ## 相关文档
 
 - [生产部署与运维指南](docs/deployment.md)
-- [OpenAPI v1.5.4 契约](docs/openapi/charge-console-v1.5.4.yaml)
+- [OpenAPI v1.5.5 契约](docs/openapi/charge-console-v1.5.5.yaml)
 - [更新日志](CHANGELOG.md) · [发布说明](RELEASE_NOTES.md)
 - [本地环境变量模板](examples/dev.env.example)
 

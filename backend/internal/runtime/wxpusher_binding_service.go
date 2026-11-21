@@ -15,13 +15,30 @@ import (
 )
 
 const (
-	wxPusherBindValidity    = 10 * time.Minute
-	wxPusherPollInterval    = 10 * time.Second
-	wxPusherCreateMinuteMax = 1
-	wxPusherCreateDayMax    = 10
-	wxPusherTestDayMax      = 5
-	wxPusherDeliveryNotice  = "消息发出后，请在 WxPusher App 或微信中确认是否收到。页面无法确认是否已经阅读。"
+	wxPusherBindValidity      = 10 * time.Minute
+	wxPusherPollInterval      = 10 * time.Second
+	wxPusherRecheckCooldown   = 5 * time.Second
+	wxPusherCreateMinuteMax   = 1
+	wxPusherCreateDayMax      = 10
+	wxPusherTestDayMax        = 5
+	wxPusherDeliveryNotice    = "消息发出后，请在 WxPusher App 或微信中确认是否收到。页面无法确认是否已经阅读。"
 )
+
+func (m *Manager) allowWxPusherRecheck(userID string, now time.Time) error {
+	m.wxPusherMu.Lock()
+	defer m.wxPusherMu.Unlock()
+	if m.wxPusherAttempts == nil {
+		m.wxPusherAttempts = make(map[string][]time.Time)
+	}
+	key := "test_recheck:" + userID
+	if prev := m.wxPusherAttempts[key]; len(prev) > 0 {
+		if remaining := prev[len(prev)-1].Add(wxPusherRecheckCooldown).Sub(now); remaining > 0 {
+			return WxPusherRateLimitError{RetryAfter: remaining}
+		}
+	}
+	m.wxPusherAttempts[key] = []time.Time{now}
+	return nil
+}
 
 var (
 	ErrWxPusherAlreadyBound        = errors.New("wxpusher already bound")
@@ -208,6 +225,9 @@ func (m *Manager) RecheckWxPusherTestDelivery(ctx context.Context, userID string
 	client, _ := m.notificationDispatcherConfig()
 	if client == nil {
 		return model.NotificationDeliverySummary{}, ErrWxPusherNotConfigured
+	}
+	if err := m.allowWxPusherRecheck(userID, m.reminderSchedulerNow().UTC()); err != nil {
+		return model.NotificationDeliverySummary{}, err
 	}
 
 	requestCtx, cancel := context.WithTimeout(ctx, 12*time.Second)

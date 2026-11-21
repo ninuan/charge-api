@@ -156,6 +156,11 @@ func (s *Server) handlePileActions(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, pileBodyLimit, &req) {
 			return
 		}
+		if len(req.Name) > 128 || len(req.Address) > 256 {
+			s.recordDashboardDiagnostic(user, "add_pile", "pile_fields_invalid", parts[2], http.StatusBadRequest)
+			writeCodedError(w, http.StatusBadRequest, "PILE_FIELDS_INVALID", "充电桩字段长度超出限制")
+			return
+		}
 		pile, err := s.manager.UpdatePile(user.ID, parts[2], req.Name, req.Address, req.SortOrder)
 		if err != nil {
 			s.recordDashboardDiagnostic(user, "add_pile", "pile_update_failed", parts[2], appruntime.DiagnosticStatusCode(err))

@@ -35,6 +35,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	releaseAuth, ok := s.acquireAuthSlot(w)
+	if !ok {
+		return
+	}
+	defer releaseAuth()
+
 	user, err := s.manager.Authenticate(req.Username, req.Password)
 	if err != nil {
 		s.writeLoginFailure(w, ip, req.Username, err)
@@ -76,6 +82,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "REGISTER_CAPTCHA_INVALID", "verify register captcha", "图片验证码错误或已过期，请重新获取。", err)
 		return
 	}
+
+	releaseAuth, ok := s.acquireAuthSlot(w)
+	if !ok {
+		return
+	}
+	defer releaseAuth()
 
 	user, err := s.manager.RegisterUser(req.Username, req.Password, req.InviteCode)
 	if err != nil {
@@ -126,15 +138,26 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
+	ip := clientIP(r)
+	if !s.allowAuthRate(w, ip) || !s.allowAuthIdentity(w, ip, user.Username) {
+		return
+	}
 	var req model.PasswordChangeRequest
 	if !decodeJSON(w, r, authBodyLimit, &req) {
 		return
 	}
-	changedUser, err := s.manager.ChangePassword(user.ID, req.CurrentPassword, req.NewPassword)
-	if err != nil {
-		writePublicOperationError(w, http.StatusBadRequest, "change password", "修改密码失败，请检查当前密码后重试。", err)
+	releaseAuth, ok := s.acquireAuthSlot(w)
+	if !ok {
 		return
 	}
+	defer releaseAuth()
+
+	changedUser, err := s.manager.ChangePassword(user.ID, req.CurrentPassword, req.NewPassword)
+	if err != nil {
+		s.writeAuthFailure(w, ip, user.Username, http.StatusBadRequest, "PASSWORD_CHANGE_FAILED", "change password", "修改密码失败，请检查当前密码后重试。", err)
+		return
+	}
+	s.authGuard.RecordSuccess(ip, user.Username)
 	cookie, _ := r.Cookie(sessionCookieName)
 	currentToken := ""
 	if cookie != nil {

@@ -135,8 +135,24 @@ func (g *AuthGuard) RecordFailure(ip string, username string) (bool, time.Durati
 func (g *AuthGuard) RecordSuccess(ip string, username string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	delete(g.failures, "ip:"+normalizeKey(ip))
-	delete(g.failures, "user:"+normalizeKey(username))
+	now := time.Now()
+	ipKey := "ip:" + normalizeKey(ip)
+	userDelta := 0
+	if strings.TrimSpace(username) != "" {
+		userKey := "user:" + normalizeKey(username)
+		if userEntry := g.failures[userKey]; userEntry != nil && now.Sub(userEntry.WindowStart) < g.failureWindow {
+			userDelta = userEntry.Count
+		}
+		delete(g.failures, userKey)
+	}
+	if userDelta > 0 {
+		if ipEntry := g.failures[ipKey]; ipEntry != nil {
+			ipEntry.Count -= userDelta
+			if ipEntry.Count <= 0 {
+				delete(g.failures, ipKey)
+			}
+		}
+	}
 }
 
 func failureKeys(ip string, username string) []string {

@@ -753,8 +753,8 @@ func (s *Store) ListUserSessions(userID string) ([]SessionRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT token_hash, user_id, created_at, expires_at, last_active_at,
 		       browser, os, device_type, ip_label
-		FROM sessions WHERE user_id=? ORDER BY last_active_at DESC
-	`, userID)
+		FROM sessions WHERE user_id=? AND expires_at > ? ORDER BY last_active_at DESC
+	`, userID, time.Now().UnixNano())
 	if err != nil {
 		return nil, err
 	}

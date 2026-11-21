@@ -292,6 +292,27 @@ func (m *Manager) reminderTargets() ([]reminderTarget, error) {
 	return targets, nil
 }
 
+func (m *Manager) clearWatchRefreshStatePreservingTodayQuota(userID, deviceID string, now time.Time) error {
+	state, ok, err := m.repository.LoadWatchRefreshState(userID, deviceID)
+	if err != nil || !ok {
+		return err
+	}
+	settings := normalizeRegistrationSettings(m.Settings())
+	quotaDate, err := reminderQuotaDate(now, settings.ScheduledPowerOffTimezone)
+	if err != nil || state.QuotaDate != quotaDate || state.QuotaUsed <= 0 {
+		return m.repository.DeleteWatchRefreshState(userID, deviceID)
+	}
+	ts := now.UTC().Truncate(time.Second)
+	return m.repository.SaveWatchRefreshState(model.WatchRefreshState{
+		UserID:        userID,
+		DeviceID:      deviceID,
+		NextAttemptAt: ts,
+		QuotaDate:     state.QuotaDate,
+		QuotaUsed:     state.QuotaUsed,
+		UpdatedAt:     ts,
+	})
+}
+
 func (m *Manager) reconcileReminderStates(targets []reminderTarget) error {
 	active := make(map[reminderTargetKey]struct{}, len(targets))
 	for _, target := range targets {
@@ -301,11 +322,12 @@ func (m *Manager) reconcileReminderStates(targets []reminderTarget) error {
 	if err != nil {
 		return err
 	}
+	now := m.reminderSchedulerNow()
 	for _, state := range states {
 		if _, ok := active[reminderTargetKey{userID: state.UserID, deviceID: state.DeviceID}]; ok {
 			continue
 		}
-		if err := m.repository.DeleteWatchRefreshState(state.UserID, state.DeviceID); err != nil {
+		if err := m.clearWatchRefreshStatePreservingTodayQuota(state.UserID, state.DeviceID, now); err != nil {
 			return err
 		}
 	}
