@@ -5,7 +5,6 @@ import {
   CheckIcon,
   Link2Icon,
   LogOutIcon,
-  RefreshCwIcon,
   ShieldCheckIcon,
 } from "lucide-react"
 import Link from "next/link"
@@ -201,7 +200,7 @@ type BindingState = {
 function PlatformConnection() {
   const params = useSearchParams(),
     online = useOnline()
-  const { snapshot, fetchSnapshot, updateCookie } = useDashboard()
+  const { updateCookie } = useDashboard()
   const [binding, setBinding] = useState<BindingState | null>(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
@@ -239,30 +238,6 @@ function PlatformConnection() {
       active = false
     }
   }, [load])
-  async function sync() {
-    const deviceId = snapshot.piles[0]?.id
-    if (!deviceId) return
-    setPending(true)
-    try {
-      await requestJSON(
-        "/api/session/mocele-cookie",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceId }),
-          timeoutMs: 120_000,
-        },
-        "同步访问凭据失败。"
-      )
-      await fetchSnapshot()
-      await load()
-      notify.success("平台凭据已同步")
-    } catch (reason) {
-      notify.error(reason, { title: "同步未完成" })
-    } finally {
-      setPending(false)
-    }
-  }
   async function saveCookie(event: React.FormEvent) {
     event.preventDefault()
     if (!cookie.trim()) {
@@ -306,7 +281,7 @@ function PlatformConnection() {
     <div className="wb-settings-content">
       <SectionHeading
         title="充电平台连接"
-        description="绑定微信用于获取访问凭据；设备是否可用，以实际读取结果为准。"
+        description="首次扫码获取平台 Cookie；Cookie 有效期较长，不会自动重复同步，失效时可手动更新 Cookie 或重新扫码。"
       />
       {loading && !binding ? (
         <WorkbenchLoading label="正在检查平台绑定" />
@@ -329,8 +304,8 @@ function PlatformConnection() {
               </h3>
               <p>
                 {binding?.bound
-                  ? `${binding.nickname || "微信账户"}${binding.openidSuffix ? ` · 尾号 ${binding.openidSuffix}` : ""} · 最近检查 ${formatSnapshotTime(binding.lastCheckedAt, true)}`
-                  : "完成扫码确认后，才能通过绑定账户恢复登录。"}
+                  ? `${binding.nickname || "微信账户"}${binding.openidSuffix ? ` · 尾号 ${binding.openidSuffix}` : ""}${binding.lastCheckedAt ? ` · 最近检查 ${formatSnapshotTime(binding.lastCheckedAt, true)}` : ""}`
+                  : "首次扫码用于获取平台 Cookie；也可直接手动填写 Cookie。"}
               </p>
             </div>
             <YybLoginDialog
@@ -360,36 +335,8 @@ function PlatformConnection() {
       <div className="wb-grouped-list">
         <div className="wb-setting-row">
           <div>
-            <h3>自动恢复登录</h3>
-            <p>已绑定微信时，凭据过期会尝试恢复；仍未成功时再提醒你。</p>
-          </div>
-          <span className="wb-small wb-muted">
-            {binding?.bound ? "已具备恢复条件" : "绑定后可用"}
-          </span>
-        </div>
-        <div className="wb-setting-row">
-          <div>
-            <h3>手动同步凭据</h3>
-            <p>
-              {snapshot.piles.length
-                ? "使用当前已绑定账户，重新获取访问凭据。"
-                : "添加一台充电桩后才能同步设备访问凭据。"}
-            </p>
-          </div>
-          <WorkbenchButton
-            variant="outline"
-            busy={pending}
-            disabled={!online || !binding?.bound || !snapshot.piles.length}
-            onClick={() => void sync()}
-          >
-            <RefreshCwIcon size={15} />
-            同步一次
-          </WorkbenchButton>
-        </div>
-        <div className="wb-setting-row">
-          <div>
             <h3>手动更新 Cookie</h3>
-            <p>未部署扫码服务时，也可以手动更新你有权使用的访问凭据。</p>
+            <p>Cookie 长期有效；失效或未启用扫码服务时，可直接手动更新访问凭据。</p>
           </div>
           <WorkbenchButton
             variant="ghost"

@@ -191,8 +191,6 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		snapshot, err = s.manager.RecoverRefreshWithYYB(user.ID, s.yybClient, s.moceleClient)
-	} else if s.yybClient != nil && s.moceleClient != nil {
-		snapshot, err = s.manager.RefreshWithYYB(user.ID, false, s.yybClient, s.moceleClient)
 	} else {
 		snapshot, err = s.manager.Refresh(user.ID, false)
 	}

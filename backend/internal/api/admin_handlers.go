@@ -300,12 +300,7 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if len(parts) == 5 && parts[4] == "refresh" && r.Method == http.MethodPost {
-		var err error
-		if s.yybClient != nil && s.moceleClient != nil {
-			_, err = s.manager.RefreshWithYYB(parts[3], true, s.yybClient, s.moceleClient)
-		} else {
-			_, err = s.manager.Refresh(parts[3], true)
-		}
+		_, err := s.manager.Refresh(parts[3], true)
 		if err != nil {
 			s.recordAdminAudit(admin, "user.refresh", "user", parts[3], parts[3], "failure")
 			writePublicOperationError(w, http.StatusBadRequest, "refresh admin user", "刷新用户设备失败，请查看诊断记录。", err)
