@@ -931,10 +931,9 @@ func TestAdminIssuesUseActualFailureTime(t *testing.T) {
 		CreatedAt: failedAt.Add(-time.Hour),
 	}
 	state := persistence.UserState{
-		Cookie: "sid=valid",
-		Stats: model.TrafficStats{
-			AuthFailures:      1,
-			LastAuthFailureAt: &failedAt,
+		Refresh: model.RefreshInfo{
+			LastRemoteAt:  &failedAt,
+			FailedDevices: 1,
 		},
 	}
 	manager := &Manager{
@@ -946,19 +945,22 @@ func TestAdminIssuesUseActualFailureTime(t *testing.T) {
 	}
 
 	stats := manager.AdminStats()
-	issue, ok := findException(stats.Exceptions, user.ID, "cookie_expired")
+	issue, ok := findException(stats.Exceptions, user.ID, "refresh")
 	if !ok {
-		t.Fatalf("missing auth issue: %+v", stats.Exceptions)
+		t.Fatalf("missing refresh issue: %+v", stats.Exceptions)
 	}
 	if !issue.Time.Equal(failedAt) {
 		t.Fatalf("issue time = %v, want %v", issue.Time, failedAt)
 	}
 
 	recoveredAt := failedAt.Add(time.Minute)
-	manager.runtimes[user.ID].recordRemoteOK(recoveredAt)
+	manager.runtimes[user.ID].store.SetRefreshInfo(model.RefreshInfo{
+		LastRemoteAt:  &recoveredAt,
+		FailedDevices: 0,
+	})
 	stats = manager.AdminStats()
-	if hasExceptionType(stats.Exceptions, user.ID, "cookie_expired") {
-		t.Fatalf("auth issue remained after recovery: %+v", stats.Exceptions)
+	if hasExceptionType(stats.Exceptions, user.ID, "refresh") {
+		t.Fatalf("refresh issue remained after recovery: %+v", stats.Exceptions)
 	}
 }
 
