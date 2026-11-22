@@ -303,7 +303,7 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 			rawDiagnostics := runtime.recoveryDiagnosticsSnapshot()
 			filteredDiagnostics := make([]model.RecoveryDiagnostic, 0, len(rawDiagnostics))
 			for _, d := range rawDiagnostics {
-				if d.Operation == diagnosticOperationScan || d.Operation == diagnosticOperationSync || strings.HasPrefix(d.Code, "yyb_") {
+				if isRetiredDiagnostic(d) {
 					continue
 				}
 				filteredDiagnostics = append(filteredDiagnostics, d)
@@ -382,8 +382,10 @@ func matchesAdminUserListQuery(summary model.AdminUserSummary, query model.Admin
 			return false
 		}
 	}
-	if query.Credential != "" && query.Credential != "all" && string(summary.Credential.State) != query.Credential {
-		return false
+	if query.Credential != "" && query.Credential != "all" {
+		if !matchesAdminUserCredentialFilter(summary, query.Credential) {
+			return false
+		}
 	}
 	switch query.Health {
 	case "healthy":
@@ -398,42 +400,65 @@ func matchesAdminUserListQuery(summary model.AdminUserSummary, query model.Admin
 	return true
 }
 
-func hasAdminUserRisk(summary model.AdminUserSummary) bool {
-	hasPersonalCookieExpired := summary.Quota != nil && summary.Quota.PersonalCookieStatus == "expired"
-	hasCredentialRisk := hasPersonalCookieExpired ||
-		(len(summary.DeviceIDs) > 0 && (summary.Credential.State == model.CredentialSyncFailed || summary.Credential.State == model.CredentialExpired))
-	return !summary.User.Enabled || hasCredentialRisk || hasActiveAuthFailure(summary.Stats) || summary.LastRefresh.FailedDevices > 0 || summary.Dashboard.OfflinePorts > 0
+func matchesAdminUserCredentialFilter(summary model.AdminUserSummary, filter string) bool {
+	if summary.User.Role == model.RoleAdmin {
+		return false
+	}
+	if summary.Quota != nil {
+		switch filter {
+		case "unbound":
+			return !summary.Quota.HasPersonalCookie
+		case "healthy":
+			return summary.Quota.UnlimitedActive
+		case "pool_unjoined":
+			return summary.Quota.HasPersonalCookie &&
+				summary.Quota.PersonalCookieStatus == "valid" &&
+				!summary.Quota.UnlimitedActive
+		case "expired":
+			return summary.Quota.PersonalCookieStatus == "expired"
+		}
+	}
+	return string(summary.Credential.State) == filter
 }
 
-func credentialSummary(runtime *UserRuntime, deviceCount int) model.CredentialSummary {
+func hasAdminUserRisk(summary model.AdminUserSummary) bool {
+	hasPersonalCookieExpired := summary.Quota != nil && summary.Quota.PersonalCookieStatus == "expired"
+	return !summary.User.Enabled || hasPersonalCookieExpired || summary.LastRefresh.FailedDevices > 0 || summary.Dashboard.OfflinePorts > 0
+}
+
+func isRetiredDiagnostic(d model.RecoveryDiagnostic) bool {
+	if d.Operation == diagnosticOperationScan || d.Operation == diagnosticOperationSync || d.Operation == diagnosticOperationRecovery {
+		return true
+	}
+	for _, prefix := range []string{"yyb_", "qr_", "binding_", "mocele_autologin_", "recovery_"} {
+		if strings.HasPrefix(d.Code, prefix) {
+			return true
+		}
+	}
+	switch d.Code {
+	case "scan_service_unavailable", "credential_sync_failed", "new_cookie_validation_failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func credentialSummary(runtime *UserRuntime, _ int) model.CredentialSummary {
 	if runtime == nil {
 		return model.CredentialSummary{State: model.CredentialUnbound}
 	}
-	runtime.mu.Lock()
-	binding := cloneYYBBinding(runtime.yybBinding)
-	runtime.mu.Unlock()
-
 	hasCookie := strings.TrimSpace(runtime.client.Cookie()) != ""
 	result := model.CredentialSummary{
-		Bound:         binding != nil && binding.Ref != "",
+		Bound:         hasCookie,
 		HasCredential: hasCookie,
 	}
-	if binding != nil {
-		result.LastCheckedAt = binding.LastCheckedAt
-	}
 	switch {
-	case binding != nil && binding.Status == "expired":
-		result.State = model.CredentialExpired
-	case binding != nil && binding.LastError != "":
-		result.State = model.CredentialSyncFailed
-	case hasCookie:
-		result.State = model.CredentialHealthy
-	case binding != nil && deviceCount == 0:
-		result.State = model.CredentialWaitingDevice
-	case binding != nil:
-		result.State = model.CredentialSyncFailed
-	default:
+	case !hasCookie:
 		result.State = model.CredentialUnbound
+	case runtime.isPersonalCookieExpired():
+		result.State = model.CredentialExpired
+	default:
+		result.State = model.CredentialHealthy
 	}
 	return result
 }

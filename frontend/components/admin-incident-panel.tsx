@@ -36,6 +36,7 @@ import { adminApi } from "@/lib/admin-api"
 import type { SystemException } from "@/lib/types"
 
 const typeLabels: Record<string, string> = {
+  public_pool: "公共 Cookie 池",
   credential: "凭据",
   cookie_expired: "凭据失效",
   refresh: "刷新失败",
@@ -58,10 +59,9 @@ const statusLabels: Record<SystemException["status"], string> = {
 const filters = [
   { id: "all", label: "全部" },
   { id: "critical", label: "紧急问题" },
-  { id: "credential", label: "凭据失效" },
+  { id: "credential", label: "公共池 / 凭据" },
   { id: "refresh", label: "刷新失败" },
   { id: "offline", label: "离线端口" },
-  { id: "stale", label: "长期未更新" },
   { id: "notification_delivery", label: "消息投递" },
 ] as const
 
@@ -69,7 +69,11 @@ function matchesFilter(issue: SystemException, filter: string) {
   if (filter === "all") return true
   if (filter === "critical") return issue.level === "critical"
   if (filter === "credential") {
-    return issue.type === "credential" || issue.type === "cookie_expired"
+    return (
+      issue.type === "public_pool" ||
+      issue.type === "credential" ||
+      issue.type === "cookie_expired"
+    )
   }
   if (filter === "notification_delivery") {
     return (

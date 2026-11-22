@@ -186,7 +186,12 @@ export interface AdminUserSummary {
 
 export type AdminAccountFilter = "all" | "enabled" | "disabled"
 export type AdminHealthFilter = "all" | "healthy" | "risk"
-export type AdminCredentialFilter = "all" | CredentialState
+export type AdminCredentialFilter =
+  | "all"
+  | "unbound"
+  | "healthy"
+  | "pool_unjoined"
+  | "expired"
 
 export interface AdminUserListQuery {
   page: number

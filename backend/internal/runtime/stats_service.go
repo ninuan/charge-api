@@ -212,36 +212,8 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 		if summary.User.Role != model.RoleUser {
 			continue
 		}
-		if summary.Quota != nil && summary.Quota.PersonalCookieStatus == "expired" {
-			exceptions = append(exceptions, model.SystemException{
-				ID:       "credential-" + summary.User.ID,
-				UserID:   summary.User.ID,
-				Username: summary.User.Username,
-				Type:     "credential",
-				Level:    "critical",
-				Message:  "个人 Cookie 已失效，需用户更新",
-				Time:     summary.SnapshotUpdatedAt,
-			})
-		} else if len(summary.DeviceIDs) > 0 && (summary.Credential.State == model.CredentialExpired || summary.Credential.State == model.CredentialSyncFailed) {
-			exceptions = append(exceptions, model.SystemException{
-				ID:       "credential-" + summary.User.ID,
-				UserID:   summary.User.ID,
-				Username: summary.User.Username,
-				Type:     "credential",
-				Level:    credentialIssueLevel(summary.Credential.State),
-				Message:  credentialIssueMessage(summary.Credential.State),
-				Time:     summary.SnapshotUpdatedAt,
-			})
-		}
-		if hasActiveAuthFailure(summary.Stats) {
-			at := *summary.Stats.LastAuthFailureAt
-			exceptions = append(exceptions, model.SystemException{ID: "auth-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "cookie_expired", Level: "critical", Message: "远端鉴权失败，Cookie 可能已失效", Time: at})
-		}
 		if summary.LastRefresh.FailedDevices > 0 {
 			exceptions = append(exceptions, model.SystemException{ID: "refresh-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "refresh", Level: "warning", Message: fmt.Sprintf("%d 台设备刷新失败", summary.LastRefresh.FailedDevices), Time: issueTime(summary)})
-		}
-		if summary.LastRefresh.LastRemoteAt != nil && now.Sub(*summary.LastRefresh.LastRemoteAt) > 24*time.Hour {
-			exceptions = append(exceptions, model.SystemException{ID: "stale-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "stale", Level: "warning", Message: "设备数据已超过 24 小时未更新", Time: *summary.LastRefresh.LastRemoteAt})
 		}
 		if summary.Dashboard.OfflinePorts > 0 {
 			exceptions = append(exceptions, model.SystemException{ID: "offline-" + summary.User.ID, UserID: summary.User.ID, Username: summary.User.Username, Type: "offline", Level: "warning", Message: fmt.Sprintf("%d 个充电口处于离线状态", summary.Dashboard.OfflinePorts), Time: summary.SnapshotUpdatedAt})
@@ -261,6 +233,25 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 				Time:     diagnostic.At,
 			})
 		}
+	}
+	if poolAvail := m.PublicPoolAvailableCount(); poolAvail == 0 {
+		exceptions = append(exceptions, model.SystemException{
+			ID:       "operations-public-pool",
+			Username: "系统",
+			Type:     "public_pool",
+			Level:    "critical",
+			Message:  "公共 Cookie 池暂无可用凭据，请尽快补充以免影响免费用户刷新",
+			Time:     now.Truncate(24 * time.Hour),
+		})
+	} else if poolAvail == 1 {
+		exceptions = append(exceptions, model.SystemException{
+			ID:       "operations-public-pool",
+			Username: "系统",
+			Type:     "public_pool",
+			Level:    "warning",
+			Message:  "公共 Cookie 池仅剩 1 个可用凭据，建议补充备用凭据",
+			Time:     now.Truncate(24 * time.Hour),
+		})
 	}
 	operations, operationsErr := m.OperationsStatus()
 	if operationsErr != nil {
@@ -368,31 +359,10 @@ func isActionableDiagnostic(diagnostic model.RecoveryDiagnostic) bool {
 	switch diagnostic.Code {
 	case "pile_identifier_required", "pile_id_invalid", "pile_number_invalid", "pile_fields_invalid", "pile_port_count_invalid",
 		"add_pile_failed", "pile_update_failed", "pile_delete_failed", "refresh_failed", "cookie_required", "cookie_too_large",
-		"cookie_update_failed", "qr_create_failed", "qr_poll_failed", "qr_confirm_failed", "qr_session_invalid",
-		"scan_service_unavailable", "binding_save_failed", "credential_sync_failed", "device_id_invalid", "auth_rate_limited",
-		"recovery_unavailable", "binding_missing", "yyb_get_code_failed", "yyb_account_refresh_failed", "yyb_account_refresh_expired", "yyb_account_refresh_unknown", "yyb_get_code_retry_failed",
-		"mocele_autologin_missing_info", "mocele_autologin_missing_wxopenid", "mocele_autologin_failed", "new_cookie_validation_failed", "recovery_failed":
+		"cookie_update_failed", "device_id_invalid", "auth_rate_limited":
 		return true
 	default:
 		return false
-	}
-}
-
-func credentialIssueLevel(state model.CredentialState) string {
-	if state == model.CredentialExpired {
-		return "critical"
-	}
-	return "warning"
-}
-
-func credentialIssueMessage(state model.CredentialState) string {
-	switch state {
-	case model.CredentialExpired:
-		return "扫码登录绑定已失效"
-	case model.CredentialSyncFailed:
-		return "扫码登录凭据同步失败"
-	default:
-		return "尚未完成扫码登录绑定"
 	}
 }
 
@@ -401,16 +371,6 @@ func issueTime(summary model.AdminUserSummary) time.Time {
 		return *summary.LastRefresh.LastRemoteAt
 	}
 	return summary.SnapshotUpdatedAt
-}
-
-func hasActiveAuthFailure(stats model.TrafficStats) bool {
-	if stats.AuthFailures == 0 || stats.LastAuthFailureAt == nil {
-		return false
-	}
-	if stats.LastRemoteOKAt == nil {
-		return true
-	}
-	return stats.LastAuthFailureAt.After(*stats.LastRemoteOKAt)
 }
 
 func adminOverview(users []model.AdminUserSummary, hourly []model.MetricPoint, issueCount int) model.AdminOverview {

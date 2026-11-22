@@ -50,39 +50,30 @@ describe("AdminUserDiagnostics", () => {
   })
 })
 
-it.each([
-  ["yyb_account_refresh_expired", "扫码服务未能恢复登录状态，请重新扫码"],
-  ["yyb_account_refresh_unknown", "扫码服务缺少账号恢复信息，请重新扫码"],
-])(
-  "shows the account refresh reason between initial and final failures: %s",
-  async (code, message) => {
-    const user = userEvent.setup()
-    render(
-      <AdminUserDiagnostics
-        diagnostics={[
-          {
-            operation: "credential_recovery",
-            code: "yyb_get_code_failed",
-            message: "临时凭据获取失败",
-            at: "2026-09-14T14:16:44Z",
-          },
-          {
-            operation: "credential_recovery",
-            code,
-            message,
-            at: "2026-09-14T14:16:45Z",
-          },
-          {
-            operation: "sync_cookie",
-            code: "credential_sync_failed",
-            message: "同步失败",
-            at: "2026-09-14T14:16:46Z",
-          },
-        ]}
-      />
-    )
-    await user.click(screen.getByRole("button", { name: "查看诊断（3）" }))
-    expect(screen.getByText(message)).toBeVisible()
-    expect(screen.getAllByRole("listitem")).toHaveLength(3)
-  }
-)
+it("filters out retired YYB scan and sync failure diagnostics", () => {
+  const { container } = render(
+    <AdminUserDiagnostics
+      diagnostics={[
+        {
+          operation: "credential_recovery",
+          code: "yyb_get_code_failed",
+          message: "临时凭据获取失败",
+          at: "2026-09-14T14:16:44Z",
+        },
+        {
+          operation: "credential_recovery",
+          code: "yyb_account_refresh_expired",
+          message: "扫码服务未能恢复登录状态，请重新扫码",
+          at: "2026-09-14T14:16:45Z",
+        },
+        {
+          operation: "sync_cookie",
+          code: "credential_sync_failed",
+          message: "同步失败",
+          at: "2026-09-14T14:16:46Z",
+        },
+      ]}
+    />
+  )
+  expect(container).toBeEmptyDOMElement()
+})

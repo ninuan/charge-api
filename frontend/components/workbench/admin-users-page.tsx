@@ -29,10 +29,10 @@ import { useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
 import { formatSnapshotTime, updatePageQuery } from "@/lib/workbench"
 import type {
+  AdminCredentialFilter,
   AdminUserDetail,
   AdminUserListQuery,
   AdminUserPage,
-  CredentialState,
   UserRole,
 } from "@/lib/types"
 import {
@@ -44,13 +44,12 @@ import {
   WorkbenchLoading,
 } from "./surfaces"
 
-const credentialLabels: Record<CredentialState, string> = {
-  unbound: "尚未绑定",
-  waiting_device: "等待添加设备",
-  healthy: "凭据正常",
-  sync_failed: "同步失败",
-  expired: "登录已失效",
-}
+const validCredentialFilters = new Set<AdminCredentialFilter>([
+  "unbound",
+  "healthy",
+  "pool_unjoined",
+  "expired",
+])
 function userQuery(params: URLSearchParams): AdminUserListQuery {
   const credential = params.get("credential")
   return {
@@ -64,8 +63,9 @@ function userQuery(params: URLSearchParams): AdminUserListQuery {
           ? "disabled"
           : "all",
     credential:
-      credential && Object.hasOwn(credentialLabels, credential)
-        ? (credential as CredentialState)
+      credential &&
+      validCredentialFilters.has(credential as AdminCredentialFilter)
+        ? (credential as AdminCredentialFilter)
         : "all",
     health:
       params.get("health") === "risk"

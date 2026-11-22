@@ -29,7 +29,9 @@ describe("AdminUserFilters", () => {
     await user.click(screen.getByRole("combobox", { name: "账户状态" }))
     await user.click(await screen.findByRole("option", { name: "已启用" }))
     await user.click(screen.getByRole("combobox", { name: "凭据状态" }))
-    await user.click(await screen.findByRole("option", { name: "凭据已失效" }))
+    await user.click(
+      await screen.findByRole("option", { name: "个人 Cookie 已失效" })
+    )
     await user.click(screen.getByRole("combobox", { name: "设备健康" }))
     await user.click(await screen.findByRole("option", { name: "存在风险" }))
     await user.click(screen.getByRole("button", { name: "应用筛选" }))

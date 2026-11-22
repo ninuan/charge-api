@@ -25,11 +25,10 @@ const accountOptions = [
 
 const credentialOptions = [
   { value: "all", label: "全部凭据" },
-  { value: "unbound", label: "未配置个人 Cookie" },
-  { value: "waiting_device", label: "等待添加设备" },
-  { value: "healthy", label: "凭据正常" },
-  { value: "sync_failed", label: "同步失败" },
-  { value: "expired", label: "凭据已失效" },
+  { value: "unbound", label: "公共池免费（未传 Cookie）" },
+  { value: "healthy", label: "互助 / 个人不限次" },
+  { value: "pool_unjoined", label: "已传 Cookie · 未入互助池" },
+  { value: "expired", label: "个人 Cookie 已失效" },
 ]
 
 const healthOptions = [
@@ -95,7 +94,7 @@ export function AdminUserFilters({
         </Button>
       </div>
       <form
-        className="mt-3 grid gap-3 md:grid-cols-[minmax(12rem,1fr)_10rem_11rem_9rem_auto]"
+        className="mt-3 grid gap-3 md:grid-cols-[minmax(12rem,1fr)_9.5rem_13.5rem_9rem_auto]"
         onSubmit={apply}
       >
         <Field>

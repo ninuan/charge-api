@@ -719,6 +719,7 @@ func TestAdminCredentialStatesAndIssues(t *testing.T) {
 		secretOpenID = "secret-openid-123"
 		secretRef    = "secret-ref-123"
 	)
+	expiredAt := time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name      string
 		state     persistence.UserState
@@ -732,11 +733,11 @@ func TestAdminCredentialStatesAndIssues(t *testing.T) {
 			wantIssue: false,
 		},
 		{
-			name: "bound without device",
+			name: "retired yyb binding without personal cookie is unbound",
 			state: persistence.UserState{
 				YYBBinding: &model.YYBBinding{Ref: secretRef, OpenID: secretOpenID, Status: "alive"},
 			},
-			wantState: model.CredentialWaitingDevice,
+			wantState: model.CredentialUnbound,
 			wantIssue: false,
 		},
 		{
@@ -757,26 +758,28 @@ func TestAdminCredentialStatesAndIssues(t *testing.T) {
 			wantIssue: false,
 		},
 		{
-			name: "binding sync failed",
+			name: "retired yyb binding sync error does not raise admin incident",
 			state: persistence.UserState{
 				DeviceIDs: []string{"2601201412385560001"},
 				YYBBinding: &model.YYBBinding{
 					Ref: secretRef, OpenID: secretOpenID, Status: "alive", LastError: "secret-upstream-error",
 				},
 			},
-			wantState: model.CredentialSyncFailed,
-			wantIssue: true,
+			wantState: model.CredentialUnbound,
+			wantIssue: false,
 		},
 		{
-			name: "expired binding",
+			name: "expired personal cookie marked expired without flooding admin incidents",
 			state: persistence.UserState{
 				DeviceIDs: []string{"2601201412385560001"},
-				YYBBinding: &model.YYBBinding{
-					Ref: secretRef, OpenID: secretOpenID, Status: "expired",
+				Cookie:    secretCookie,
+				Stats: model.TrafficStats{
+					AuthFailures:      1,
+					LastAuthFailureAt: &expiredAt,
 				},
 			},
 			wantState: model.CredentialExpired,
-			wantIssue: true,
+			wantIssue: false,
 		},
 	}
 
@@ -816,6 +819,109 @@ func TestAdminCredentialStatesAndIssues(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAdminStatsAutoResolvesLegacyAuthIncidentsAndTracksPublicPool(t *testing.T) {
+	repo := testRepository(t)
+	now := time.Now().UTC()
+	if err := repo.UpsertIncident(model.SystemException{
+		ID: "auth-user-1", UserID: "user-1", Username: "ABC",
+		Type: "cookie_expired", Level: "critical",
+		Message: "远端鉴权失败，Cookie 可能已失效", Time: now.Add(-24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("seed legacy auth incident: %v", err)
+	}
+	user := model.User{
+		ID: "user-1", Username: "ABC", Role: model.RoleUser, Enabled: true,
+		CreatedAt: now.Add(-48 * time.Hour),
+	}
+	manager := &Manager{
+		repository: repo,
+		users:      map[string]model.User{user.ID: user},
+		runtimes: map[string]*UserRuntime{
+			user.ID: newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{
+				Cookie: "wxopenid=legacy; info=old",
+				Stats:  model.TrafficStats{AuthFailures: 3, LastAuthFailureAt: &now},
+			}, 30*time.Second),
+		},
+	}
+
+	stats, err := manager.AdminStatsResult()
+	if err != nil {
+		t.Fatalf("AdminStatsResult: %v", err)
+	}
+	foundPool := false
+	for _, issue := range stats.Exceptions {
+		if issue.ID == "auth-user-1" {
+			t.Fatalf("legacy auth incident should be auto-resolved, still active: %+v", issue)
+		}
+		if issue.ID == "operations-public-pool" && issue.Level == "critical" {
+			foundPool = true
+		}
+	}
+	if !foundPool {
+		t.Fatalf("expected operations-public-pool critical incident when pool is empty: %+v", stats.Exceptions)
+	}
+}
+
+func TestListUsersPageFiltersByNewCredentialModes(t *testing.T) {
+	repo := testRepository(t)
+	now := time.Now().UTC()
+	manager := &Manager{
+		repository: repo,
+		settings: model.RegistrationSettings{
+			DefaultDeviceLimit:           defaultDeviceLimit,
+			DefaultRefreshEnabled:        true,
+			FreeDailyRefreshQuota:        3,
+			SharedPileCacheTTLSeconds:    60,
+			RequirePoolShareForUnlimited: true,
+		},
+		users: map[string]model.User{
+			"admin-1":   {ID: "admin-1", Username: "admin", Role: model.RoleAdmin, Enabled: true, CreatedAt: now},
+			"free-1":    {ID: "free-1", Username: "free-user", Role: model.RoleUser, Enabled: true, CreatedAt: now},
+			"unjoin-1":  {ID: "unjoin-1", Username: "unjoined-user", Role: model.RoleUser, Enabled: true, CreatedAt: now},
+			"pool-1":    {ID: "pool-1", Username: "pool-user", Role: model.RoleUser, Enabled: true, CreatedAt: now},
+			"expired-1": {ID: "expired-1", Username: "expired-user", Role: model.RoleUser, Enabled: true, CreatedAt: now},
+		},
+		runtimes: map[string]*UserRuntime{
+			"admin-1":  newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{}, 30*time.Second),
+			"free-1":   newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{}, 30*time.Second),
+			"unjoin-1": newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{Cookie: "wxopenid=unjoined; info=ok"}, 30*time.Second),
+			"pool-1":   newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{Cookie: "wxopenid=pooled; info=ok"}, 30*time.Second),
+			"expired-1": newUserRuntime(parser.DefaultCaptureRequests(), persistence.UserState{
+				Cookie: "wxopenid=expired; info=bad",
+				Stats:  model.TrafficStats{AuthFailures: 1, LastAuthFailureAt: &now},
+			}, 30*time.Second),
+		},
+	}
+	if _, err := repo.UpsertUserPublicPoolCookie("pool-1", "用户互助 · pool-user", "wxopenid=pooled; info=ok"); err != nil {
+		t.Fatalf("UpsertUserPublicPoolCookie: %v", err)
+	}
+
+	assertMatch := func(filter string, want []string) {
+		t.Helper()
+		page := manager.ListUsersPage(model.AdminUserListQuery{
+			Page: 1, PageSize: 20, Account: "all", Credential: filter, Health: "all",
+		})
+		got := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			got = append(got, item.User.Username)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("filter %q got %v, want %v", filter, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("filter %q got %v, want %v", filter, got, want)
+			}
+		}
+	}
+
+	assertMatch("all", []string{"admin", "expired-user", "free-user", "pool-user", "unjoined-user"})
+	assertMatch("unbound", []string{"free-user"})
+	assertMatch("healthy", []string{"pool-user"})
+	assertMatch("pool_unjoined", []string{"unjoined-user"})
+	assertMatch("expired", []string{"expired-user"})
 }
 
 func TestAdminIssuesUseActualFailureTime(t *testing.T) {
