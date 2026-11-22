@@ -69,6 +69,8 @@ const publicErrorMessages: Record<string, string> = {
   COOKIE_TEST_FAILED: "测试个人 Cookie 失败，请检查网络或先添加至少 1 台充电桩后重试。",
   JOIN_POOL_FAILED: "加入互助公共池失败，请确认当前个人 Cookie 有效后重试。",
   PUBLIC_POOL_INVALID: "公共 Cookie 备注名或内容无效，请检查后重试。",
+  PUBLIC_POOL_COOKIE_DUPLICATE:
+    "该 Cookie 已在公共池中，请勿与其他账户共用同一个凭据。",
   PUBLIC_POOL_NOT_FOUND: "未找到对应的公共 Cookie。",
   PUBLIC_POOL_TEST_FAILED: "测试公共 Cookie 失败，请检查网络或确认公共桩库中至少有 1 台充电桩。",
   SHARED_PILE_NOT_FOUND: "未找到对应的公共充电桩。",

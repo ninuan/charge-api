@@ -64,3 +64,21 @@ func TestExtractCookie(t *testing.T) {
 		})
 	}
 }
+
+func TestCookieIdentity(t *testing.T) {
+	id1 := CookieIdentity("deviceid=123; wxopenid=oABC; info=tok1")
+	id2 := CookieIdentity("info=tok2; WXOpenID=oABC; extra=noise; deviceid=999")
+	id3 := CookieIdentity("wxopenid=oOTHER; info=tok1")
+	if id1 != "wxopenid:oABC" || id1 != id2 {
+		t.Fatalf("expected identical wxopenid identity, got id1=%q id2=%q", id1, id2)
+	}
+	if id1 == id3 {
+		t.Fatalf("different wxopenid should not match: %q == %q", id1, id3)
+	}
+
+	fb1 := CookieIdentity("b=2; a=1")
+	fb2 := CookieIdentity("A=1; b=2")
+	if fb1 != "cookie:a=1;b=2" || fb1 != fb2 {
+		t.Fatalf("expected canonical sorted fallback, got fb1=%q fb2=%q", fb1, fb2)
+	}
+}

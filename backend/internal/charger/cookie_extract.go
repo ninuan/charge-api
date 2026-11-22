@@ -3,6 +3,7 @@ package charger
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -60,4 +61,47 @@ func ExtractCookie(raw string) (string, error) {
 		return "", fmt.Errorf("Cookie 格式无效，需要包含有效的键值对（如 wxopenid=...; info=...）")
 	}
 	return extracted, nil
+}
+
+// CookieIdentity returns a canonical upstream identity string for deduplication.
+// When wxopenid is present it is used directly so reordering fields, adding noise
+// keys, or refreshing info for the same WeChat account still maps to one identity.
+func CookieIdentity(cookie string) string {
+	trimmed := strings.TrimSpace(cookie)
+	if trimmed == "" {
+		return ""
+	}
+	pairs := make(map[string]string)
+	for _, part := range strings.Split(trimmed, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		eq := strings.IndexByte(part, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(part[:eq]))
+		val := strings.TrimSpace(part[eq+1:])
+		if key == "" || val == "" {
+			continue
+		}
+		pairs[key] = val
+	}
+	if wxopenid := pairs["wxopenid"]; wxopenid != "" {
+		return "wxopenid:" + wxopenid
+	}
+	if len(pairs) == 0 {
+		return "raw:" + trimmed
+	}
+	keys := make([]string, 0, len(pairs))
+	for k := range pairs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+pairs[k])
+	}
+	return "cookie:" + strings.Join(parts, ";")
 }

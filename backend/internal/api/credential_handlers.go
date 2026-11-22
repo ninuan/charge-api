@@ -51,6 +51,11 @@ func (s *Server) handleCookieUpdate(w http.ResponseWriter, r *http.Request) {
 
 	snapshot, err := s.manager.UpdateCookieWithPoolOption(user.ID, req.Cookie, req.JoinPublicPool)
 	if err != nil {
+		if errors.Is(err, appruntime.ErrPublicPoolCookieDuplicate) {
+			s.recordDashboardDiagnostic(user, "update_cookie", "cookie_duplicate", "", http.StatusConflict)
+			writeCodedError(w, http.StatusConflict, "PUBLIC_POOL_COOKIE_DUPLICATE", "该 Cookie 已在互助公共池中，请勿与其他账户共用同一个凭据。")
+			return
+		}
 		s.recordDashboardDiagnostic(user, "update_cookie", "cookie_update_failed", "", appruntime.DiagnosticStatusCode(err))
 		writePublicOperationError(w, http.StatusBadRequest, "update cookie", "登录信息更新失败，请检查内容后重试。", err)
 		return
@@ -100,6 +105,10 @@ func (s *Server) handleCookieJoinPool(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		snapshot, err := s.manager.JoinPublicPoolWithExistingCookie(user.ID)
 		if err != nil {
+			if errors.Is(err, appruntime.ErrPublicPoolCookieDuplicate) {
+				writeCodedError(w, http.StatusConflict, "PUBLIC_POOL_COOKIE_DUPLICATE", "该 Cookie 已在互助公共池中，请勿与其他账户共用同一个凭据。")
+				return
+			}
 			logStructuredError("join_public_pool", user.ID, err)
 			writeCodedError(w, http.StatusBadRequest, "JOIN_POOL_FAILED", "加入互助公共池失败，请确认当前个人 Cookie 有效后重试。")
 			return

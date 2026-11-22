@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -124,5 +125,40 @@ func TestPublicPoolGuardsMetadataAndSharedPileMetaLock(t *testing.T) {
 	}
 	if shared.LastSnapshot == nil || shared.LastSnapshot.Name != "管理员规范名称" || shared.LastSnapshot.Address != "北门车棚东侧" {
 		t.Fatalf("admin-locked snapshot metadata overwritten: %+v", shared.LastSnapshot)
+	}
+}
+
+func TestPublicPoolCookieDeduplicatesByWXOpenID(t *testing.T) {
+	store := openPoolTestStore(t)
+
+	// User A joins pool with wxopenid=same-wx.
+	if _, err := store.UpsertUserPublicPoolCookie("u-a", "用户互助 · a", "deviceid=1; wxopenid=same-wx; info=v1"); err != nil {
+		t.Fatalf("u-a upsert: %v", err)
+	}
+
+	// User B tries to join with the SAME wxopenid (different order, refreshed info, extra noise key) -> rejected!
+	if _, err := store.UpsertUserPublicPoolCookie("u-b", "用户互助 · b", "foo=bar; info=v2; wxopenid=same-wx; deviceid=999"); !errors.Is(err, ErrPublicPoolCookieDuplicate) {
+		t.Fatalf("u-b duplicate upsert err = %v, want ErrPublicPoolCookieDuplicate", err)
+	}
+
+	// Admin tries to add the SAME wxopenid -> rejected!
+	if _, err := store.CreatePublicPoolCookie(PublicPoolCookieRecord{
+		PublicPoolCookie: model.PublicPoolCookie{ID: "pool_dup", Label: "重复号", Enabled: true, Status: "healthy"},
+		Cookie:           "wxopenid=same-wx; info=v3",
+	}); !errors.Is(err, ErrPublicPoolCookieDuplicate) {
+		t.Fatalf("admin duplicate create err = %v, want ErrPublicPoolCookieDuplicate", err)
+	}
+
+	// User A updates their OWN cookie with a refreshed info (same wxopenid) -> allowed!
+	if _, err := store.UpsertUserPublicPoolCookie("u-a", "用户互助 · a", "wxopenid=same-wx; info=v4-refreshed"); err != nil {
+		t.Fatalf("u-a self update should succeed: %v", err)
+	}
+
+	// Once User A leaves the pool, User B can join with that wxopenid.
+	if err := store.DeleteUserPublicPoolCookie("u-a"); err != nil {
+		t.Fatalf("u-a delete: %v", err)
+	}
+	if _, err := store.UpsertUserPublicPoolCookie("u-b", "用户互助 · b", "wxopenid=same-wx; info=v5"); err != nil {
+		t.Fatalf("u-b upsert after u-a left should succeed: %v", err)
 	}
 }

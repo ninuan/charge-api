@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charge-dashboard/internal/model"
+	appruntime "charge-dashboard/internal/runtime"
 )
 
 func (s *Server) handleSharedPiles(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +74,10 @@ func (s *Server) handleAdminPublicPool(w http.ResponseWriter, r *http.Request) {
 		item, err := s.manager.CreatePublicPoolCookie(req)
 		if err != nil {
 			s.recordAdminAuditMessage(admin, "public_pool.create", "public_pool", "pool", strings.TrimSpace(req.Label), "failure", err.Error())
+			if errors.Is(err, appruntime.ErrPublicPoolCookieDuplicate) {
+				writeCodedError(w, http.StatusConflict, "PUBLIC_POOL_COOKIE_DUPLICATE", "公共池中已存在相同的上游账号凭据，请勿重复添加。")
+				return
+			}
 			writeCodedError(w, http.StatusBadRequest, "PUBLIC_POOL_INVALID", err.Error())
 			return
 		}
@@ -131,6 +136,10 @@ func (s *Server) handleAdminPublicPoolActions(w http.ResponseWriter, r *http.Req
 				return
 			}
 			s.recordAdminAuditMessage(admin, "public_pool.update", "public_pool", id, id, "failure", err.Error())
+			if errors.Is(err, appruntime.ErrPublicPoolCookieDuplicate) {
+				writeCodedError(w, http.StatusConflict, "PUBLIC_POOL_COOKIE_DUPLICATE", "公共池中已存在相同的上游账号凭据，请勿重复添加。")
+				return
+			}
 			writeCodedError(w, http.StatusBadRequest, "PUBLIC_POOL_INVALID", err.Error())
 			return
 		}

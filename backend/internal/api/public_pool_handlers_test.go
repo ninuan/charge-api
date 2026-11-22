@@ -78,6 +78,59 @@ func TestPublicPoolAndCookieTestRegressions(t *testing.T) {
 		t.Fatalf("PublicPoolAvailableCount = %d, want 1", manager.PublicPoolAvailableCount())
 	}
 
+	// 3a. A second user or admin cannot join/add the same wxopenid (even with different info/order/noise keys).
+	user2, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "freeuser_dup",
+		Password: "FreeUserPass123!",
+		Role:     model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("create user2: %v", err)
+	}
+	user2Session, err := sessions.Create(user2.ID)
+	if err != nil {
+		t.Fatalf("create user2 session: %v", err)
+	}
+	dupCookieBody, _ := json.Marshal(map[string]any{
+		"cookie":         "noise=1; info=other; wxopenid=free-user-pool",
+		"joinPublicPool": true,
+	})
+	dupReq := httptest.NewRequest(http.MethodPost, "/api/session/cookie", bytes.NewReader(dupCookieBody))
+	dupReq.Header.Set("Content-Type", "application/json")
+	dupReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: user2Session.Token})
+	dupRec := httptest.NewRecorder()
+	mux.ServeHTTP(dupRec, dupReq)
+	if dupRec.Code != http.StatusConflict || !strings.Contains(dupRec.Body.String(), "PUBLIC_POOL_COOKIE_DUPLICATE") {
+		t.Fatalf("duplicate user join pool = %d %s, want 409 PUBLIC_POOL_COOKIE_DUPLICATE", dupRec.Code, dupRec.Body.String())
+	}
+
+	adminDupBody, _ := json.Marshal(map[string]any{
+		"label":  "重复公共号",
+		"cookie": "wxopenid=free-user-pool; info=admin-copy",
+	})
+	adminDupReq := httptest.NewRequest(http.MethodPost, "/api/admin/public-pool", bytes.NewReader(adminDupBody))
+	adminDupReq.Header.Set("Content-Type", "application/json")
+	adminDupReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminSession.Token})
+	adminDupRec := httptest.NewRecorder()
+	mux.ServeHTTP(adminDupRec, adminDupReq)
+	if adminDupRec.Code != http.StatusConflict || !strings.Contains(adminDupRec.Body.String(), "PUBLIC_POOL_COOKIE_DUPLICATE") {
+		t.Fatalf("duplicate admin create pool cookie = %d %s, want 409 PUBLIC_POOL_COOKIE_DUPLICATE", adminDupRec.Code, adminDupRec.Body.String())
+	}
+
+	// Same user refreshing their own cookie (same wxopenid, new info) succeeds.
+	selfRefreshBody, _ := json.Marshal(map[string]any{
+		"cookie":         "wxopenid=free-user-pool; info=refreshed",
+		"joinPublicPool": true,
+	})
+	selfRefreshReq := httptest.NewRequest(http.MethodPost, "/api/session/cookie", bytes.NewReader(selfRefreshBody))
+	selfRefreshReq.Header.Set("Content-Type", "application/json")
+	selfRefreshReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: userSession.Token})
+	selfRefreshRec := httptest.NewRecorder()
+	mux.ServeHTTP(selfRefreshRec, selfRefreshReq)
+	if selfRefreshRec.Code != http.StatusOK {
+		t.Fatalf("self refresh same wxopenid = %d %s, want 200", selfRefreshRec.Code, selfRefreshRec.Body.String())
+	}
+
 	// 3b. Admin cannot overwrite a user mutual-aid pool cookie's secret, but can rename its label.
 	replaceSecretBody, _ := json.Marshal(map[string]any{
 		"label":  "用户互助 · freeuser-renamed",

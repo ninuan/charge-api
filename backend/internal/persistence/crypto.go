@@ -3,8 +3,11 @@ package persistence
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -13,7 +16,8 @@ import (
 const CookieKeySize = 32
 
 type secretCipher struct {
-	aead cipher.AEAD
+	aead  cipher.AEAD
+	fpKey []byte
 }
 
 func DecodeCookieKey(encoded string) ([]byte, error) {
@@ -49,7 +53,19 @@ func newCookieCipher(key []byte) (*secretCipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create cookie GCM: %w", err)
 	}
-	return &secretCipher{aead: aead}, nil
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte("charge-dashboard:cookie-fingerprint:v1"))
+	fpKey := mac.Sum(nil)
+	return &secretCipher{aead: aead, fpKey: fpKey}, nil
+}
+
+func (c *secretCipher) fingerprint(identity string) string {
+	if strings.TrimSpace(identity) == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, c.fpKey)
+	mac.Write([]byte(identity))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (c *secretCipher) encryptWithAAD(aad string, plaintext []byte) ([]byte, []byte, error) {

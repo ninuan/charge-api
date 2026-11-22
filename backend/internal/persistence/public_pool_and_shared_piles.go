@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"charge-dashboard/internal/charger"
 	"charge-dashboard/internal/model"
 )
+
+var ErrPublicPoolCookieDuplicate = errors.New("public pool cookie already exists")
 
 type PublicPoolCookieRecord struct {
 	model.PublicPoolCookie
@@ -80,10 +83,117 @@ func (s *Store) ensurePublicPoolAndSharedPiles() error {
 	if err := s.ensureColumn("public_cookie_pool", "owner_user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("public_cookie_pool", "cookie_fingerprint", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.backfillPublicPoolFingerprints(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS public_cookie_pool_fingerprint_uidx
+		 ON public_cookie_pool(cookie_fingerprint)
+		 WHERE cookie_fingerprint <> ''`,
+	); err != nil {
+		return fmt.Errorf("create public pool fingerprint unique index: %w", err)
+	}
 	if err := s.ensureColumn("shared_piles", "meta_locked", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	return s.backfillSharedPilesOnce()
+}
+
+func (s *Store) cookieFingerprint(cookie string) string {
+	identity := charger.CookieIdentity(cookie)
+	if identity == "" {
+		return ""
+	}
+	return s.cipher.fingerprint(identity)
+}
+
+func (s *Store) backfillPublicPoolFingerprints() error {
+	rows, err := s.db.Query(
+		`SELECT id, cookie_nonce, cookie_ciphertext, COALESCE(cookie_fingerprint, '')
+		 FROM public_cookie_pool
+		 ORDER BY created_at ASC, id ASC`,
+	)
+	if err != nil {
+		return fmt.Errorf("query public pool for fingerprint backfill: %w", err)
+	}
+	type poolRow struct {
+		id         string
+		nonce      []byte
+		ciphertext []byte
+		fp         string
+	}
+	var all []poolRow
+	for rows.Next() {
+		var r poolRow
+		if scanErr := rows.Scan(&r.id, &r.nonce, &r.ciphertext, &r.fp); scanErr != nil {
+			_ = rows.Close()
+			return scanErr
+		}
+		all = append(all, r)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+
+	seen := make(map[string]bool, len(all))
+	for _, r := range all {
+		if r.fp != "" {
+			seen[r.fp] = true
+		}
+	}
+	for _, r := range all {
+		if r.fp != "" {
+			continue
+		}
+		plaintext, decErr := s.cipher.decryptWithAAD(publicPoolAAD(r.id), r.nonce, r.ciphertext)
+		if decErr != nil {
+			continue
+		}
+		fp := s.cookieFingerprint(string(plaintext))
+		if fp == "" || seen[fp] {
+			continue
+		}
+		seen[fp] = true
+		if _, err := s.db.Exec(
+			`UPDATE public_cookie_pool SET cookie_fingerprint = ? WHERE id = ?`,
+			fp, r.id,
+		); err != nil {
+			return fmt.Errorf("backfill public pool fingerprint %s: %w", r.id, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) HasPublicPoolCookieDuplicate(excludeID, cookie string) (bool, error) {
+	fp := s.cookieFingerprint(cookie)
+	if fp == "" {
+		return false, nil
+	}
+	var exists int
+	err := s.db.QueryRow(
+		`SELECT 1 FROM public_cookie_pool WHERE cookie_fingerprint = ? AND id <> ? LIMIT 1`,
+		fp, strings.TrimSpace(excludeID),
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func isPublicPoolFingerprintConstraintErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") && strings.Contains(msg, "cookie_fingerprint")
 }
 
 func (s *Store) backfillSharedPilesOnce() error {
@@ -171,6 +281,12 @@ func (s *Store) CreatePublicPoolCookie(entry PublicPoolCookieRecord) (model.Publ
 	if entry.Status == "" {
 		entry.Status = "healthy"
 	}
+	fp := s.cookieFingerprint(entry.Cookie)
+	if dup, dupErr := s.HasPublicPoolCookieDuplicate(entry.ID, entry.Cookie); dupErr != nil {
+		return model.PublicPoolCookie{}, fmt.Errorf("check duplicate public pool cookie: %w", dupErr)
+	} else if dup {
+		return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+	}
 	nonce, ciphertext, err := s.cipher.encryptWithAAD(publicPoolAAD(entry.ID), []byte(entry.Cookie))
 	if err != nil {
 		return model.PublicPoolCookie{}, fmt.Errorf("encrypt public pool cookie: %w", err)
@@ -181,10 +297,11 @@ func (s *Store) CreatePublicPoolCookie(entry PublicPoolCookieRecord) (model.Publ
 	}
 	_, err = s.db.Exec(
 		`INSERT INTO public_cookie_pool
-		 (id, label, cookie_nonce, cookie_ciphertext, enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, NULL, '', ?, ?)`,
+		 (id, label, cookie_fingerprint, cookie_nonce, cookie_ciphertext, enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, '', ?, ?)`,
 		entry.ID,
 		strings.TrimSpace(entry.Label),
+		fp,
 		nonce,
 		ciphertext,
 		enabledInt,
@@ -193,6 +310,9 @@ func (s *Store) CreatePublicPoolCookie(entry PublicPoolCookieRecord) (model.Publ
 		entry.UpdatedAt.Unix(),
 	)
 	if err != nil {
+		if isPublicPoolFingerprintConstraintErr(err) {
+			return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+		}
 		return model.PublicPoolCookie{}, fmt.Errorf("insert public pool cookie: %w", err)
 	}
 	return entry.PublicPoolCookie, nil
@@ -326,7 +446,14 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 	}
 
 	if cookie != nil && strings.TrimSpace(*cookie) != "" {
-		nonce, ciphertext, encErr := s.cipher.encryptWithAAD(publicPoolAAD(id), []byte(strings.TrimSpace(*cookie)))
+		trimmedCookie := strings.TrimSpace(*cookie)
+		fp := s.cookieFingerprint(trimmedCookie)
+		if dup, dupErr := s.HasPublicPoolCookieDuplicate(id, trimmedCookie); dupErr != nil {
+			return model.PublicPoolCookie{}, fmt.Errorf("check duplicate public pool cookie: %w", dupErr)
+		} else if dup {
+			return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+		}
+		nonce, ciphertext, encErr := s.cipher.encryptWithAAD(publicPoolAAD(id), []byte(trimmedCookie))
 		if encErr != nil {
 			return model.PublicPoolCookie{}, fmt.Errorf("encrypt updated public pool cookie: %w", encErr)
 		}
@@ -335,10 +462,10 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 		existing.LastError = ""
 		_, err = s.db.Exec(
 			`UPDATE public_cookie_pool
-			 SET label = ?, cookie_nonce = ?, cookie_ciphertext = ?, enabled = ?, status = 'healthy',
+			 SET label = ?, cookie_fingerprint = ?, cookie_nonce = ?, cookie_ciphertext = ?, enabled = ?, status = 'healthy',
 			     consecutive_failures = 0, last_error = '', updated_at = ?
 			 WHERE id = ?`,
-			existing.Label, nonce, ciphertext, enabledInt, now.Unix(), id,
+			existing.Label, fp, nonce, ciphertext, enabledInt, now.Unix(), id,
 		)
 	} else {
 		_, err = s.db.Exec(
@@ -347,6 +474,9 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 		)
 	}
 	if err != nil {
+		if isPublicPoolFingerprintConstraintErr(err) {
+			return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+		}
 		return model.PublicPoolCookie{}, fmt.Errorf("update public pool cookie %s: %w", id, err)
 	}
 	return existing, nil
@@ -421,19 +551,28 @@ func (s *Store) GetPublicPoolCookie(id string) (*PublicPoolCookieRecord, error) 
 }
 
 func (s *Store) UpsertUserPublicPoolCookie(userID, label, cookie string) (model.PublicPoolCookie, error) {
-	id := "user_" + strings.TrimSpace(userID)
+	trimmedUserID := strings.TrimSpace(userID)
+	trimmedCookie := strings.TrimSpace(cookie)
+	id := "user_" + trimmedUserID
+	fp := s.cookieFingerprint(trimmedCookie)
+	if dup, dupErr := s.HasPublicPoolCookieDuplicate(id, trimmedCookie); dupErr != nil {
+		return model.PublicPoolCookie{}, fmt.Errorf("check duplicate user pool cookie: %w", dupErr)
+	} else if dup {
+		return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+	}
 	now := time.Now().UTC()
-	nonce, ciphertext, err := s.cipher.encryptWithAAD(publicPoolAAD(id), []byte(strings.TrimSpace(cookie)))
+	nonce, ciphertext, err := s.cipher.encryptWithAAD(publicPoolAAD(id), []byte(trimmedCookie))
 	if err != nil {
 		return model.PublicPoolCookie{}, fmt.Errorf("encrypt user pool cookie: %w", err)
 	}
 	_, err = s.db.Exec(
 		`INSERT INTO public_cookie_pool
-		 (id, label, owner_user_id, cookie_nonce, cookie_ciphertext, enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 1, 'healthy', 0, NULL, '', ?, ?)
+		 (id, label, owner_user_id, cookie_fingerprint, cookie_nonce, cookie_ciphertext, enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, 'healthy', 0, NULL, '', ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		     label = excluded.label,
 		     owner_user_id = excluded.owner_user_id,
+		     cookie_fingerprint = excluded.cookie_fingerprint,
 		     cookie_nonce = excluded.cookie_nonce,
 		     cookie_ciphertext = excluded.cookie_ciphertext,
 		     enabled = 1,
@@ -441,9 +580,12 @@ func (s *Store) UpsertUserPublicPoolCookie(userID, label, cookie string) (model.
 		     consecutive_failures = 0,
 		     last_error = '',
 		     updated_at = excluded.updated_at`,
-		id, strings.TrimSpace(label), strings.TrimSpace(userID), nonce, ciphertext, now.Unix(), now.Unix(),
+		id, strings.TrimSpace(label), trimmedUserID, fp, nonce, ciphertext, now.Unix(), now.Unix(),
 	)
 	if err != nil {
+		if isPublicPoolFingerprintConstraintErr(err) {
+			return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+		}
 		return model.PublicPoolCookie{}, fmt.Errorf("upsert user pool cookie: %w", err)
 	}
 	rec, err := s.GetPublicPoolCookie(id)

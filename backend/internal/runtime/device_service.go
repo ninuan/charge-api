@@ -301,16 +301,25 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 	}
 	m.invalidateBackgroundCredentialValidation(userID)
 	user, _ := m.User(userID)
-	syncPool := func() {
+	if joinPool {
+		if dup, dupErr := m.repository.HasPublicPoolCookieDuplicate("user_"+strings.TrimSpace(userID), cookie); dupErr != nil {
+			_ = runtime.client.UpdateCookie(previous)
+			return model.DashboardSnapshot{}, dupErr
+		} else if dup {
+			_ = runtime.client.UpdateCookie(previous)
+			return model.DashboardSnapshot{}, ErrPublicPoolCookieDuplicate
+		}
+	}
+	syncPool := func() error {
 		if joinPool {
 			label := "用户互助 · " + user.Username
 			if user.Username == "" {
 				label = "用户互助 · " + userID
 			}
-			_, _ = m.repository.UpsertUserPublicPoolCookie(userID, label, cookie)
-		} else {
-			_ = m.repository.DeleteUserPublicPoolCookie(userID)
+			_, err := m.repository.UpsertUserPublicPoolCookie(userID, label, cookie)
+			return err
 		}
+		return m.repository.DeleteUserPublicPoolCookie(userID)
 	}
 	if !user.RefreshEnabled {
 		if joinPool {
@@ -337,10 +346,13 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 				return model.DashboardSnapshot{}, probeErr
 			}
 		}
+		if err := syncPool(); err != nil {
+			_ = runtime.client.UpdateCookie(previous)
+			return model.DashboardSnapshot{}, err
+		}
 		now := time.Now().UTC()
 		runtime.setPersonalCookieExpired(false)
 		runtime.recordRemoteOK(now)
-		syncPool()
 		_ = m.resolveCredentialExpired(userID, now)
 		snapshot := runtime.store.Snapshot()
 		if joinPool {
@@ -363,9 +375,12 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 		_ = m.Save()
 		return model.DashboardSnapshot{}, err
 	}
+	if err := syncPool(); err != nil {
+		_ = runtime.client.UpdateCookie(previous)
+		return model.DashboardSnapshot{}, err
+	}
 	runtime.setPersonalCookieExpired(false)
 	runtime.recordRemoteOK(time.Now().UTC())
-	syncPool()
 	m.recordSharedPiles(userID, remotePiles)
 	snapshot := runtime.store.Snapshot()
 	m.recordRefreshMetrics(userID, snapshot.Refresh)

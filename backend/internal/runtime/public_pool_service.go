@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	ErrRefreshQuotaExhausted  = errors.New("free refresh quota exhausted")
-	ErrPublicPoolUnavailable  = errors.New("public cookie pool unavailable")
-	ErrPersonalCookieRequired = errors.New("personal cookie required")
-	ErrDailyProbeLimitReached = errors.New("daily pile probe limit reached")
+	ErrRefreshQuotaExhausted     = errors.New("free refresh quota exhausted")
+	ErrPublicPoolUnavailable     = errors.New("public cookie pool unavailable")
+	ErrPersonalCookieRequired    = errors.New("personal cookie required")
+	ErrDailyProbeLimitReached    = errors.New("daily pile probe limit reached")
+	ErrPublicPoolCookieDuplicate = persistence.ErrPublicPoolCookieDuplicate
 )
 
 var shanghaiLoc = func() *time.Location {
