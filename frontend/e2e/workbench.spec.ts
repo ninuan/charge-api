@@ -106,6 +106,8 @@ async function mockApi(page: Page, data: DashboardSnapshot, failFirst = false) {
       })
     if (path === "/api/notifications")
       return route.fulfill({ json: { items: [], unreadCount: 0 } })
+    if (path === "/api/shared-piles")
+      return route.fulfill({ json: [] })
     // Unexpected requests are blocked rather than forwarded to a real account.
     return route.fulfill({ status: 404, json: { error: "Unmocked endpoint" } })
   })
@@ -385,102 +387,169 @@ for (const width of [390, 1440]) {
   })
 }
 
-async function mockBindingFlow(
-  page: Page,
-  data: DashboardSnapshot,
-  initiallyBound: boolean,
-  scanEnabled = true
-) {
-  await mockApi(page, data)
-  const flow = {
-    status: "pending",
-    bound: initiallyBound,
-    adds: 0,
-    confirms: 0,
-    creates: 0,
-    polls: 0,
-    rejectAdd: false,
-    failBinding: false,
+function defaultQuota() {
+  return {
+    freeDailyLimit: 2,
+    freeDailyUsed: 0,
+    freeDailyRemaining: 2,
+    bonusRemaining: 0,
+    totalFreeRemaining: 2,
+    contributedPileCount: 0,
+    pileContributionBonusQuota: 2,
+    sharedPileCacheTTLSeconds: 60,
+    dailyResetAt: "2026-09-12T00:00:00+08:00",
+    hasPersonalCookie: false,
+    personalCookieStatus: "none" as const,
+    joinedPublicPool: false,
+    requirePoolShareForUnlimited: true,
+    unlimitedActive: false,
+    publicPoolAvailable: 1,
+    freeUserWatchAllowed: false,
   }
-  await page.route("**/api/session/yyb-binding", (route) =>
-    route.fulfill({
-      status: flow.failBinding ? 503 : 200,
-      json: { bound: flow.bound, scanEnabled },
-    })
-  )
-  await page.route("**/api/session/yyb-qr", (route) => {
-    flow.creates++
-    return route.fulfill({
-      json: {
-        sessionId: "browser-qr",
-        imageBase64:
-          "data:image/svg+xml;base64," +
-          Buffer.from(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="white"/><path d="M20 20h50v50H20zm110 0h50v50h-50zM20 130h50v50H20z" fill="black"/></svg>'
-          ).toString("base64"),
-      },
-    })
+}
+
+async function mockCatalogAndCookieFlow(page: Page, data: DashboardSnapshot) {
+  if (!data.quota) data.quota = defaultQuota()
+  await mockApi(page, data)
+
+  const catalog = [
+    {
+      deviceId: "2601201412385560001",
+      number: "61034278",
+      name: "北门车棚",
+      address: "北门入口右侧",
+      openNum: 10,
+      portCount: 10,
+      createdAt: data.updatedAt,
+      updatedAt: data.updatedAt,
+    },
+    {
+      deviceId: "2601201412385560002",
+      number: "61034279",
+      name: "南门东车棚",
+      address: "南门主路东侧",
+      openNum: 12,
+      portCount: 12,
+      createdAt: data.updatedAt,
+      updatedAt: data.updatedAt,
+    },
+  ]
+  const flow = {
+    adds: 0,
+    cookieUpdates: 0,
+    poolJoins: 0,
+    poolLeaves: 0,
+    rejectAdd: false,
+    nextSeq: 3,
+  }
+  let stamp = Date.parse(data.updatedAt) || Date.now()
+  const bumpUpdatedAt = () => {
+    stamp += 1000
+    data.updatedAt = new Date(stamp).toISOString()
+  }
+
+  await page.route("**/api/shared-piles**", (route) => {
+    const query = (new URL(route.request().url()).searchParams.get("q") || "").trim()
+    const items = query
+      ? catalog.filter((item) =>
+          [item.name, item.number, item.address].some((field) => field.includes(query))
+        )
+      : catalog
+    return route.fulfill({ json: items })
   })
-  await page.route("**/api/session/yyb-qr/*/poll", (route) => {
-    flow.polls++
-    return route.fulfill({ json: { sessionId: "browser-qr", status: flow.status } })
-  })
-  await page.route("**/api/session/yyb-qr/*/confirm", (route) => {
-    flow.confirms++
-    flow.bound = true
-    return route.fulfill({
-      json: {
-        bound: true,
-        sessionId: "browser-qr",
-        cookieSynced: false,
-        syncState: "not_needed",
-      },
-    })
-  })
+
   await page.route("**/api/piles", (route) => {
-    if (route.request().method() !== "POST")
-      return route.fulfill({ json: data })
+    if (route.request().method() !== "POST") return route.fulfill({ json: data })
     flow.adds++
-    if (flow.rejectAdd)
+    if (flow.rejectAdd) {
       return route.fulfill({
-        status: 409,
-        json: { code: "YYB_RESCAN_REQUIRED" },
+        status: 429,
+        json: {
+          code: "DAILY_PROBE_LIMIT_REACHED",
+          error: "今日录桩校验次数已达上限，请明天再试。",
+        },
       })
-    const pile = {
-      ...data.piles[0],
-      ...route.request().postDataJSON(),
-      id: "2601201412385560002",
     }
-    data.piles.push(pile)
-    return route.fulfill({ status: 201, json: pile })
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    const fromCatalog = catalog.find(
+      (item) => item.deviceId === body.id || item.number === body.number
+    )
+    const id = fromCatalog
+      ? fromCatalog.deviceId
+      : `260120141238556000${flow.nextSeq++}`
+    const base = snapshot().piles[0]
+    const pile = {
+      ...base,
+      id,
+      number: String(body.number || fromCatalog?.number || ""),
+      name: String(body.name || fromCatalog?.name || `充电桩 ${body.number || id.slice(-6)}`),
+      address: String(body.address || fromCatalog?.address || ""),
+      openNum: Number(body.openNum || fromCatalog?.openNum || 10),
+    }
+    if (!data.piles.some((item) => item.id === pile.id)) {
+      data.piles.push(pile)
+      data.statistics.pileCount = data.piles.length
+    }
+    const rewardGranted = fromCatalog ? 0 : data.quota!.pileContributionBonusQuota
+    if (rewardGranted > 0 && data.quota) {
+      data.quota = {
+        ...data.quota,
+        bonusRemaining: data.quota.bonusRemaining + rewardGranted,
+        totalFreeRemaining: data.quota.totalFreeRemaining + rewardGranted,
+        contributedPileCount: data.quota.contributedPileCount + 1,
+      }
+    }
+    bumpUpdatedAt()
+    return route.fulfill({
+      status: 201,
+      json: {
+        ...pile,
+        fromSharedCatalog: Boolean(fromCatalog),
+        rewardGranted,
+        quota: data.quota,
+      },
+    })
   })
+
+  await page.route("**/api/session/cookie", (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 405 })
+    flow.cookieUpdates++
+    const body = route.request().postDataJSON() as {
+      cookie?: string
+      joinPublicPool?: boolean
+    }
+    const joined = Boolean(body.joinPublicPool)
+    data.quota = {
+      ...data.quota!,
+      hasPersonalCookie: true,
+      personalCookieStatus: "valid",
+      joinedPublicPool: joined,
+      unlimitedActive: joined || !data.quota!.requirePoolShareForUnlimited,
+    }
+    bumpUpdatedAt()
+    return route.fulfill({ json: data })
+  })
+
+  await page.route("**/api/session/cookie/join-pool", (route) => {
+    const joined = route.request().method() === "POST"
+    if (joined) flow.poolJoins++
+    else flow.poolLeaves++
+    data.quota = {
+      ...data.quota!,
+      joinedPublicPool: joined,
+      unlimitedActive: joined || !data.quota!.requirePoolShareForUnlimited,
+    }
+    bumpUpdatedAt()
+    return route.fulfill({ json: data })
+  })
+
   return flow
 }
 
-test("automatic checks preserve the QR until delayed phone confirmation", async ({ page }) => {
-  const flow = await mockBindingFlow(page, snapshot(), false)
-  await page.goto("/dashboard/")
-  await page.getByRole("button", { name: "添加充电桩", exact: true }).first().click()
-  const dialog = page.getByRole("dialog")
-  const confirm = dialog.getByRole("button", { name: "确认绑定", exact: true })
-  // Let multiple real automatic timer cycles finish before authorizing on the phone.
-  await expect.poll(() => flow.polls, { timeout: 15000 }).toBeGreaterThanOrEqual(2)
-  await expect(confirm).toBeDisabled()
-  flow.status = "scanned"
-  await expect(dialog.getByText("已扫码，请在微信中确认授权")).toBeVisible({ timeout: 10000 })
-  await expect(confirm).toBeDisabled()
-  flow.status = "authorized"
-  await dialog.getByRole("button", { name: "检查扫码状态" }).click()
-  await expect(confirm).toBeEnabled()
-  await expect(dialog.getByText("扫码会话不匹配，请重新检查。")).toHaveCount(0)
-  await confirm.click()
-  await expect(dialog.getByText("微信已绑定", { exact: true })).toBeVisible()
-  expect(flow.creates).toBe(1)
-  expect(flow.confirms).toBe(1)
-})
-
 for (const width of [320, 390, 768, 1440]) {
-  test(`binding onboarding completes at ${width}px`, async ({ page }) => {
+  test(`shared catalog add and new pile contribution complete at ${width}px`, async ({
+    page,
+  }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({
       reducedMotion: "reduce",
@@ -490,7 +559,7 @@ for (const width of [320, 390, 768, 1440]) {
       (theme) => localStorage.setItem("theme", theme),
       width === 390 || width === 1440 ? "dark" : "light"
     )
-    const flow = await mockBindingFlow(page, snapshot(), false)
+    const flow = await mockCatalogAndCookieFlow(page, snapshot())
     await page.goto("/dashboard/")
     await page
       .getByRole("button", { name: "添加充电桩", exact: true })
@@ -498,165 +567,121 @@ for (const width of [320, 390, 768, 1440]) {
       .click()
     const dialog = page.getByRole("dialog")
     await expect(
-      dialog.getByRole("heading", { name: "添加前，先绑定微信" })
-    ).toBeVisible()
-    await expect(
-      dialog.getByRole("img", { name: "微信扫码登录二维码" })
-    ).toBeVisible()
-    const confirm = dialog.getByRole("button", {
-      name: "确认绑定",
-      exact: true,
-    })
-    await expect(confirm).toBeDisabled()
-    flow.status = "scanned"
-    await dialog.getByRole("button", { name: "检查扫码状态" }).click()
-    await expect(dialog.getByText("已扫码，请在微信中确认授权")).toBeVisible()
-    await expect(confirm).toBeDisabled()
-    flow.status = "authorized"
-    await dialog.getByRole("button", { name: "检查扫码状态" }).click()
-    await expect(confirm).toBeEnabled()
+      dialog.getByRole("tab", { name: "从公共桩库添加" })
+    ).toHaveAttribute("aria-selected", "true")
+    await dialog
+      .getByRole("textbox", { name: "搜索公共桩库", exact: true })
+      .fill("南门")
+    await expect(dialog.getByText("南门东车棚")).toBeVisible()
     expect(
       await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)
     ).toBe(true)
     await page.screenshot({
-      path: `/tmp/charge-binding-${width}.png`,
+      path: `/tmp/charge-catalog-${width}.png`,
       fullPage: true,
     })
-    await confirm.focus()
-    await page.keyboard.press("Enter")
-    await expect(dialog.getByText("微信已绑定", { exact: true })).toBeVisible()
-    expect(flow.adds).toBe(0)
-    await dialog.getByRole("button", { name: "继续添加充电桩" }).click()
-    await expect(dialog.getByLabel("桩号", { exact: true })).toBeFocused()
-    await dialog.getByLabel("桩号", { exact: true }).fill("61034279")
-    await dialog.getByLabel("显示名称").fill("新绑定车棚")
-    await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
+    await dialog.getByRole("button", { name: "添加", exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(page).toHaveURL(/pile=2601201412385560002/)
     expect(flow.adds).toBe(1)
-    expect(flow.confirms).toBe(1)
-    expect(flow.creates).toBe(1)
-  })
-}
 
-for (const status of ["expired", "unknown"]) {
-  test(`saved binding with ${status} status can add without creating another QR`, async ({ page }) => {
-    const flow = await mockBindingFlow(page, snapshot(), true)
-    await page.route("**/api/session/yyb-binding", (route) =>
-      route.fulfill({ json: { bound: true, scanEnabled: true, status } })
-    )
-    await page.goto("/dashboard/")
-    await page.getByRole("button", { name: "添加充电桩", exact: true }).first().click()
-    const dialog = page.getByRole("dialog")
-    await dialog.getByLabel("桩号", { exact: true }).fill("61034279")
-    await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
+    await page.goBack()
+    await expect(page).not.toHaveURL(/pile=/)
+
+    await page
+      .getByRole("button", { name: "添加充电桩", exact: true })
+      .first()
+      .click()
+    await dialog.getByRole("tab", { name: /录入新桩/ }).click()
+    const numberInput = dialog.getByLabel("桩号（推荐）")
+    await expect(numberInput).toBeFocused()
+    await numberInput.fill("61034280")
+    await dialog.getByLabel("常用名称（可选）").fill("西门新车棚")
+    await dialog.getByRole("button", { name: "校验并收录", exact: true }).click()
     await expect(dialog).toHaveCount(0)
-    expect(flow.adds).toBe(1)
-    expect(flow.creates).toBe(0)
+    await expect(page).toHaveURL(/pile=2601201412385560003/)
+    expect(flow.adds).toBe(2)
   })
 }
 
-test("rescan after add failure preserves the draft and never replays the add", async ({
-  page,
-}) => {
-  const flow = await mockBindingFlow(page, snapshot(), true)
-  flow.rejectAdd = true
-  await page.goto("/dashboard/")
-  await page
-    .getByRole("button", { name: "添加充电桩", exact: true })
-    .first()
-    .click()
-  const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("桩号", { exact: true }).fill("61034279")
-  await dialog.getByLabel("显示名称").fill("保留名称")
-  await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
-  await dialog.getByRole("button", { name: "去绑定 / 重新扫码" }).click()
-  await expect(dialog.getByRole("img")).toBeVisible()
-  await dialog.getByRole("button", { name: "返回填写" }).click()
-  await expect(dialog.getByLabel("显示名称")).toHaveValue("保留名称")
-  await expect(
-    dialog.getByRole("button", { name: "确认添加", exact: true })
-  ).toBeDisabled()
-  await dialog.getByRole("button", { name: "去绑定 / 重新扫码" }).click()
-  await expect(dialog.getByRole("img")).toBeVisible()
-  flow.status = "authorized"
-  await dialog.getByRole("button", { name: "检查扫码状态" }).click()
-  await dialog.getByRole("button", { name: "确认绑定", exact: true }).click()
-  await expect(
-    dialog.getByRole("button", { name: "继续添加充电桩" })
-  ).toBeVisible()
-  await expect(dialog.getByRole("button", { name: "返回填写" })).toHaveCount(0)
-  await dialog.getByRole("button", { name: "继续添加充电桩" }).click()
-  expect(flow.adds).toBe(1)
-  await expect(dialog.getByLabel("显示名称")).toHaveValue("保留名称")
-  flow.rejectAdd = false
-  await dialog.getByRole("button", { name: "确认添加", exact: true }).click()
-  await expect(dialog).toHaveCount(0)
-  expect(flow.adds).toBe(2)
-})
-
-test("binding check failure, offline and manual Cookie have actionable recovery", async ({
+test("add failure preserves contribute draft, offline disables submit, and Escape restores focus", async ({
   page,
   context,
 }) => {
-  const flow = await mockBindingFlow(page, snapshot(), false, false)
-  flow.failBinding = true
+  const flow = await mockCatalogAndCookieFlow(page, snapshot())
+  flow.rejectAdd = true
   await page.goto("/dashboard/")
   const trigger = page
     .getByRole("button", { name: "添加充电桩", exact: true })
     .first()
   await trigger.click()
   const dialog = page.getByRole("dialog")
-  await expect(dialog.getByRole("button", { name: "重新检查" })).toBeVisible()
-  expect(flow.creates).toBe(0)
-  flow.failBinding = false
-  await dialog.getByRole("button", { name: "重新检查" }).click()
-  await expect(dialog.getByLabel("桩号", { exact: true })).toBeVisible()
-  await dialog.getByRole("button", { name: "手动设置 Cookie" }).click()
-  await expect(dialog.getByLabel("手动更新 Cookie")).toBeVisible()
+  await dialog.getByRole("tab", { name: /录入新桩/ }).click()
+  await dialog.getByLabel("桩号（推荐）").fill("61034280")
+  await dialog.getByLabel("常用名称（可选）").fill("保留名称")
+  const submit = dialog.getByRole("button", { name: "校验并收录", exact: true })
+  await submit.click()
+  await expect(dialog.getByRole("alert")).toContainText(
+    "今日录桩校验次数已达上限"
+  )
+  await expect(dialog.getByLabel("常用名称（可选）")).toHaveValue("保留名称")
+  expect(flow.adds).toBe(1)
+
   await context.setOffline(true)
-  await expect(
-    dialog.getByRole("button", { name: "确认添加", exact: true })
-  ).toBeDisabled()
+  await expect(submit).toBeDisabled()
   await context.setOffline(false)
+  await expect(submit).toBeEnabled()
+
   await page.keyboard.press("Escape")
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()
-  expect(flow.creates).toBe(0)
+
+  await trigger.click()
+  await expect(dialog.getByLabel("常用名称（可选）")).toHaveValue("保留名称")
+  flow.rejectAdd = false
+  await dialog.getByRole("button", { name: "校验并收录", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(flow.adds).toBe(2)
 })
 
-test("account rebind polls a new QR even while the old binding exists", async ({
+test("account connection uploads personal cookie and toggles mutual-aid pool", async ({
   page,
 }) => {
-  const flow = await mockBindingFlow(page, snapshot(), true)
+  const flow = await mockCatalogAndCookieFlow(page, snapshot())
   await page.goto("/account/?tab=connection&connect=1")
   const dialog = page.getByRole("dialog")
   await expect(
-    dialog.getByRole("heading", { name: "绑定平台微信" })
+    dialog.getByRole("heading", { name: "上传个人 Cookie" })
   ).toBeVisible()
-  await dialog.getByRole("button", { name: "重新扫码绑定" }).click()
-  await expect(dialog.getByRole("img")).toBeVisible()
-  flow.status = "authorized"
-  await expect(
-    dialog.getByRole("button", { name: "确认绑定", exact: true })
-  ).toBeEnabled({ timeout: 10000 })
-  await dialog.getByRole("button", { name: "确认绑定", exact: true }).click()
-  await expect(dialog.getByText("微信已绑定", { exact: true })).toBeVisible()
-  await dialog.getByRole("button", { name: "完成", exact: true }).click()
+  await dialog
+    .getByLabel("Cookie / cURL 内容")
+    .fill("wxopenid=e2e-user-openid; info=test")
+  await dialog.getByRole("button", { name: "保存并验证", exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  expect(flow.confirms).toBe(1)
-  expect(flow.adds).toBe(0)
+  await expect(page.getByText("互助 Cookie · 不限次")).toBeVisible()
+  expect(flow.cookieUpdates).toBe(1)
+
+  await page.getByRole("button", { name: "退出互助池", exact: true }).click()
+  await expect(page.getByText("未加入互助池 · 免费模式")).toBeVisible()
+  expect(flow.poolLeaves).toBe(1)
+
+  await page.getByRole("button", { name: "立即加入互助池", exact: true }).click()
+  await expect(page.getByText("互助 Cookie · 不限次")).toBeVisible()
+  expect(flow.poolJoins).toBe(1)
 })
 
-test("empty-list add entry opens the same binding flow", async ({ page }) => {
+test("empty-list add entry opens the shared catalog dialog", async ({ page }) => {
   const data = snapshot()
   data.piles = []
-  const flow = await mockBindingFlow(page, data, false)
+  const flow = await mockCatalogAndCookieFlow(page, data)
   await page.goto("/dashboard/")
   const list = page.getByRole("complementary", { name: "常用充电桩列表" })
   await list.getByRole("button", { name: "添加充电桩", exact: true }).click()
-  await expect(page.getByRole("dialog").getByRole("img")).toBeVisible()
-  expect(flow.creates).toBe(1)
+  const dialog = page.getByRole("dialog")
+  await expect(
+    dialog.getByRole("tab", { name: "从公共桩库添加" })
+  ).toHaveAttribute("aria-selected", "true")
+  await expect(dialog.getByText("南门东车棚")).toBeVisible()
   expect(flow.adds).toBe(0)
 })
 
@@ -710,7 +735,7 @@ test("announcement outage does not block piles",async({page})=>{
   await page.route("**/api/announcements/summary",route=>route.fulfill({status:503,json:{error:"公告暂时不可用"}}))
   await page.goto("/dashboard/")
   await expect(page.getByText("公告暂时无法加载")).toBeVisible()
-  await expect(page.getByRole("button",{name:"刷新状态",exact:true})).toBeEnabled()
+  await expect(page.getByRole("button",{name:"刷新全部",exact:true})).toBeEnabled()
   await expect(page.getByRole("heading",{name:"北门车棚"})).toBeVisible()
 })
 
@@ -750,7 +775,7 @@ test("slow auxiliary requests do not hold the main workspace",async({page})=>{
  await page.route("**/api/notifications",async route=>{await held;await route.fulfill({json:{items:[],unreadCount:0}})})
  await page.route("**/api/watch-rules",async route=>{await held;await route.fulfill({json:[]})})
  await page.goto("/dashboard/?pile=2601201412385560001")
- await expect(page.getByRole("button",{name:"刷新状态",exact:true})).toBeEnabled()
+ await expect(page.getByRole("button",{name:"刷新全部",exact:true})).toBeEnabled()
  await expect(page.getByRole("button",{name:"有空闲时提醒我",exact:true})).toBeDisabled()
  release()
  await expect(page.getByRole("button",{name:"有空闲时提醒我",exact:true})).toBeEnabled()
@@ -761,7 +786,7 @@ for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await mockApi(page, snapshot())
     await page.goto("/dashboard/")
-    const refresh = page.getByRole("button", { name: "刷新状态", exact: true })
+    const refresh = page.getByRole("button", { name: "刷新全部", exact: true })
     const add = page.getByRole("button", { name: "添加充电桩", exact: true })
     await expect(refresh).toBeEnabled()
     const refreshBox = await refresh.boundingBox()

@@ -189,8 +189,8 @@ export function AddPileDialog({
           </Button>
         }
       />
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
-        <DialogHeader className="pr-7">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-xl">
+        <DialogHeader className="min-w-0 pr-7">
           <DialogTitle className="flex items-center gap-2">
             <ServerCogIcon className="size-5" />
             添加充电桩
@@ -201,37 +201,41 @@ export function AddPileDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="wb-seg-rail" role="tablist" aria-label="添加方式">
+        <div
+          className="wb-seg-rail grid w-full min-w-0 grid-cols-2"
+          role="tablist"
+          aria-label="添加方式"
+        >
           <button
             type="button"
             role="tab"
             aria-selected={mode === "catalog"}
-            className={`wb-seg-btn ${mode === "catalog" ? "wb-seg-active" : ""}`}
+            className={`wb-seg-btn min-w-0 justify-center px-2 text-xs sm:px-3 sm:text-[13px] ${mode === "catalog" ? "wb-seg-active" : ""}`}
             onClick={() => {
               setMode("catalog")
               setError("")
             }}
           >
-            <DatabaseIcon size={14} />
-            从公共桩库添加
+            <DatabaseIcon size={14} className="shrink-0" />
+            <span className="truncate">从公共桩库添加</span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={mode === "contribute"}
-            className={`wb-seg-btn ${mode === "contribute" ? "wb-seg-active" : ""}`}
+            className={`wb-seg-btn min-w-0 justify-center px-2 text-xs sm:px-3 sm:text-[13px] ${mode === "contribute" ? "wb-seg-active" : ""}`}
             onClick={() => {
               setMode("contribute")
               setError("")
             }}
           >
-            <SparklesIcon size={14} />
-            录入新桩 (+{bonusQuota} 次)
+            <SparklesIcon size={14} className="shrink-0" />
+            <span className="truncate">录入新桩 (+{bonusQuota} 次)</span>
           </button>
         </div>
 
         {mode === "catalog" ? (
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <WorkbenchSearch
               value={catalogQuery}
               onChange={setCatalogQuery}
@@ -295,7 +299,7 @@ export function AddPileDialog({
             )}
           </div>
         ) : (
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="min-w-0 space-y-4">
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="pile-number">桩号（推荐）</FieldLabel>
