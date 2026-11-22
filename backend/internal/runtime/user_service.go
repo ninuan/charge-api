@@ -3,6 +3,7 @@ package runtime
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -12,6 +13,14 @@ import (
 	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/persistence"
+)
+
+var (
+	ErrRegistrationClosed       = errors.New("当前未开放注册")
+	ErrInviteRegistrationClosed = errors.New("当前未开放邀请码注册")
+	ErrInviteRequired           = errors.New("请输入有效邀请码")
+	ErrInviteInvalid            = errors.New("邀请码无效或已过期")
+	ErrUsernameExists           = errors.New("username already exists")
 )
 
 func newUser(username string, password string, role model.UserRole, enabled bool) (model.User, error) {
@@ -482,28 +491,35 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 	for _, existing := range m.users {
 		if existing.Username == user.Username {
 			m.mu.Unlock()
-			return model.CurrentUser{}, fmt.Errorf("username already exists")
+			return model.CurrentUser{}, ErrUsernameExists
 		}
 	}
 	m.users[user.ID] = user
 	m.runtimes[user.ID] = newUserRuntime(m.requests, persistence.UserState{}, m.minInterval)
 	m.mu.Unlock()
 
-	return publicUser(user), m.Save()
+	if err := m.Save(); err != nil {
+		m.mu.Lock()
+		delete(m.users, user.ID)
+		delete(m.runtimes, user.ID)
+		m.mu.Unlock()
+		return model.CurrentUser{}, err
+	}
+	return publicUser(user), nil
 }
 
 func (m *Manager) RegisterUser(username string, password string, inviteCode string) (model.CurrentUser, error) {
 	m.mu.Lock()
 	if !m.settings.OpenRegistration && !m.settings.InviteRequired {
 		m.mu.Unlock()
-		return model.CurrentUser{}, fmt.Errorf("当前未开放注册")
+		return model.CurrentUser{}, ErrRegistrationClosed
 	}
 	var usedInviteID string
 	inviteCode = strings.TrimSpace(inviteCode)
 	if inviteCode != "" {
 		if !m.settings.InviteRequired {
 			m.mu.Unlock()
-			return model.CurrentUser{}, fmt.Errorf("当前未开放邀请码注册")
+			return model.CurrentUser{}, ErrInviteRegistrationClosed
 		}
 		now := time.Now()
 		for id, invite := range m.invites {
@@ -515,11 +531,11 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 		}
 		if usedInviteID == "" {
 			m.mu.Unlock()
-			return model.CurrentUser{}, fmt.Errorf("邀请码无效或已过期")
+			return model.CurrentUser{}, ErrInviteInvalid
 		}
 	} else if !m.settings.OpenRegistration {
 		m.mu.Unlock()
-		return model.CurrentUser{}, fmt.Errorf("请输入有效邀请码")
+		return model.CurrentUser{}, ErrInviteRequired
 	}
 	m.mu.Unlock()
 	user, err := m.CreateUser(model.UserCreateRequest{
@@ -538,6 +554,12 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 		}
 		m.mu.Unlock()
 		if err := m.Save(); err != nil {
+			m.mu.Lock()
+			if invite, ok := m.invites[usedInviteID]; ok && invite.UsedCount > 0 {
+				invite.UsedCount--
+				m.invites[usedInviteID] = invite
+			}
+			m.mu.Unlock()
 			return model.CurrentUser{}, err
 		}
 	}

@@ -1,10 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"charge-dashboard/internal/model"
+	appruntime "charge-dashboard/internal/runtime"
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +93,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.manager.RegisterUser(req.Username, req.Password, req.InviteCode)
 	if err != nil {
-		writePublicOperationError(w, http.StatusBadRequest, "register user", "注册失败，请检查填写信息或邀请码后重试。", err)
+		writeRegisterError(w, err)
 		return
 	}
 	s.authGuard.RecordSuccess(ip, req.Username)
@@ -103,6 +105,23 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, session)
 	writeJSON(w, http.StatusCreated, user)
+}
+
+func writeRegisterError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, appruntime.ErrUsernameExists):
+		writeCodedError(w, http.StatusConflict, "REGISTER_USERNAME_TAKEN", "该用户名已被注册，请换一个用户名。")
+	case errors.Is(err, appruntime.ErrRegistrationClosed):
+		writeCodedError(w, http.StatusForbidden, "REGISTER_CLOSED", "当前未开放自助注册，请联系管理员开通账户。")
+	case errors.Is(err, appruntime.ErrInviteRegistrationClosed):
+		writeCodedError(w, http.StatusForbidden, "REGISTER_INVITE_DISABLED", "当前未开放邀请码注册。")
+	case errors.Is(err, appruntime.ErrInviteRequired):
+		writeCodedError(w, http.StatusBadRequest, "REGISTER_INVITE_REQUIRED", "请输入有效邀请码。")
+	case errors.Is(err, appruntime.ErrInviteInvalid):
+		writeCodedError(w, http.StatusBadRequest, "REGISTER_INVITE_INVALID", "邀请码无效或已过期，请核对后重试。")
+	default:
+		writePublicOperationError(w, http.StatusInternalServerError, "register user", "注册暂时不可用，请稍后重试。", err)
+	}
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

@@ -177,6 +177,25 @@ describe("requestJSON", () => {
     ).rejects.toThrow("公共查询通道暂无可用 Cookie")
   })
 
+  it("maps typed registration failure codes to user-friendly messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "REGISTER_USERNAME_TAKEN",
+            error: "username already exists",
+          }),
+          { status: 409 }
+        )
+      )
+    )
+
+    await expect(
+      requestJSON("/api/auth/register", { method: "POST" }, "注册失败，请检查填写信息和验证后重试。")
+    ).rejects.toThrow("该用户名已被注册，请换一个用户名。")
+  })
+
   it("handles empty responses through the same request entry point", async () => {
     vi.stubGlobal(
       "fetch",

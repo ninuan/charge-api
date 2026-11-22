@@ -50,6 +50,46 @@ func TestUpdateUserKeepsAtLeastOneEnabledAdmin(t *testing.T) {
 	}
 }
 
+func TestCreateUserRollsBackMemoryWhenSaveFails(t *testing.T) {
+	brokenRepo := testRepository(t)
+	if err := brokenRepo.Close(); err != nil {
+		t.Fatalf("close broken repo: %v", err)
+	}
+	manager := &Manager{
+		repository: brokenRepo,
+		users:      map[string]model.User{},
+		runtimes:   map[string]*UserRuntime{},
+		settings: model.RegistrationSettings{
+			DefaultDeviceLimit:    defaultDeviceLimit,
+			DefaultRefreshEnabled: true,
+		},
+	}
+
+	if _, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "rollback-user",
+		Password: "password123",
+		Role:     model.RoleUser,
+	}); err == nil {
+		t.Fatal("expected CreateUser to fail when repository is closed")
+	}
+	if len(manager.users) != 0 || len(manager.runtimes) != 0 {
+		t.Fatalf("expected failed CreateUser to roll back memory, got users=%d runtimes=%d", len(manager.users), len(manager.runtimes))
+	}
+
+	manager.repository = testRepository(t)
+	created, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "rollback-user",
+		Password: "password123",
+		Role:     model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("retry CreateUser after storage recovery failed: %v", err)
+	}
+	if created.Username != "rollback-user" {
+		t.Fatalf("created username = %q, want rollback-user", created.Username)
+	}
+}
+
 func TestResetUserPasswordRequiresChangeOnNextLogin(t *testing.T) {
 	manager := &Manager{
 		repository: testRepository(t),

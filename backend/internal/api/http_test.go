@@ -817,6 +817,58 @@ func TestInviteOnlyRegistrationThroughAPI(t *testing.T) {
 	}
 }
 
+func TestRegisterReturnsTypedErrorCodes(t *testing.T) {
+	server, manager, _ := newTestServer(t)
+	server.captcha = &fixedCaptcha{answer: "24682"}
+
+	postRegister := func(username, inviteCode string) *httptest.ResponseRecorder {
+		t.Helper()
+		captchaRecorder := httptest.NewRecorder()
+		server.handleAuthCaptcha(captchaRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/captcha", nil))
+		var challenge struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(captchaRecorder.Body).Decode(&challenge); err != nil {
+			t.Fatalf("decode captcha: %v", err)
+		}
+		payload, err := json.Marshal(map[string]string{
+			"username":      username,
+			"password":      "password123",
+			"captchaId":     challenge.ID,
+			"captchaAnswer": "24682",
+			"inviteCode":    inviteCode,
+		})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		server.handleRegister(rec, req)
+		return rec
+	}
+
+	if rec := postRegister("dup-user", ""); rec.Code != http.StatusCreated {
+		t.Fatalf("first register returned %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := postRegister("dup-user", ""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "REGISTER_USERNAME_TAKEN") {
+		t.Fatalf("duplicate register = %d %s, want 409 REGISTER_USERNAME_TAKEN", rec.Code, rec.Body.String())
+	}
+	if rec := postRegister("bad-invite-user", "NO-SUCH-INVITE"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "REGISTER_INVITE_INVALID") {
+		t.Fatalf("invalid invite register = %d %s, want 400 REGISTER_INVITE_INVALID", rec.Code, rec.Body.String())
+	}
+
+	settings := manager.Settings()
+	settings.OpenRegistration = false
+	settings.InviteRequired = false
+	if err := manager.UpdateSettings(settings); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	if rec := postRegister("closed-user", ""); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "REGISTER_CLOSED") {
+		t.Fatalf("closed register = %d %s, want 403 REGISTER_CLOSED", rec.Code, rec.Body.String())
+	}
+}
+
 func TestLoginRequiresCaptchaAfterTwoCredentialFailures(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	server.captcha = &fixedCaptcha{answer: "24682"}
