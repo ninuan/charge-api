@@ -881,6 +881,61 @@ func (s *Store) GetUserQuota(userID string, today string) (UserQuotaRecord, erro
 	return rec, nil
 }
 
+func (s *Store) ListAllUserQuotas(today string) (map[string]UserQuotaRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT user_id, daily_date, daily_used, bonus_remaining, contributed_pile_count, daily_probe_date, daily_probe_count, updated_at
+		 FROM user_refresh_quotas`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all user quotas: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]UserQuotaRecord)
+	for rows.Next() {
+		var rec UserQuotaRecord
+		var updatedAt int64
+		if err := rows.Scan(
+			&rec.UserID, &rec.DailyDate, &rec.DailyUsed, &rec.BonusRemaining,
+			&rec.ContributedPileCount, &rec.DailyProbeDate, &rec.DailyProbeCount, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan user quota: %w", err)
+		}
+		if rec.DailyDate != today {
+			rec.DailyDate = today
+			rec.DailyUsed = 0
+		}
+		if rec.DailyProbeDate != today {
+			rec.DailyProbeDate = today
+			rec.DailyProbeCount = 0
+		}
+		rec.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		result[rec.UserID] = rec
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListHealthyPoolOwnerIDs() (map[string]bool, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT owner_user_id FROM public_cookie_pool
+		 WHERE enabled = 1 AND status = 'healthy' AND owner_user_id <> ''`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list healthy pool owner ids: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]bool)
+	for rows.Next() {
+		var ownerID string
+		if err := rows.Scan(&ownerID); err != nil {
+			return nil, fmt.Errorf("scan healthy pool owner id: %w", err)
+		}
+		if ownerID != "" {
+			result[ownerID] = true
+		}
+	}
+	return result, rows.Err()
+}
+
 // ConsumeRefreshQuota atomically deducts `amount` refresh credits (daily free first, then permanent bonus).
 func (s *Store) ConsumeRefreshQuota(userID string, today string, dailyLimit int, amount int) (QuotaConsumeReceipt, bool, error) {
 	if amount <= 0 {

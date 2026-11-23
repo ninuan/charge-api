@@ -148,19 +148,20 @@ func TestSecurityHeadersAreSetOnEveryResponse(t *testing.T) {
 		}
 	}
 	policy := recorder.Header().Get("Content-Security-Policy")
-	if strings.Contains(policy, "cloudflareinsights.com") {
-		t.Fatal("analytics must not be allowed by default")
-	}
 	for _, directive := range []string{
 		"frame-ancestors 'none'",
 		"object-src 'none'",
 		"base-uri 'none'",
 		"frame-src 'none'",
-		"connect-src 'self'",
+		"script-src 'self' https://static.cloudflareinsights.com",
+		"connect-src 'self' https://cloudflareinsights.com",
 	} {
 		if !strings.Contains(policy, directive) {
 			t.Fatalf("CSP %q is missing %q", policy, directive)
 		}
+	}
+	if strings.Contains(policy, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("CSP %q must not allow unsafe-inline scripts", policy)
 	}
 	if recorder.Header().Get("Strict-Transport-Security") != "" {
 		t.Fatalf("HSTS must not be sent over plaintext http")
@@ -171,6 +172,9 @@ func TestStaticPolicyHashesInlineScripts(t *testing.T) {
 	policy := staticPolicy([]byte(`<html><script>window.__BOOT__=1</script></html>`))
 	if strings.Contains(policy, "script-src 'self' 'unsafe-inline'") || !strings.Contains(policy, "'sha256-") {
 		t.Fatalf("static policy did not replace inline script allowance: %s", policy)
+	}
+	if !strings.Contains(policy, "https://static.cloudflareinsights.com") || !strings.Contains(policy, "connect-src 'self' https://cloudflareinsights.com") {
+		t.Fatalf("static policy dropped Cloudflare Web Analytics allowance: %s", policy)
 	}
 }
 
@@ -262,5 +266,50 @@ func TestStaticHandlerRoutesAndBlocksDirectoryListing(t *testing.T) {
 		if rec.Code != tc.status {
 			t.Fatalf("GET %s: status=%d, want %d", tc.path, rec.Code, tc.status)
 		}
+	}
+}
+
+func TestStaticHandlerCachesHTMLWithETagAndInvalidatesOnChange(t *testing.T) {
+	dir := t.TempDir()
+	indexPath := filepath.Join(dir, "index.html")
+	v1 := "<html><script>console.log('v1')</script></html>"
+	if err := os.WriteFile(indexPath, []byte(v1), 0o644); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+
+	handler := StaticHandler(dir)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first status=%d, want 200", rec1.Code)
+	}
+	etag1 := rec1.Header().Get("ETag")
+	csp1 := rec1.Header().Get("Content-Security-Policy")
+	if !strings.HasPrefix(etag1, `W/"`) || !strings.Contains(csp1, "sha256-") {
+		t.Fatalf("missing weak ETag or CSP hash: etag=%q csp=%q", etag1, csp1)
+	}
+
+	req304 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req304.Header.Set("If-None-Match", etag1)
+	rec304 := httptest.NewRecorder()
+	handler.ServeHTTP(rec304, req304)
+	if rec304.Code != http.StatusNotModified {
+		t.Fatalf("conditional status=%d, want 304", rec304.Code)
+	}
+
+	v2 := "<html><script>console.log('v2-updated-script')</script></html>"
+	if err := os.WriteFile(indexPath, []byte(v2), 0o644); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("updated status=%d, want 200", rec2.Code)
+	}
+	if rec2.Header().Get("ETag") == etag1 || rec2.Header().Get("Content-Security-Policy") == csp1 {
+		t.Fatalf("cache did not invalidate on file update: etag=%q csp=%q", rec2.Header().Get("ETag"), rec2.Header().Get("Content-Security-Policy"))
+	}
+	if rec2.Body.String() != v2 {
+		t.Fatalf("body=%q, want %q", rec2.Body.String(), v2)
 	}
 }

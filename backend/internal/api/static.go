@@ -4,21 +4,35 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"path"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"charge-dashboard/internal/security"
 )
 
 var inlineScriptPattern = regexp.MustCompile(`(?is)<script\b[^>]*>(.*?)</script\s*>`)
 
+type cachedHTML struct {
+	modTime time.Time
+	size    int64
+	body    []byte
+	csp     string
+	etag    string
+}
+
 // StaticHandler hashes the same bytes it serves, so a build replacement never
 // combines new HTML with a stale policy. Only trusted exported HTML is hashed.
 func StaticHandler(directory string) http.Handler {
 	root := http.Dir(directory)
 	files := http.FileServer(root)
+	var cacheMu sync.RWMutex
+	htmlCache := make(map[string]cachedHTML)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := path.Clean("/" + r.URL.Path)
 		if strings.HasSuffix(r.URL.Path, "/") {
@@ -66,13 +80,30 @@ func StaticHandler(directory string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		body, err := security.ReadLimited(file, 4<<20)
-		if err != nil {
-			http.Error(w, "static page unavailable", http.StatusInternalServerError)
-			return
+		cacheMu.RLock()
+		entry, hit := htmlCache[name]
+		cacheMu.RUnlock()
+		if !hit || !entry.modTime.Equal(info.ModTime()) || entry.size != info.Size() {
+			body, readErr := security.ReadLimited(file, 4<<20)
+			if readErr != nil {
+				http.Error(w, "static page unavailable", http.StatusInternalServerError)
+				return
+			}
+			sum := sha256.Sum256(body)
+			entry = cachedHTML{
+				modTime: info.ModTime(),
+				size:    info.Size(),
+				body:    body,
+				csp:     staticPolicy(body),
+				etag:    `W/"` + hex.EncodeToString(sum[:12]) + `"`,
+			}
+			cacheMu.Lock()
+			htmlCache[name] = entry
+			cacheMu.Unlock()
 		}
-		w.Header().Set("Content-Security-Policy", staticPolicy(body))
-		http.ServeContent(w, r, name, info.ModTime(), bytes.NewReader(body))
+		w.Header().Set("Content-Security-Policy", entry.csp)
+		w.Header().Set("ETag", entry.etag)
+		http.ServeContent(w, r, name, entry.modTime, bytes.NewReader(entry.body))
 	})
 }
 

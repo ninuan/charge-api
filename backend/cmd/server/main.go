@@ -200,7 +200,7 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	server.Register(mux)
-	mux.Handle("/", api.StaticHandler("../frontend/dist"))
+	mux.Handle("/", server.WithRootRedirect(api.StaticHandler("../frontend/dist")))
 	allowedOrigins := splitCommaSeparated(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	rateLimiter := api.NewIPRateLimiter(300, time.Minute)
 	content := api.WithCacheHeaders(api.WithCompression(mux))

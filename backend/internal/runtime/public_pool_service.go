@@ -402,14 +402,26 @@ func (m *Manager) userRefreshQuotaWithPoolCount(userID string, poolAvailable int
 	settings := m.Settings()
 	now := time.Now()
 	today := quotaTodayString(now)
+	rec, err := m.repository.GetUserQuota(userID, today)
+	if err != nil {
+		return model.UserRefreshQuota{}, err
+	}
+	joinedPool := m.userJoinedHealthyPool(userID)
+	return buildUserRefreshQuota(runtime, settings, now, poolAvailable, rec, joinedPool), nil
+}
+
+func buildUserRefreshQuota(
+	runtime *UserRuntime,
+	settings model.RegistrationSettings,
+	now time.Time,
+	poolAvailable int,
+	rec persistence.UserQuotaRecord,
+	joinedPool bool,
+) model.UserRefreshQuota {
 	resetAt := nextQuotaResetAt(now)
 	cacheTTLSec := settings.SharedPileCacheTTLSeconds
 	if cacheTTLSec <= 0 {
 		cacheTTLSec = defaultSharedPileCacheTTL
-	}
-	rec, err := m.repository.GetUserQuota(userID, today)
-	if err != nil {
-		return model.UserRefreshQuota{}, err
 	}
 	dailyRem := settings.FreeDailyRefreshQuota - rec.DailyUsed
 	if dailyRem < 0 {
@@ -424,7 +436,6 @@ func (m *Manager) userRefreshQuotaWithPoolCount(userID string, poolAvailable int
 			status = "valid"
 		}
 	}
-	joinedPool := m.userJoinedHealthyPool(userID)
 	unlimitedActive := status == "valid" && (!settings.RequirePoolShareForUnlimited || joinedPool)
 	return model.UserRefreshQuota{
 		HasPersonalCookie:            hasPersonal,
@@ -444,7 +455,7 @@ func (m *Manager) userRefreshQuotaWithPoolCount(userID string, poolAvailable int
 		FreeUserWatchAllowed:         settings.FreeUserWatchAllowed,
 		CookieGuideURL:               settings.CookieGuideURL,
 		PublicPoolAvailable:          poolAvailable,
-	}, nil
+	}
 }
 
 func (m *Manager) attachQuota(userID string, snapshot model.DashboardSnapshot) model.DashboardSnapshot {

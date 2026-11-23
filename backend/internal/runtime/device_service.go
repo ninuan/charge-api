@@ -17,7 +17,7 @@ func (m *Manager) Snapshot(userID string) (model.DashboardSnapshot, error) {
 	}
 	runtime.recordRequest()
 	m.recordMetric(userID, "request")
-	return m.attachQuota(userID, runtime.store.Snapshot()), m.Save()
+	return m.attachQuota(userID, runtime.store.Snapshot()), nil
 }
 
 func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pile, error) {

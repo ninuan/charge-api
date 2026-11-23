@@ -67,4 +67,40 @@ describe("AdminIncidentPanel", () => {
     )
     expect(await screen.findByText("已联系用户")).toBeInTheDocument()
   })
+
+  it("reuses overview exceptions in compact mode and clears stale overrides on refresh", async () => {
+    const user = userEvent.setup()
+    vi.mocked(adminApi.updateIncident).mockImplementation(
+      async (_id, payload) => ({
+        ...issue,
+        ...payload,
+        handledBy: "admin",
+        handledAt: "2026-07-27T10:00:00Z",
+      })
+    )
+    const initial = [issue]
+    const { rerender } = render(
+      <AdminIncidentPanel initialIssues={initial} onUser={vi.fn()} compact />
+    )
+    expect(screen.getByText("2 个充电口处于离线状态")).toBeInTheDocument()
+    expect(adminApi.incidents).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "确认" }))
+    await user.type(
+      screen.getByPlaceholderText("处理备注（可选，最多 500 字）"),
+      "首次确认"
+    )
+    await user.click(screen.getByRole("button", { name: "确认更新" }))
+    expect(await screen.findByText("首次确认")).toBeInTheDocument()
+
+    rerender(
+      <AdminIncidentPanel
+        initialIssues={[{ ...issue, status: "open", note: "服务端最新状态" }]}
+        onUser={vi.fn()}
+        compact
+      />
+    )
+    expect(screen.getByText("服务端最新状态")).toBeInTheDocument()
+    expect(screen.queryByText("首次确认")).not.toBeInTheDocument()
+  })
 })

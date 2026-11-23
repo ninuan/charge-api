@@ -128,3 +128,24 @@ it("starts one initialization under StrictMode and prioritizes the snapshot", as
   )
   expect(mocks.connect).toHaveBeenCalledTimes(1)
 })
+
+it("fires fetchMe and fetchSnapshot in parallel on cold dashboard loads", async () => {
+  mocks.user = null
+  let resolveMe!: (value: { id: string; role: string }) => void
+  mocks.fetchMe.mockReturnValue(
+    new Promise((resolve) => {
+      resolveMe = resolve
+    })
+  )
+  render(
+    <DashboardSession>
+      <Child />
+    </DashboardSession>
+  )
+  await waitFor(() => {
+    expect(mocks.fetchMe).toHaveBeenCalledTimes(1)
+    expect(mocks.snapshot).toHaveBeenCalledTimes(1)
+  })
+  resolveMe({ id: "user", role: "user" })
+  await screen.findByText("已准备好")
+})

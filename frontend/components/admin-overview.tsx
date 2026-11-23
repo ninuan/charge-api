@@ -29,6 +29,7 @@ export function AdminOverview({
       <section className="wb-admin-priority">
         <AdminIncidentPanel
           initialIssues={stats?.exceptions}
+          externalLoading={trendLoading && stats === null}
           onUser={onUser}
           compact
         />

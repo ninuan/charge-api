@@ -869,6 +869,73 @@ func TestRegisterReturnsTypedErrorCodes(t *testing.T) {
 	}
 }
 
+func TestWithRootRedirectUsesSessionRoleWithoutCaching(t *testing.T) {
+	server, manager, sessions := newTestServer(t)
+	user, err := manager.CreateUser(model.UserCreateRequest{
+		Username: "redirect-user", Password: "password123", Role: model.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	userSession, err := sessions.Create(user.ID)
+	if err != nil {
+		t.Fatalf("create user session: %v", err)
+	}
+	var adminID string
+	for _, summary := range manager.ListUsers() {
+		if summary.User.Role == model.RoleAdmin {
+			adminID = summary.User.ID
+			break
+		}
+	}
+	adminSession, err := sessions.Create(adminID)
+	if err != nil {
+		t.Fatalf("create admin session: %v", err)
+	}
+
+	nextCalled := false
+	handler := WithCacheHeaders(server.WithRootRedirect(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	})))
+
+	for _, tc := range []struct {
+		name         string
+		token        string
+		wantLocation string
+	}{
+		{"anonymous", "", "/login/"},
+		{"invalid token", "bogus-token", "/login/"},
+		{"regular user", userSession.Token, "/dashboard/"},
+		{"admin", adminSession.Token, "/admin/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tc.token != "" {
+				req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tc.token})
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, want 302", rec.Code)
+			}
+			if got := rec.Header().Get("Location"); got != tc.wantLocation {
+				t.Fatalf("Location = %q, want %q", got, tc.wantLocation)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q, want no-store", got)
+			}
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if !nextCalled || rec.Code != http.StatusOK {
+		t.Fatalf("non-root path did not pass through: nextCalled=%v code=%d", nextCalled, rec.Code)
+	}
+}
+
 func TestLoginRequiresCaptchaAfterTwoCredentialFailures(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	server.captcha = &fixedCaptcha{answer: "24682"}

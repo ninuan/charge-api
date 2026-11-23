@@ -34,8 +34,6 @@ import {
 import type { DashboardSnapshot, Pile, Port, SharedPile } from "@/lib/types"
 import { AnnouncementStrip } from "@/components/announcement-strip"
 import { AppShell } from "@/components/app-shell"
-import { AddPileDialog } from "@/components/add-pile-dialog"
-import { UsageGuideDialog } from "@/components/usage-guide-dialog"
 import {
   Dialog,
   DialogContent,
@@ -75,6 +73,30 @@ import {
   WorkbenchLoading,
   WorkbenchSearch,
 } from "./surfaces"
+
+const AddPileDialog = dynamic(
+  () =>
+    import("@/components/add-pile-dialog").then(
+      (module) => module.AddPileDialog
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <WorkbenchButton disabled>
+        <PlusIcon />
+        添加充电桩
+      </WorkbenchButton>
+    ),
+  }
+)
+
+const UsageGuideDialog = dynamic(
+  () =>
+    import("@/components/usage-guide-dialog").then(
+      (module) => module.UsageGuideDialog
+    ),
+  { ssr: false }
+)
 
 const WatchRuleDialog = dynamic(
   () =>

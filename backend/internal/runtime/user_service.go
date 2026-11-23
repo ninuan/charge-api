@@ -278,7 +278,12 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 	}
 	m.mu.RUnlock()
 
+	settings := m.Settings()
+	now := time.Now()
+	today := quotaTodayString(now)
 	poolAvail := m.PublicPoolAvailableCount()
+	quotasByUser, quotasErr := m.repository.ListAllUserQuotas(today)
+	healthyPoolOwners, poolOwnersErr := m.repository.ListHealthyPoolOwnerIDs()
 	summaries := make([]model.AdminUserSummary, 0, len(users))
 	for i, user := range users {
 		runtime := runtimes[i]
@@ -297,8 +302,17 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 			summary.HasCookie = summary.Credential.HasCredential
 			summary.SnapshotUpdatedAt = latestSnapshotDataTime(snapshot, user.CreatedAt)
 			summary.LastRefresh = snapshot.Refresh
-			if quota, qErr := m.userRefreshQuotaWithPoolCount(user.ID, poolAvail); qErr == nil {
-				summary.Quota = &quota
+			if user.Enabled {
+				if quotasErr == nil && poolOwnersErr == nil {
+					rec, ok := quotasByUser[user.ID]
+					if !ok {
+						rec = persistence.UserQuotaRecord{UserID: user.ID, DailyDate: today, DailyProbeDate: today}
+					}
+					quota := buildUserRefreshQuota(runtime, settings, now, poolAvail, rec, healthyPoolOwners[user.ID])
+					summary.Quota = &quota
+				} else if quota, qErr := m.userRefreshQuotaWithPoolCount(user.ID, poolAvail); qErr == nil {
+					summary.Quota = &quota
+				}
 			}
 			rawDiagnostics := runtime.recoveryDiagnosticsSnapshot()
 			filteredDiagnostics := make([]model.RecoveryDiagnostic, 0, len(rawDiagnostics))

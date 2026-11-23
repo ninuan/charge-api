@@ -184,6 +184,32 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", s.handleHealth)
 }
 
+// WithRootRedirect short-circuits GET/HEAD / on the server using the session
+// cookie, avoiding a full SPA boot + /api/auth/me round-trip just to redirect.
+func (s *Server) WithRootRedirect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		target := "/login/"
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			if session, ok := s.sessions.Get(cookie.Value); ok {
+				if user, ok := s.manager.User(session.UserID); ok {
+					if user.Role == model.RoleAdmin {
+						target = "/admin/"
+					} else {
+						target = "/dashboard/"
+					}
+				}
+			}
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Add("Vary", "Cookie")
+		http.Redirect(w, r, target, http.StatusFound)
+	})
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",

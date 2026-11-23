@@ -1,12 +1,20 @@
 "use client"
 import type { ComponentProps } from "react"
+import dynamic from "next/dynamic"
 import { AppShell } from "@/components/app-shell"
-import { UsageGuideDialog } from "@/components/usage-guide-dialog"
 import { useDashboard } from "@/lib/dashboard-context"
 import { useWatch } from "@/lib/watch-context"
 import { useNotifications } from "@/lib/notification-context"
 import { useOnline } from "@/lib/browser-state"
 import { dashboardHref } from "@/lib/workbench"
+
+const UsageGuideDialog = dynamic(
+  () =>
+    import("@/components/usage-guide-dialog").then(
+      (module) => module.UsageGuideDialog
+    ),
+  { ssr: false }
+)
 
 export function UserWorkbenchShell(props: ComponentProps<typeof AppShell>) {
   const { snapshot, streamState } = useDashboard(),

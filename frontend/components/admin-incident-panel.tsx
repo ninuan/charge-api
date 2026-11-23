@@ -86,17 +86,23 @@ function matchesFilter(issue: SystemException, filter: string) {
 
 type AdminIncidentPanelProps = {
   initialIssues?: SystemException[]
+  externalLoading?: boolean
   onUser: (id: string) => void
   compact?: boolean
 }
 
 export function AdminIncidentPanel({
-  initialIssues = [],
+  initialIssues,
+  externalLoading = false,
   onUser,
   compact = false,
 }: AdminIncidentPanelProps) {
-  const [issues, setIssues] = useState(initialIssues)
-  const [loading, setLoading] = useState(!initialIssues.length)
+  const [issues, setIssues] = useState<SystemException[]>(initialIssues ?? [])
+  const [compactOverrides, setCompactOverrides] = useState<{
+    source: SystemException[] | undefined
+    items: Record<string, SystemException>
+  }>({ source: initialIssues, items: {} })
+  const [loading, setLoading] = useState(!compact && !(initialIssues?.length))
   const [filter, setFilter] = useState("all")
   const [status, setStatus] = useState<"active" | SystemException["status"]>(
     "active"
@@ -111,6 +117,7 @@ export function AdminIncidentPanel({
   const online = useOnline()
 
   useEffect(() => {
+    if (compact) return
     let ignore = false
     void adminApi
       .incidents()
@@ -137,11 +144,26 @@ export function AdminIncidentPanel({
     return () => {
       ignore = true
     }
-  }, [])
+  }, [compact])
+
+  const activeCompactOverrides =
+    compactOverrides.source === initialIssues ? compactOverrides.items : null
+  const effectiveIssues = useMemo(
+    () =>
+      compact
+        ? (initialIssues ?? []).map(
+            (item) => activeCompactOverrides?.[item.id] ?? item
+          )
+        : issues,
+    [activeCompactOverrides, compact, initialIssues, issues]
+  )
+  const isLoading = compact
+    ? externalLoading && initialIssues === undefined
+    : loading
 
   const visible = useMemo(
     () =>
-      issues.filter(
+      effectiveIssues.filter(
         (issue) =>
           matchesFilter(issue, filter) &&
           `${issue.username} ${issue.message} ${issue.deviceId ?? ""}`
@@ -151,7 +173,7 @@ export function AdminIncidentPanel({
             ? issue.status !== "resolved"
             : issue.status === status)
       ),
-    [filter, issues, status, search]
+    [filter, effectiveIssues, status, search]
   )
 
   function startUpdate(
@@ -171,9 +193,19 @@ export function AdminIncidentPanel({
         status: nextStatus,
         note,
       })
-      setIssues((current) =>
-        current.map((issue) => (issue.id === updated.id ? updated : issue))
-      )
+      if (compact) {
+        setCompactOverrides((current) => ({
+          source: initialIssues,
+          items: {
+            ...(current.source === initialIssues ? current.items : {}),
+            [updated.id]: updated,
+          },
+        }))
+      } else {
+        setIssues((current) =>
+          current.map((issue) => (issue.id === updated.id ? updated : issue))
+        )
+      }
       notify.success(`异常已标记为${statusLabels[updated.status]}`)
       setTarget(null)
     } catch (reason) {
@@ -284,7 +316,7 @@ export function AdminIncidentPanel({
             key={`${filter}-${status}`}
             className="grid gap-2 motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in"
           >
-            {loading ? (
+            {isLoading ? (
               <>
                 <Skeleton className="h-16 w-full" />
                 <Skeleton className="h-16 w-full" />

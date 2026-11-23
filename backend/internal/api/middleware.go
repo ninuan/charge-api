@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Static HTML adds hashes for its exact inline scripts in StaticHandler.
@@ -19,9 +20,9 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"img-src 'self' data: https:; " +
 	"font-src 'self' data:; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"script-src 'self'; " +
+	"script-src 'self' https://static.cloudflareinsights.com; " +
 	"frame-src 'none'; " +
-	"connect-src 'self'"
+	"connect-src 'self' https://cloudflareinsights.com"
 
 func WithSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +81,13 @@ var compressiblePrefixes = []string{
 	"image/svg+xml",
 }
 
+var gzipWriterPool = sync.Pool{
+	New: func() any {
+		writer, _ := gzip.NewWriterLevel(io.Discard, 5)
+		return writer
+	},
+}
+
 type gzipResponseWriter struct {
 	http.ResponseWriter
 	writer      *gzip.Writer
@@ -99,7 +107,9 @@ func (w *gzipResponseWriter) WriteHeader(status int) {
 		w.compress = true
 		header.Del("Content-Length")
 		header.Set("Content-Encoding", "gzip")
-		w.writer = gzip.NewWriter(w.ResponseWriter)
+		zw := gzipWriterPool.Get().(*gzip.Writer)
+		zw.Reset(w.ResponseWriter)
+		w.writer = zw
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
@@ -126,6 +136,9 @@ func (w *gzipResponseWriter) Flush() {
 func (w *gzipResponseWriter) Close() {
 	if w.writer != nil {
 		_ = w.writer.Close()
+		w.writer.Reset(io.Discard)
+		gzipWriterPool.Put(w.writer)
+		w.writer = nil
 	}
 }
 

@@ -46,7 +46,15 @@ export function DashboardSession({ children }: { children: ReactNode }) {
     setInitialLoading(true)
     setError(null)
     try {
-      const user = currentUser ?? (await fetchMe())
+      // Cold page loads to /dashboard/ issue /api/auth/me and /api/piles in
+      // parallel to avoid a 2-RTT waterfall; known admin sessions skip the user
+      // snapshot request completely.
+      const userPromise = currentUser ? Promise.resolve(currentUser) : fetchMe()
+      const snapshotPending =
+        currentUser?.role === "admin"
+          ? null
+          : Promise.allSettled([fetchSnapshot()])
+      const user = await userPromise
       if (current !== version.current) return
       if (!user) {
         router.replace("/login")
@@ -59,10 +67,11 @@ export function DashboardSession({ children }: { children: ReactNode }) {
       setAuthorized(true)
       // Auxiliary panels own their loading/error states; they must not hold
       // the pile workspace or its stream behind a slow notification request.
-      const snapshotPending = Promise.allSettled([fetchSnapshot()])
+      const resolvedSnapshotPending =
+        snapshotPending ?? Promise.allSettled([fetchSnapshot()])
       void loadWatch().catch(() => undefined)
       void loadNotifications().catch(() => undefined)
-      const [snapshotResult] = await snapshotPending
+      const [snapshotResult] = await resolvedSnapshotPending
       if (current !== version.current) return
       if (snapshotResult.status === "rejected")
         setError(
