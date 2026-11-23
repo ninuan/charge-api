@@ -219,7 +219,9 @@ func TestWxPusherBindingIsUserScopedAndUIDIsUnique(t *testing.T) {
 
 func TestWxPusherPollingIntervalAndRestartRecovery(t *testing.T) {
 	manager, owner, _ := newWatchTestManager(t)
-	now := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
+	// Use a current timestamp so NewManager's startup retention prune (based on
+	// wall clock) does not sweep the active bind session across calendar drift.
+	now := time.Now().UTC().Truncate(time.Second)
 	setReminderTestClock(manager, &now)
 	client := &fakeWxPusherBindingClient{now: &now}
 	session, err := manager.CreateWxPusherBindSession(context.Background(), owner.ID, client)
