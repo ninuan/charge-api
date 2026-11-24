@@ -103,6 +103,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       statusRef.current = nextStatus
       setStatus(nextStatus)
       setLoading(true)
+      setLoadingMore(false)
       setError(null)
       try {
         const page = await watchApi.notifications({ status: nextStatus })
@@ -158,29 +159,21 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   }, [loadingMore, nextCursor])
 
-  const markRead = useCallback(
-    async (notificationId: string) => {
-      const updated = await watchApi.markNotificationRead(notificationId)
-      const wasUnread =
-        notificationUnreadStateRef.current.get(updated.id) ??
-        items.some(
-          (notification) =>
-            notification.id === notificationId && !notification.readAt
-        )
-      notificationUnreadStateRef.current.set(updated.id, false)
-      setItems((current) =>
-        statusRef.current === "unread"
-          ? current.filter((notification) => notification.id !== updated.id)
-          : current.map((notification) =>
-              notification.id === updated.id ? updated : notification
-            )
-      )
-      if (wasUnread) {
-        setUnreadCount((current) => Math.max(0, current - 1))
-      }
-    },
-    [items]
-  )
+  const markRead = useCallback(async (notificationId: string) => {
+    const updated = await watchApi.markNotificationRead(notificationId)
+    const wasUnread = notificationUnreadStateRef.current.get(updated.id) ?? false
+    notificationUnreadStateRef.current.set(updated.id, false)
+    setItems((current) =>
+      statusRef.current === "unread"
+        ? current.filter((notification) => notification.id !== updated.id)
+        : current.map((notification) =>
+            notification.id === updated.id ? updated : notification
+          )
+    )
+    if (wasUnread) {
+      setUnreadCount((current) => Math.max(0, current - 1))
+    }
+  }, [])
 
   const markAllRead = useCallback(async () => {
     const result = await watchApi.markAllNotificationsRead()

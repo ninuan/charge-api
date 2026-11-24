@@ -458,22 +458,36 @@ function OverviewData({
     [revision, setRevision] = useState(0)
   useEffect(() => {
     let active = true
-    Promise.allSettled([adminApi.stats(), adminApi.trends(range)]).then(
-      ([s, t]) => {
+    adminApi
+      .stats()
+      .then((value) => {
+        if (active) setStats(value)
+      })
+      .catch((reason) => {
+        if (active) notify.error(reason, { title: "运行概览暂时无法读取" })
+      })
+    return () => {
+      active = false
+    }
+  }, [revision])
+  useEffect(() => {
+    let active = true
+    adminApi
+      .trends(range)
+      .then((value) => {
         if (!active) return
-        if (s.status === "fulfilled") setStats(s.value)
-        if (t.status === "fulfilled") {
-          setTrends(t.value)
-          setError(null)
-        } else
-          setError(
-            t.reason instanceof Error ? t.reason.message : "趋势暂时无法读取。"
-          )
-        if (s.status === "rejected")
-          notify.error(s.reason, { title: "运行概览暂时无法读取" })
-        setPending(false)
-      }
-    )
+        setTrends(value)
+        setError(null)
+      })
+      .catch((reason) => {
+        if (!active) return
+        setError(
+          reason instanceof Error ? reason.message : "趋势暂时无法读取。"
+        )
+      })
+      .finally(() => {
+        if (active) setPending(false)
+      })
     return () => {
       active = false
     }

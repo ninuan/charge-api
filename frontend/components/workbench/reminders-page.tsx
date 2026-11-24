@@ -12,10 +12,10 @@ import {
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Suspense, useState } from "react"
-import { WatchRuleDialog } from "@/components/watch-rule-dialog"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+
+const WatchRuleDialog = dynamic(
+  () =>
+    import("@/components/watch-rule-dialog").then(
+      (module) => module.WatchRuleDialog
+    ),
+  { ssr: false }
+)
 import { Field, FieldLabel } from "@/components/ui/field"
 import type { WatchRule, WatchTemporaryDuration } from "@/lib/api/generated"
 import { useDashboard } from "@/lib/dashboard-context"
@@ -200,7 +208,7 @@ function RemindersContent() {
                   ? "/account?tab=connection"
                   : "/account?tab=connection&connect=1"
               }
-              className="wb-btn wb-btn-outline"
+              className="wb-button"
             >
               {quota?.hasPersonalCookie &&
               quota.personalCookieStatus === "valid" &&

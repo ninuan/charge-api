@@ -916,3 +916,320 @@ for (const mode of ["login", "register"]) {
     })
   }
 }
+
+test("fluid layout adapts across critical viewport widths without overflow", async ({
+  page,
+}) => {
+  const richSnapshot: DashboardSnapshot = {
+    ...snapshot(),
+    piles: [
+      {
+        ...snapshot().piles[0],
+        openNum: 10,
+        ports: Array.from({ length: 10 }, (_, idx) => ({
+          id: idx + 1,
+          status: idx % 3 === 0 ? "idle" : idx % 3 === 1 ? "in_use" : "offline",
+          powerKw: idx % 3 === 1 ? 0.45 : 0,
+          energyKwh: idx % 3 === 1 ? 1.2 : 0,
+          sessionMin: idx % 3 === 1 ? 45 : 0,
+          usedSeconds: idx % 3 === 1 ? 2700 : 0,
+          remainingText: idx % 3 === 1 ? "1小时20分钟" : "",
+          updatedAt: "2026-09-11T02:00:00Z",
+        })),
+      },
+      {
+        ...snapshot().piles[0],
+        id: "2601201412385560002",
+        number: "61034279",
+        name: "南门地下车库西侧充电区",
+        address: "南门地下二层 B 区柱子旁",
+        openNum: 10,
+        ports: Array.from({ length: 10 }, (_, idx) => ({
+          id: idx + 1,
+          status: idx % 2 === 0 ? "idle" : "in_use",
+          powerKw: idx % 2 === 1 ? 0.32 : 0,
+          energyKwh: idx % 2 === 1 ? 0.8 : 0,
+          sessionMin: idx % 2 === 1 ? 30 : 0,
+          usedSeconds: idx % 2 === 1 ? 1800 : 0,
+          remainingText: idx % 2 === 1 ? "充满自停" : "",
+          updatedAt: "2026-09-11T02:00:00Z",
+        })),
+      },
+    ],
+    quota: {
+      freeDailyLimit: 20,
+      freeDailyUsed: 3,
+      freeDailyRemaining: 17,
+      bonusRemaining: 10,
+      totalFreeRemaining: 27,
+      publicPoolAvailable: 3,
+      contributedPileCount: 2,
+      dailyResetAt: "2026-09-12T00:00:00+08:00",
+      hasPersonalCookie: false,
+      personalCookieStatus: "none",
+      joinedPublicPool: false,
+      requirePoolShareForUnlimited: true,
+      unlimitedActive: false,
+      freeUserWatchAllowed: false,
+      pileContributionBonusQuota: 5,
+      sharedPileCacheTTLSeconds: 60,
+    },
+  }
+
+  await mockApi(page, richSnapshot)
+  await page.route("**/api/watch-rules", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "rule-1",
+          deviceId: "2601201412385560001",
+          mode: "temporary",
+          enabled: true,
+          expiresAt: "2026-09-11T05:00:00Z",
+          nextCheckAt: "2026-09-11T02:10:00Z",
+          createdAt: "2026-09-11T01:00:00Z",
+        },
+      ],
+    })
+  )
+  const pageErrors: string[] = []
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message)
+  })
+  await page.route("**/api/notifications**", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: "notice-1",
+            type: "pile_available",
+            title: "北门车棚已有空闲充电口",
+            message: "1 号口、4 号口当前空闲，可直接前往扫码充电。",
+            deviceId: "2601201412385560001",
+            portId: 1,
+            createdAt: "2026-09-11T02:00:00Z",
+            lastOccurredAt: "2026-09-11T02:00:00Z",
+            occurrenceCount: 1,
+          },
+        ],
+        unreadCount: 1,
+      },
+    })
+  )
+
+  const widths = [320, 390, 640, 765, 768, 850, 950, 1100, 1440]
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/dashboard/")
+  await expect(
+    page.getByRole("button", { name: "查看 北门车棚" })
+  ).toBeVisible()
+
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 })
+    const metrics = await page.evaluate(() => {
+      const overflow =
+        document.documentElement.scrollWidth > window.innerWidth + 1
+      const searchBtn = document.querySelector(".wb-global-search")
+      const searchSpan = document.querySelector(".wb-global-search > span")
+      const searchSpanVisible =
+        searchSpan instanceof HTMLElement &&
+        getComputedStyle(searchSpan).display !== "none"
+      const chips = Array.from(document.querySelectorAll(".wb-socket-chip"))
+      const minChipWidth = chips.reduce(
+        (min, el) => Math.min(min, el.getBoundingClientRect().width),
+        Infinity
+      )
+      return {
+        overflow,
+        searchWidth: searchBtn?.getBoundingClientRect().width ?? 0,
+        searchSpanVisible,
+        minChipWidth,
+      }
+    })
+    expect(metrics.overflow, `dashboard overflow at ${width}px`).toBe(false)
+    expect(
+      metrics.minChipWidth,
+      `socket chip too narrow at ${width}px`
+    ).toBeGreaterThanOrEqual(62)
+    if (width >= 1024) {
+      expect(
+        metrics.searchSpanVisible,
+        `search placeholder hidden at ${width}px`
+      ).toBe(true)
+    }
+  }
+
+  const routeChecks = [
+    { path: "/dashboard/reminders/", readyText: "北门车棚" },
+    { path: "/dashboard/notifications/", readyText: "1 号充电口空闲了" },
+    { path: "/account/?tab=connection", readyText: "平台连接" },
+  ]
+  for (const { path, readyText } of routeChecks) {
+    await page.goto(path)
+    await expect(page.getByText(readyText).first()).toBeVisible()
+    for (const width of [320, 390, 560, 768, 1100]) {
+      await page.setViewportSize({ width, height: 900 })
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth + 1
+      )
+      expect(overflow, `${path} overflow at ${width}px`).toBe(false)
+    }
+  }
+  expect(pageErrors, `unexpected page errors: ${pageErrors.join("; ")}`).toEqual(
+    []
+  )
+})
+
+test("admin user filters and header stay inside bounds across critical widths", async ({
+  page,
+}) => {
+  await mockApi(page, snapshot())
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({
+      json: {
+        id: "admin",
+        username: "admin",
+        role: "admin",
+        enabled: true,
+        refreshEnabled: true,
+      },
+    })
+  )
+  await page.route("**/api/admin/users**", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            user: {
+              id: "u1",
+              username: "student_a",
+              role: "user",
+              enabled: true,
+              refreshEnabled: true,
+              deviceLimit: 10,
+              createdAt: "2026-09-01T00:00:00Z",
+            },
+            dashboard: {
+              pileCount: 3,
+              portCount: 30,
+              idlePortCount: 12,
+              inUsePortCount: 15,
+              offlinePorts: 3,
+            },
+            lastRefresh: {
+              lastRemoteAt: "2026-09-11T02:00:00Z",
+              failedDevices: 0,
+            },
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 15,
+        totalPages: 1,
+      },
+    })
+  )
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/admin/?tab=users")
+  await expect(page.getByRole("heading", { name: "筛选用户" })).toBeVisible()
+
+  for (const width of [320, 390, 640, 765, 768, 850, 950, 1024, 1100, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    const result = await page.evaluate(() => {
+      const pageOverflow =
+        document.documentElement.scrollWidth > window.innerWidth + 1
+      const filterSection = document.querySelector(
+        'section[aria-label="用户筛选"]'
+      )
+      const filterOverflow = filterSection
+        ? filterSection.scrollWidth > filterSection.clientWidth + 1
+        : false
+      const header = document.querySelector(".wb-header-inner")
+      const headerOverflow = header
+        ? header.scrollWidth > header.clientWidth + 1
+        : false
+      return { pageOverflow, filterOverflow, headerOverflow }
+    })
+    expect(result.pageOverflow, `admin page overflow at ${width}px`).toBe(false)
+    expect(result.filterOverflow, `admin filter overflow at ${width}px`).toBe(
+      false
+    )
+    expect(result.headerOverflow, `admin header overflow at ${width}px`).toBe(
+      false
+    )
+  }
+})
+
+test("mobile topbar controls stay aligned and drawer auto-closes on desktop resize", async ({
+  page,
+}) => {
+  await mockApi(page, snapshot())
+  await page.setViewportSize({ width: 560, height: 844 })
+  await page.goto("/dashboard/")
+  await expect(
+    page.getByRole("button", { name: "查看 北门车棚" })
+  ).toBeVisible()
+
+  const topbarMetrics = await page.evaluate(() => {
+    const dot = document.querySelector(".wb-conn-chip .wb-pulse-dot")
+    const dotRect = dot?.getBoundingClientRect()
+    const searchRect = document
+      .querySelector(".wb-global-search")
+      ?.getBoundingClientRect()
+    const rightRect = document
+      .querySelector(".wb-header-right")
+      ?.getBoundingClientRect()
+    const heights = [
+      document.querySelector(".wb-mobile-menu-trigger button"),
+      document.querySelector(".wb-global-search"),
+      document.querySelector(".wb-header-icon-link"),
+      document.querySelector('.wb-header-right button[data-ui-button]'),
+      document.querySelector(".wb-avatar-link"),
+    ]
+      .filter((el): el is Element => Boolean(el))
+      .map((el) => el.getBoundingClientRect().height)
+    return {
+      dotVisible: Boolean(dotRect && dotRect.width > 0 && dotRect.height > 0),
+      searchToRightGap:
+        searchRect && rightRect ? rightRect.left - searchRect.right : 999,
+      minHeight: Math.min(...heights),
+      maxHeight: Math.max(...heights),
+    }
+  })
+
+  expect(topbarMetrics.dotVisible).toBe(true)
+  expect(topbarMetrics.searchToRightGap).toBeLessThanOrEqual(12)
+  expect(topbarMetrics.maxHeight - topbarMetrics.minHeight).toBeLessThanOrEqual(
+    2.5
+  )
+  expect(topbarMetrics.maxHeight).toBeLessThanOrEqual(36)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole("button", { name: "打开菜单" }).click()
+  const drawer = page.locator('[data-slot="sheet-content"]')
+  await expect(drawer).toBeVisible()
+
+  const drawerMetrics = await page.evaluate(() => {
+    const sheet = document.querySelector('[data-slot="sheet-content"]')
+    const closeBtn = sheet?.querySelector('[data-slot="sheet-close"]')
+    const account = sheet?.querySelector(".wb-menu-account")
+    const sheetRect = sheet?.getBoundingClientRect()
+    const closeRect = closeBtn?.getBoundingClientRect()
+    const accountRect = account?.getBoundingClientRect()
+    return {
+      sheetWidth: sheetRect?.width ?? 0,
+      closeHeight: closeRect?.height ?? 0,
+      accountBottomGap:
+        sheetRect && accountRect ? sheetRect.bottom - accountRect.bottom : 999,
+    }
+  })
+
+  expect(drawerMetrics.sheetWidth).toBeLessThanOrEqual(302)
+  expect(drawerMetrics.closeHeight).toBeLessThanOrEqual(34)
+  expect(drawerMetrics.accountBottomGap).toBeLessThanOrEqual(24)
+
+  await page.setViewportSize({ width: 1024, height: 844 })
+  await expect(drawer).toHaveCount(0)
+})

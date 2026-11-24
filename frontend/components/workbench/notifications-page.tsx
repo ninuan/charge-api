@@ -92,6 +92,7 @@ function NotificationsContent() {
   const selected =
     items.find((item) => item.id === selectedId) ||
     (opened?.id === selectedId ? opened : null)
+  const needle = query.trim().toLocaleLowerCase()
   const shown = items
     .filter(
       (item) =>
@@ -101,11 +102,13 @@ function NotificationsContent() {
           : notificationRequiresAction(item.type) &&
             (status === "pending" ? !item.resolvedAt : !!item.resolvedAt))
     )
-    .filter((item) =>
-      `${notificationPresentation(item).title} ${item.message}`.includes(
-        query.trim()
-      )
-    )
+    .filter((item) => {
+      if (!needle) return true
+      const presentation = notificationPresentation(item)
+      return `${presentation.title} ${presentation.message} ${item.message}`
+        .toLocaleLowerCase()
+        .includes(needle)
+    })
   useEffect(() => {
     void load(status).catch(() => undefined)
   }, [load, status])

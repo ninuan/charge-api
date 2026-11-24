@@ -110,6 +110,7 @@ export function WorkbenchAdminUsers({
     }
   }, [key, selectedId, revision])
   const apply = async (next: AdminUserListQuery = query) => {
+    const before = window.location.search
     updatePageQuery({
       tab: "users",
       user: null,
@@ -119,7 +120,9 @@ export function WorkbenchAdminUsers({
       credential: next.credential === "all" ? null : next.credential,
       health: next.health === "all" ? null : next.health,
     })
-    setRevision((value) => value + 1)
+    if (window.location.search === before) {
+      setRevision((value) => value + 1)
+    }
   }
   if (selectedId)
     return (

@@ -33,52 +33,15 @@ func StaticHandler(directory string) http.Handler {
 	var cacheMu sync.RWMutex
 	htmlCache := make(map[string]cachedHTML)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := path.Clean("/" + r.URL.Path)
-		if strings.HasSuffix(r.URL.Path, "/") {
-			name = path.Join(name, "index.html")
-		}
-		if !strings.HasSuffix(name, ".html") {
-			file, err := root.Open(name)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			info, statErr := file.Stat()
-			_ = file.Close()
-			if statErr != nil {
-				http.NotFound(w, r)
-				return
-			}
-			if info.IsDir() {
-				// Next.js static export (trailingSlash: true) exports routes as
-				// <dir>/index.html. Allow directories with index.html while blocking
-				// directory listings on asset folders like /_next/static.
-				indexFile, indexErr := root.Open(path.Join(name, "index.html"))
-				if indexErr != nil {
-					http.NotFound(w, r)
-					return
-				}
-				indexInfo, indexStatErr := indexFile.Stat()
-				_ = indexFile.Close()
-				if indexStatErr != nil || !indexInfo.Mode().IsRegular() {
-					http.NotFound(w, r)
-					return
-				}
-			}
-			files.ServeHTTP(w, r)
-			return
-		}
+	loadHTML := func(name string) (cachedHTML, bool, error) {
 		file, err := root.Open(name)
 		if err != nil {
-			http.NotFound(w, r)
-			return
+			return cachedHTML{}, false, nil
 		}
 		defer file.Close()
 		info, err := file.Stat()
 		if err != nil || !info.Mode().IsRegular() {
-			http.NotFound(w, r)
-			return
+			return cachedHTML{}, false, nil
 		}
 		cacheMu.RLock()
 		entry, hit := htmlCache[name]
@@ -86,8 +49,7 @@ func StaticHandler(directory string) http.Handler {
 		if !hit || !entry.modTime.Equal(info.ModTime()) || entry.size != info.Size() {
 			body, readErr := security.ReadLimited(file, 4<<20)
 			if readErr != nil {
-				http.Error(w, "static page unavailable", http.StatusInternalServerError)
-				return
+				return cachedHTML{}, false, readErr
 			}
 			sum := sha256.Sum256(body)
 			entry = cachedHTML{
@@ -100,6 +62,78 @@ func StaticHandler(directory string) http.Handler {
 			cacheMu.Lock()
 			htmlCache[name] = entry
 			cacheMu.Unlock()
+		}
+		return entry, true, nil
+	}
+
+	serveNotFound := func(w http.ResponseWriter, r *http.Request, name string) {
+		// Never allow a 404 response (for example under /_next/static/) to inherit
+		// long-lived immutable cache headers.
+		w.Header().Set("Cache-Control", "no-store")
+		// Only render the exported 404.html page for frontend HTML/route requests,
+		// keeping unknown /api/ paths and missing static assets as plain 404s.
+		isNonPagePrefix := name == "/api" || strings.HasPrefix(name, "/api/") ||
+			name == "/_next" || strings.HasPrefix(name, "/_next/")
+		isRouteRequest := !isNonPagePrefix &&
+			(strings.HasSuffix(name, ".html") || !strings.Contains(path.Base(name), "."))
+		if isRouteRequest {
+			if entry, ok, err := loadHTML("/404.html"); err == nil && ok {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("Content-Security-Policy", entry.csp)
+				w.WriteHeader(http.StatusNotFound)
+				if r.Method != http.MethodHead {
+					_, _ = w.Write(entry.body)
+				}
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := path.Clean("/" + r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/") {
+			name = path.Join(name, "index.html")
+		}
+		if !strings.HasSuffix(name, ".html") {
+			file, err := root.Open(name)
+			if err != nil {
+				serveNotFound(w, r, name)
+				return
+			}
+			info, statErr := file.Stat()
+			_ = file.Close()
+			if statErr != nil {
+				serveNotFound(w, r, name)
+				return
+			}
+			if info.IsDir() {
+				// Next.js static export (trailingSlash: true) exports routes as
+				// <dir>/index.html. Allow directories with index.html while blocking
+				// directory listings on asset folders like /_next/static.
+				indexFile, indexErr := root.Open(path.Join(name, "index.html"))
+				if indexErr != nil {
+					serveNotFound(w, r, name)
+					return
+				}
+				indexInfo, indexStatErr := indexFile.Stat()
+				_ = indexFile.Close()
+				if indexStatErr != nil || !indexInfo.Mode().IsRegular() {
+					serveNotFound(w, r, name)
+					return
+				}
+			}
+			files.ServeHTTP(w, r)
+			return
+		}
+		entry, ok, err := loadHTML(name)
+		if err != nil {
+			http.Error(w, "static page unavailable", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			serveNotFound(w, r, name)
+			return
 		}
 		w.Header().Set("Content-Security-Policy", entry.csp)
 		w.Header().Set("ETag", entry.etag)

@@ -313,7 +313,10 @@ func (m *Manager) Save() error {
 func (m *Manager) saveUserState(userID string) error {
 	m.saveMu.Lock()
 	defer m.saveMu.Unlock()
+	return m.saveUserStateLocked(userID)
+}
 
+func (m *Manager) saveUserStateLocked(userID string) error {
 	m.mu.RLock()
 	user, ok := m.users[userID]
 	runtime := m.runtimes[userID]
@@ -331,7 +334,10 @@ func (m *Manager) saveUserState(userID string) error {
 func (m *Manager) saveSettings() error {
 	m.saveMu.Lock()
 	defer m.saveMu.Unlock()
+	return m.saveSettingsLocked()
+}
 
+func (m *Manager) saveSettingsLocked() error {
 	m.mu.RLock()
 	settings := m.settings
 	m.mu.RUnlock()

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,6 +173,25 @@ func TestTemporaryWatchRuleCapsAtPowerOffAndRejectsOutage(t *testing.T) {
 		DeviceID: testWatchPileTwo, Mode: &mode,
 	}); !errors.Is(err, ErrWatchPowerOff) {
 		t.Fatalf("power-off creation error = %v", err)
+	}
+}
+
+func TestWatchPowerOffErrorFormatsConfiguredTimezoneAndFallbacks(t *testing.T) {
+	restoreAt := time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC)
+
+	utcErr := WatchPowerOffError{RestoreAt: restoreAt, Timezone: "UTC"}
+	if got := utcErr.Error(); !strings.Contains(got, "12:30") {
+		t.Fatalf("UTC timezone error = %q, want 12:30", got)
+	}
+
+	emptyErr := WatchPowerOffError{RestoreAt: restoreAt}
+	if got := emptyErr.Error(); !strings.Contains(got, "20:30") {
+		t.Fatalf("empty timezone fallback error = %q, want 20:30 (UTC+8)", got)
+	}
+
+	invalidErr := WatchPowerOffError{RestoreAt: restoreAt, Timezone: "Invalid/Zone"}
+	if got := invalidErr.Error(); !strings.Contains(got, "20:30") {
+		t.Fatalf("invalid timezone fallback error = %q, want 20:30 (UTC+8)", got)
 	}
 }
 

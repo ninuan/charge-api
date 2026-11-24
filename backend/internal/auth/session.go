@@ -38,6 +38,7 @@ type SessionClientInfo struct {
 type SessionManager struct {
 	mu                 sync.RWMutex
 	sessions           map[string]Session
+	revocationGen      uint64
 	ttl                time.Duration
 	maxSessionsPerUser int
 	stopCleanup        chan struct{}
@@ -101,6 +102,9 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 	}
 
 	if m.store != nil {
+		m.mu.RLock()
+		gen := m.revocationGen
+		m.mu.RUnlock()
 		if err := m.store.SaveSession(persistence.SessionRecord{
 			TokenHash:    hashSessionToken(session.Token),
 			UserID:       session.UserID,
@@ -117,10 +121,8 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 		records, listErr := m.store.ListUserSessions(userID)
 		m.mu.Lock()
 		m.cleanupExpiredLocked(now)
-		m.sessions[session.Token] = session
-		m.limitUserSessionsLocked(userID)
-		// Keep in-memory cache in sync with SQLite eviction (including sessions
-		// cached before a restart-evicted limit was hit).
+		// Always keep in-memory cache in sync with SQLite eviction for this user,
+		// even when an unrelated revocation incremented revocationGen.
 		if listErr == nil {
 			active := make(map[string]struct{}, len(records))
 			for _, record := range records {
@@ -134,6 +136,24 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 					delete(m.sessions, token)
 				}
 			}
+		} else if m.revocationGen != gen {
+			for token, cached := range m.sessions {
+				if cached.UserID == userID {
+					delete(m.sessions, token)
+				}
+			}
+		}
+		// Only cache the new session when no revocation raced with SaveSession;
+		// otherwise let subsequent Get() verify the authoritative SQLite row.
+		if m.revocationGen == gen {
+			m.sessions[session.Token] = session
+			m.limitUserSessionsLocked(userID)
+		}
+		// SaveSession may have evicted an older session when enforcing
+		// maxSessionsPerUser; bump revocationGen so a concurrent Get() for that
+		// evicted token cannot repopulate m.sessions.
+		if m.maxSessionsPerUser > 0 {
+			m.revocationGen++
 		}
 		m.mu.Unlock()
 		return session, nil
@@ -151,16 +171,18 @@ func (m *SessionManager) Get(token string) (Session, bool) {
 	now := time.Now()
 	m.mu.RLock()
 	session, ok := m.sessions[token]
+	gen := m.revocationGen
 	m.mu.RUnlock()
 
 	if ok {
 		if now.After(session.ExpiresAt) {
-			m.mu.Lock()
-			delete(m.sessions, token)
-			m.mu.Unlock()
 			if m.store != nil {
 				_ = m.store.DeleteSession(hashSessionToken(token))
 			}
+			m.mu.Lock()
+			delete(m.sessions, token)
+			m.revocationGen++
+			m.mu.Unlock()
 			return Session{}, false
 		}
 		return session, true
@@ -190,7 +212,9 @@ func (m *SessionManager) Get(token string) (Session, bool) {
 		return Session{}, false
 	}
 	m.mu.Lock()
-	m.sessions[token] = session
+	if m.revocationGen == gen {
+		m.sessions[token] = session
+	}
 	m.mu.Unlock()
 	return session, true
 }
@@ -221,27 +245,29 @@ func (m *SessionManager) Touch(token string) {
 }
 
 func (m *SessionManager) Delete(token string) {
-	m.mu.Lock()
-	delete(m.sessions, token)
-	m.mu.Unlock()
 	if m.store != nil {
 		_ = m.store.DeleteSession(hashSessionToken(token))
 	}
+	m.mu.Lock()
+	delete(m.sessions, token)
+	m.revocationGen++
+	m.mu.Unlock()
 }
 
 func (m *SessionManager) DeleteUser(userID string) error {
+	if m.store != nil {
+		if err := m.store.DeleteUserSessions(userID); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	for token, session := range m.sessions {
 		if session.UserID == userID {
 			delete(m.sessions, token)
 		}
 	}
+	m.revocationGen++
 	m.mu.Unlock()
-	if m.store != nil {
-		if err := m.store.DeleteUserSessions(userID); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -287,16 +313,19 @@ func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView,
 }
 
 func (m *SessionManager) DeleteOthers(userID, currentToken string) error {
+	if m.store != nil {
+		if err := m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken)); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	for token, session := range m.sessions {
 		if session.UserID == userID && token != currentToken {
 			delete(m.sessions, token)
 		}
 	}
+	m.revocationGen++
 	m.mu.Unlock()
-	if m.store != nil {
-		return m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken))
-	}
 	return nil
 }
 

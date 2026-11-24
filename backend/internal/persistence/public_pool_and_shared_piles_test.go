@@ -178,7 +178,11 @@ func TestGranularPersistenceAndSharedPileBatchLookup(t *testing.T) {
 	if err := store.SaveUserState(user1, UserState{Cookie: "wxopenid=alice; info=1", DeviceIDs: []string{"100001"}}); err != nil {
 		t.Fatalf("SaveUserState user1: %v", err)
 	}
-	invite := model.InviteCode{ID: "inv_1", Code: "CHG-TEST1", Enabled: true, CreatedAt: now, UsedCount: 1}
+	invite := model.InviteCode{ID: "inv_1", Code: "CHG-TEST1", Enabled: true, CreatedAt: now, UsedCount: 0}
+	if err := store.SaveInvite(invite); err != nil {
+		t.Fatalf("SaveInvite: %v", err)
+	}
+	invite.UsedCount = 1
 	if err := store.SaveUserAndInvite(user2, UserState{Cookie: "wxopenid=bob; info=2"}, &invite); err != nil {
 		t.Fatalf("SaveUserAndInvite user2: %v", err)
 	}

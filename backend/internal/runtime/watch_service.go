@@ -35,10 +35,17 @@ var (
 
 type WatchPowerOffError struct {
 	RestoreAt time.Time
+	Timezone  string
 }
 
 func (e WatchPowerOffError) Error() string {
-	return fmt.Sprintf("当前处于计划断电时段，预计 %s 恢复供电", e.RestoreAt.In(time.FixedZone("UTC+8", 8*60*60)).Format("01月02日 15:04"))
+	loc := time.FixedZone("UTC+8", 8*60*60)
+	if tz := strings.TrimSpace(e.Timezone); tz != "" {
+		if loaded, err := time.LoadLocation(tz); err == nil {
+			loc = loaded
+		}
+	}
+	return fmt.Sprintf("当前处于计划断电时段，预计 %s 恢复供电", e.RestoreAt.In(loc).Format("01月02日 15:04"))
 }
 
 func (e WatchPowerOffError) Unwrap() error { return ErrWatchPowerOff }
@@ -678,7 +685,10 @@ func temporaryWatchExpiry(
 		return time.Time{}, ErrWatchRuleInvalid
 	}
 	if inPowerOff {
-		return time.Time{}, WatchPowerOffError{RestoreAt: restoreAt}
+		return time.Time{}, WatchPowerOffError{
+			RestoreAt: restoreAt,
+			Timezone:  settings.ScheduledPowerOffTimezone,
+		}
 	}
 	selected := model.WatchDurationTwoHours
 	if duration != nil {

@@ -307,7 +307,10 @@ export function AdminTrendPanel({
 
             <div className="overflow-x-auto rounded-lg border bg-muted/10 px-2 pt-4 pb-2">
               <div
-                className="flex h-52 min-w-[38rem] items-end gap-1.5"
+                className={cn(
+                  "flex h-52 items-end gap-1.5",
+                  trends.points.length > 10 ? "min-w-[34rem]" : "min-w-0"
+                )}
                 role="group"
                 aria-label={`${ranges.find((item) => item.value === trends.window.range)?.label}${selectedMetric.label}趋势`}
               >

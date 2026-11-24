@@ -8,15 +8,11 @@ import {
   LogOutIcon,
   ShieldCheckIcon,
 } from "lucide-react"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { AppShell } from "@/components/app-shell"
-import { AccountSecurityPanel } from "@/components/account-security-panel"
-import { AppearanceSettings } from "@/components/appearance-settings"
-import { BrowserNotificationSetting } from "@/components/notification-center"
-import { WxPusherChannelCard } from "@/components/wxpusher-channel-card"
-import { QuietHoursForm } from "@/components/watch-management-sheet"
 import {
   Dialog,
   DialogContent,
@@ -42,6 +38,46 @@ import {
   WorkbenchError,
   WorkbenchLoading,
 } from "./surfaces"
+
+const AccountSecurityPanel = dynamic(
+  () =>
+    import("@/components/account-security-panel").then(
+      (module) => module.AccountSecurityPanel
+    ),
+  { ssr: false }
+)
+
+const AppearanceSettings = dynamic(
+  () =>
+    import("@/components/appearance-settings").then(
+      (module) => module.AppearanceSettings
+    ),
+  { ssr: false }
+)
+
+const BrowserNotificationSetting = dynamic(
+  () =>
+    import("@/components/browser-notification-setting").then(
+      (module) => module.BrowserNotificationSetting
+    ),
+  { ssr: false }
+)
+
+const WxPusherChannelCard = dynamic(
+  () =>
+    import("@/components/wxpusher-channel-card").then(
+      (module) => module.WxPusherChannelCard
+    ),
+  { ssr: false }
+)
+
+const QuietHoursForm = dynamic(
+  () =>
+    import("@/components/quiet-hours-form").then(
+      (module) => module.QuietHoursForm
+    ),
+  { ssr: false }
+)
 
 export function AccountWorkbench() {
   return (
@@ -449,7 +485,7 @@ function PlatformConnection() {
               href={quota.cookieGuideUrl}
               target="_blank"
               rel="noreferrer"
-              className="wb-btn wb-btn-outline"
+              className="wb-button"
             >
               观看教程
               <ExternalLinkIcon size={14} />
@@ -654,7 +690,11 @@ function NotificationPreferences() {
               title="免打扰"
               description="按设置的时区生效，暂停外部提醒但保留站内记录。"
             />
-            <QuietHoursForm preference={preference} onSave={updatePreference} />
+            <QuietHoursForm
+              key={`${preference.quietHoursEnabled}:${preference.quietStartMinute}:${preference.quietEndMinute}`}
+              preference={preference}
+              onSave={updatePreference}
+            />
           </section>
         )
       )}

@@ -221,26 +221,19 @@ func (s *Server) handleYYBQR(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer s.endBindingChange(user.ID)
-		// A completed unbind/newer confirmation may have invalidated this QR
-		// between the initial ownership lookup and acquiring the mutation slot.
-		if s.findQR(sessionID, user.ID) != owned {
+		// A completed unbind/newer confirmation or eviction may have invalidated
+		// this QR between the initial ownership lookup and acquiring the mutation slot.
+		switch claim, cached := s.beginConfirmQR(sessionID, user.ID, owned); claim {
+		case qrConfirmInvalid:
 			writeCodedError(w, http.StatusNotFound, "QR_SESSION_INVALID", "二维码会话已失效，请重新生成。")
 			return
-		}
-		owned.mu.Lock()
-		if owned.result != nil {
-			result := owned.result
-			owned.mu.Unlock()
-			writeJSON(w, http.StatusOK, result)
+		case qrConfirmCached:
+			writeJSON(w, http.StatusOK, cached)
 			return
-		}
-		if owned.confirming {
-			owned.mu.Unlock()
+		case qrConfirmBusy:
 			writeCodedError(w, http.StatusConflict, "QR_CONFIRM_IN_PROGRESS", "正在确认绑定，请检查扫码状态。")
 			return
 		}
-		owned.confirming = true
-		owned.mu.Unlock()
 		defer func() { owned.mu.Lock(); owned.confirming = false; owned.mu.Unlock() }()
 		status, err := s.yybClient.PollQR(r.Context(), sessionID)
 		if err != nil {

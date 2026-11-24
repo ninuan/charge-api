@@ -1,5 +1,5 @@
 "use client"
-import type { ComponentProps } from "react"
+import { useMemo, type ComponentProps } from "react"
 import dynamic from "next/dynamic"
 import { AppShell } from "@/components/app-shell"
 import { useDashboard } from "@/lib/dashboard-context"
@@ -21,6 +21,26 @@ export function UserWorkbenchShell(props: ComponentProps<typeof AppShell>) {
     { rules } = useWatch(),
     { unreadCount } = useNotifications(),
     online = useOnline()
+  const counts = useMemo(
+    () => ({
+      reminders: rules.filter(
+        (rule) =>
+          rule.mode === "temporary" && rule.enabled && !rule.completedAt
+      ).length,
+      notifications: unreadCount,
+    }),
+    [rules, unreadCount]
+  )
+  const searchItems = useMemo(
+    () =>
+      snapshot.piles.map((pile) => ({
+        title: pile.name || pile.number,
+        description: `${pile.number} · ${pile.address}`,
+        href: dashboardHref(pile.id),
+      })),
+    [snapshot.piles]
+  )
+  const guideAction = useMemo(() => <UsageGuideDialog compact />, [])
   return (
     <AppShell
       {...props}
@@ -31,19 +51,9 @@ export function UserWorkbenchShell(props: ComponentProps<typeof AppShell>) {
             ? "reconnecting"
             : "connected"
       }
-      counts={{
-        reminders: rules.filter(
-          (rule) =>
-            rule.mode === "temporary" && rule.enabled && !rule.completedAt
-        ).length,
-        notifications: unreadCount,
-      }}
-      searchItems={snapshot.piles.map((pile) => ({
-        title: pile.name || pile.number,
-        description: `${pile.number} · ${pile.address}`,
-        href: dashboardHref(pile.id),
-      }))}
-      guideAction={<UsageGuideDialog compact />}
+      counts={counts}
+      searchItems={searchItems}
+      guideAction={guideAction}
     />
   )
 }

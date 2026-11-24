@@ -62,8 +62,8 @@ if [[ "$dry_run_output" != *"pnpm_fetch_timeout=180000"* ]] || [[ "$dry_run_outp
   exit 1
 fi
 
-if [[ "$dry_run_output" != *"health_ready=0"* ]] || [[ "$dry_run_output" != *"journalctl -u \"\$service_name\""* ]]; then
-  echo "dry-run should retry health checks and print service diagnostics on failure"
+if [[ "$dry_run_output" != *"health_ready=0"* ]] || [[ "$dry_run_output" != *"journalctl -u \"\$service_name\""* ]] || [[ "$dry_run_output" != *"../frontend/dist.prev"* ]] || [[ "$dry_run_output" != *"restart_ok=0"* ]]; then
+  echo "dry-run should retry health checks, guard restart failures, print diagnostics, and roll back frontend/dist on failure"
   exit 1
 fi
 
@@ -75,3 +75,18 @@ if [[ "$malicious_status" -eq 0 ]]; then
   echo "deploy-git should reject shell syntax in service settings"
   exit 1
 fi
+
+for bad_path in "/" "//" "/." "/.." "/opt/.." "relative/path" "/opt/has space"; do
+  set +e
+  bad_path_output="$(DEPLOY_PATH="$bad_path" DEPLOY_HOST=root@example.invalid SKIP_CHECK=1 DEPLOY_BRANCH=main "$DEPLOY_SCRIPT" --dry-run 2>&1)"
+  bad_path_status=$?
+  set -e
+  if [[ "$bad_path_status" -eq 0 ]]; then
+    echo "deploy-git should reject unsafe DEPLOY_PATH: $bad_path"
+    exit 1
+  fi
+  if [[ "$bad_path_output" == *"git"* && "$bad_path_output" == *"push"* ]]; then
+    echo "deploy-git should validate DEPLOY_PATH before git push: $bad_path"
+    exit 1
+  fi
+done

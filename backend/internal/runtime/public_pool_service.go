@@ -1039,6 +1039,8 @@ func (m *Manager) AddPileWithCatalog(userID string, req model.PileUpsertRequest)
 
 	runtime.refreshMu.Lock()
 	defer runtime.refreshMu.Unlock()
+	hadDevice := hasDeviceID(runtime.client.DeviceIDs(), req.ID)
+	prevPile := findPileSnapshot(runtime.store.Snapshot().Piles, req.ID)
 	if err := runtime.client.AddDeviceWithLimit(req.ID, user.DeviceLimit); err != nil {
 		return model.PileCreateResponse{}, err
 	}
@@ -1050,6 +1052,7 @@ func (m *Manager) AddPileWithCatalog(userID string, req model.PileUpsertRequest)
 	}
 	runtime.store.MergeCapturePiles([]model.Pile{fetchedPile})
 	if err := m.saveUserState(userID); err != nil {
+		rollbackPileAdd(runtime, req.ID, hadDevice, prevPile)
 		return model.PileCreateResponse{}, err
 	}
 	rewardGranted := 0
@@ -1084,6 +1087,8 @@ func (m *Manager) attachSharedPileToUser(
 ) (model.Pile, error) {
 	runtime.refreshMu.Lock()
 	defer runtime.refreshMu.Unlock()
+	hadDevice := hasDeviceID(runtime.client.DeviceIDs(), shared.DeviceID)
+	prevPile := findPileSnapshot(runtime.store.Snapshot().Piles, shared.DeviceID)
 	if err := runtime.client.AddDeviceWithLimit(shared.DeviceID, deviceLimit); err != nil {
 		return model.Pile{}, err
 	}
@@ -1108,6 +1113,7 @@ func (m *Manager) attachSharedPileToUser(
 	}
 	runtime.store.MergeCapturePiles([]model.Pile{pile})
 	if err := m.saveUserState(userID); err != nil {
+		rollbackPileAdd(runtime, shared.DeviceID, hadDevice, prevPile)
 		return model.Pile{}, err
 	}
 	for _, candidate := range runtime.store.Snapshot().Piles {
@@ -1116,4 +1122,34 @@ func (m *Manager) attachSharedPileToUser(
 		}
 	}
 	return pile, nil
+}
+
+func hasDeviceID(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
+func findPileSnapshot(piles []model.Pile, target string) *model.Pile {
+	for _, pile := range piles {
+		if pile.ID == target {
+			copyPile := pile
+			return &copyPile
+		}
+	}
+	return nil
+}
+
+func rollbackPileAdd(runtime *UserRuntime, deviceID string, hadDevice bool, prevPile *model.Pile) {
+	if !hadDevice {
+		runtime.client.RemoveDevice(deviceID)
+	}
+	if prevPile != nil {
+		runtime.store.MergeCapturePiles([]model.Pile{*prevPile})
+		return
+	}
+	runtime.store.DeletePile(deviceID)
 }

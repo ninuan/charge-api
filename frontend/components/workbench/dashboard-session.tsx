@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -132,8 +133,12 @@ export function DashboardSession({ children }: { children: ReactNode }) {
     window.addEventListener(notificationNavigateEvent, navigate)
     return () => window.removeEventListener(notificationNavigateEvent, navigate)
   }, [router])
+  const sessionValue = useMemo(
+    () => ({ initialLoading, error, retry: load }),
+    [initialLoading, error, load]
+  )
   return (
-    <SessionContext.Provider value={{ initialLoading, error, retry: load }}>
+    <SessionContext.Provider value={sessionValue}>
       {authorized ? (
         children
       ) : (

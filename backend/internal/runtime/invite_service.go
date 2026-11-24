@@ -118,16 +118,19 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	if settings.PowerRestoreJitterMinutes < 0 || settings.PowerRestoreJitterMinutes > 60 {
 		return fmt.Errorf("恢复供电抖动需要在 0 到 60 分钟之间")
 	}
+	m.saveMu.Lock()
 	m.mu.Lock()
 	previous := m.settings
 	m.settings = settings
 	m.mu.Unlock()
-	if err := m.saveSettings(); err != nil {
+	if err := m.saveSettingsLocked(); err != nil {
 		m.mu.Lock()
 		m.settings = previous
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return err
 	}
+	m.saveMu.Unlock()
 	if _, _, _, err := m.runRetentionMaintenance(time.Now()); err != nil {
 		return err
 	}
@@ -248,6 +251,8 @@ func (m *Manager) CreateInvite(code string, expiresAt *time.Time) (model.InviteC
 	if len(code) < 4 || len(code) > 64 {
 		return model.InviteCode{}, fmt.Errorf("邀请码长度需要在 4 到 64 个字符之间")
 	}
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	for _, existing := range m.invites {
 		if existing.Code == code {
@@ -261,10 +266,7 @@ func (m *Manager) CreateInvite(code string, expiresAt *time.Time) (model.InviteC
 	}
 	m.invites[invite.ID] = invite
 	m.mu.Unlock()
-	m.saveMu.Lock()
-	err := m.repository.SaveInvite(invite)
-	m.saveMu.Unlock()
-	if err != nil {
+	if err := m.repository.SaveInvite(invite); err != nil {
 		m.mu.Lock()
 		delete(m.invites, invite.ID)
 		m.mu.Unlock()
@@ -283,6 +285,8 @@ func randomInviteCode() (string, error) {
 }
 
 func (m *Manager) DeleteInvite(id string) error {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	prev, ok := m.invites[id]
 	if !ok {
@@ -291,10 +295,7 @@ func (m *Manager) DeleteInvite(id string) error {
 	}
 	delete(m.invites, id)
 	m.mu.Unlock()
-	m.saveMu.Lock()
-	err := m.repository.DeleteInvite(id)
-	m.saveMu.Unlock()
-	if err != nil {
+	if err := m.repository.DeleteInvite(id); err != nil {
 		m.mu.Lock()
 		m.invites[id] = prev
 		m.mu.Unlock()

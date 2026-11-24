@@ -119,6 +119,8 @@ func writeRegisterError(w http.ResponseWriter, err error) {
 		writeCodedError(w, http.StatusBadRequest, "REGISTER_INVITE_REQUIRED", "请输入有效邀请码。")
 	case errors.Is(err, appruntime.ErrInviteInvalid):
 		writeCodedError(w, http.StatusBadRequest, "REGISTER_INVITE_INVALID", "邀请码无效或已过期，请核对后重试。")
+	case errors.Is(err, appruntime.ErrInvalidRegisterInput):
+		writeCodedError(w, http.StatusBadRequest, "REGISTER_INPUT_INVALID", "用户名需要 3-64 个字符，密码需要 8-128 个字符")
 	default:
 		writePublicOperationError(w, http.StatusInternalServerError, "register user", "注册暂时不可用，请稍后重试。", err)
 	}

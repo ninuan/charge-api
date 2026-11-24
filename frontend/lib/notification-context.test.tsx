@@ -202,4 +202,53 @@ describe("NotificationProvider", () => {
     expect(result.current.unreadCount).toBe(0)
     expect(fetch).toHaveBeenCalledTimes(3)
   })
+
+  it("resets loadingMore when a fresh load interrupts an in-flight pagination request", async () => {
+    let resolveLoadMore!: (response: Response) => void
+    const loadMorePromise = new Promise<Response>((resolve) => {
+      resolveLoadMore = resolve
+    })
+    vi.mocked(fetch)
+      .mockReset()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [initialNotice],
+            unreadCount: 1,
+            nextCursor: "cursor-2",
+          })
+        )
+      )
+      .mockImplementationOnce(() => loadMorePromise)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [], unreadCount: 0 }))
+      )
+
+    const { result } = renderHook(() => useNotifications(), { wrapper })
+    await act(() => result.current.load("all"))
+    expect(result.current.nextCursor).toBe("cursor-2")
+
+    let pendingLoadMore!: Promise<void>
+    act(() => {
+      pendingLoadMore = result.current.loadMore()
+    })
+    expect(result.current.loadingMore).toBe(true)
+
+    await act(() => result.current.load("unread"))
+    expect(result.current.loadingMore).toBe(false)
+
+    await act(async () => {
+      resolveLoadMore(
+        new Response(
+          JSON.stringify({
+            items: [{ ...initialNotice, id: "notice-stale-page" }],
+            unreadCount: 1,
+          })
+        )
+      )
+      await pendingLoadMore
+    })
+    expect(result.current.loadingMore).toBe(false)
+    expect(result.current.items).toEqual([])
+  })
 })

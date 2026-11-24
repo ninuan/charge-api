@@ -73,13 +73,18 @@ export function AccountSecurityPanel() {
       setSaving(false)
     }
   }
+  const [revokingOthers, setRevokingOthers] = useState(false)
   async function logoutOthers() {
+    if (revokingOthers) return
+    setRevokingOthers(true)
     try {
       await logoutOtherSessions()
       await loadSessions()
       notify.success("其他设备已退出")
     } catch (reason) {
       notify.error(reason, { title: "退出设备失败" })
+    } finally {
+      setRevokingOthers(false)
     }
   }
 
@@ -168,12 +173,18 @@ export function AccountSecurityPanel() {
             )}
           </div>
           <Button
+            type="button"
             className="wb-form-submit mt-4"
             variant="outline"
+            disabled={revokingOthers}
             onClick={() => void logoutOthers()}
           >
-            <LogOutIcon />
-            退出其他设备
+            {revokingOthers ? (
+              <LoaderCircleIcon className="motion-safe:animate-spin" />
+            ) : (
+              <LogOutIcon />
+            )}
+            {revokingOthers ? "退出中…" : "退出其他设备"}
           </Button>
         </CardContent>
       </Card>

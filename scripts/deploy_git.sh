@@ -25,7 +25,7 @@ Usage:
   SKIP_CHECK=1 make deploy-git DEPLOY_HOST=root@server
 
 Environment:
-  DEPLOY_HOST      Required. SSH target, for example root@8.148.25.204.
+  DEPLOY_HOST      Required. SSH target, for example root@your-server.
   DEPLOY_PATH      Remote git project path. Default: /opt/charge-api.
   DEPLOY_REMOTE    Git remote name. Default: origin.
   DEPLOY_BRANCH    Git branch to push and pull. Default: current local branch.
@@ -103,7 +103,7 @@ run_ssh() {
 }
 
 if [[ -z "$DEPLOY_HOST" ]]; then
-  echo "DEPLOY_HOST is required. Example: make deploy-git DEPLOY_HOST=root@8.148.25.204" >&2
+  echo "DEPLOY_HOST is required. Example: make deploy-git DEPLOY_HOST=root@your-server" >&2
   exit 1
 fi
 
@@ -114,6 +114,13 @@ fi
 if [[ "$HEALTH_URL" != http://* && "$HEALTH_URL" != https://* ]] || [[ "$HEALTH_URL" =~ [[:space:][:cntrl:]] ]]; then
   echo "HEALTH_URL must use http:// or https://" >&2
   exit 2
+fi
+if [[ ! "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/@-]+$ ]] \
+  || [[ "$DEPLOY_PATH" == *"//"* ]] \
+  || [[ "$DEPLOY_PATH" =~ (^|/)(\.|\.\.)(/|$) ]] \
+  || [[ "${DEPLOY_PATH%/}" == "" ]]; then
+  echo "Invalid DEPLOY_PATH: $DEPLOY_PATH" >&2
+  exit 1
 fi
 
 require_command git
@@ -190,34 +197,56 @@ pnpm "\${pnpm_config_args[@]}" install --frozen-lockfile --prefer-offline --repo
 pnpm exec next build
 cd ../backend
 go build -o charge-server.new ./cmd/server
+rm -f charge-server.prev
 if [[ -f charge-server ]]; then
   cp -p charge-server charge-server.prev
 fi
-rsync -a --delete ../frontend/out/ ../frontend/dist/
-mv charge-server.new charge-server
+rm -rf ../frontend/dist.new ../frontend/dist.prev ../frontend/dist.failed
+rsync -a --delete ../frontend/out/ ../frontend/dist.new/
 service_name=$service_name_quoted
 health_url=$health_url_quoted
-sudo systemctl restart "\$service_name"
-health_ready=0
-for _ in {1..15}; do
-  if sudo systemctl is-active --quiet "\$service_name" && curl --silent --fail --max-time 2 "\$health_url" | grep -q '"status":"ok"'; then
-    health_ready=1
-    break
+rollback_release() {
+  if [[ -d ../frontend/dist.prev ]]; then
+    echo "Rolling back frontend/dist to previous static bundle..." >&2
+    if [[ -d ../frontend/dist ]]; then
+      mv ../frontend/dist ../frontend/dist.failed || true
+    fi
+    mv ../frontend/dist.prev ../frontend/dist || true
+    rm -rf ../frontend/dist.failed || true
   fi
-  sleep 1
-done
+  if [[ -f charge-server.prev ]]; then
+    echo "Rolling back charge-server to previous binary..." >&2
+    mv -f charge-server.prev charge-server || true
+    sudo systemctl restart "\$service_name" || true
+  fi
+}
+if [[ -d ../frontend/dist ]]; then
+  mv ../frontend/dist ../frontend/dist.prev
+fi
+if ! mv ../frontend/dist.new ../frontend/dist || ! mv charge-server.new charge-server; then
+  rollback_release
+  exit 1
+fi
+restart_ok=1
+sudo systemctl restart "\$service_name" || restart_ok=0
+health_ready=0
+if [[ "\$restart_ok" -eq 1 ]]; then
+  for _ in {1..15}; do
+    if sudo systemctl is-active --quiet "\$service_name" && curl --silent --fail --max-time 2 "\$health_url" | grep -q '"status":"ok"'; then
+      health_ready=1
+      break
+    fi
+    sleep 1
+  done
+fi
 if [[ "\$health_ready" -ne 1 ]]; then
   echo "Charge health check failed after restart. Recent service diagnostics:" >&2
   sudo systemctl --no-pager --full status "\$service_name" || true
   sudo journalctl -u "\$service_name" -n 80 --no-pager || true
-  if [[ -f charge-server.prev ]]; then
-    echo "Rolling back charge-server to previous binary..." >&2
-    mv -f charge-server.prev charge-server
-    sudo systemctl restart "\$service_name" || true
-  fi
+  rollback_release
   exit 1
 fi
-rm -f charge-server.prev
+rm -rf charge-server.prev ../frontend/dist.prev ../frontend/dist.failed
 echo "Remote service is healthy: \$health_url"
 REMOTE
 

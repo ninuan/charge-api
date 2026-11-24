@@ -307,9 +307,11 @@ func TestNotificationDispatcherProcessesOneSendAtATime(t *testing.T) {
 
 func TestAcceptedDeliveryResumesStatusQueryAfterManagerRestart(t *testing.T) {
 	manager, owner, _ := newWatchTestManager(t)
-	// Anchor to current UTC time so startup retention pruning on restart never
-	// sweeps the test notification/delivery rows as calendar time advances.
-	now := time.Now().UTC().Truncate(time.Second)
+	// Anchor to today at 04:00 UTC (12:00 Asia/Shanghai) so startup retention
+	// pruning never sweeps the test rows and default quiet hours (22:00-08:00)
+	// never suppress the delivery regardless of local wall-clock time.
+	today := time.Now().UTC()
+	now := time.Date(today.Year(), today.Month(), today.Day(), 4, 0, 0, 0, time.UTC)
 	saveTestWxPusherBinding(t, manager, owner.ID, now, true, model.WxPusherAllEventTypes)
 	firstClient := &fakeNotificationDeliveryClient{}
 	configureTestNotificationDispatcher(manager, firstClient, &now)

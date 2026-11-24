@@ -11,7 +11,7 @@ import {
   useState,
 } from "react"
 
-import { request } from "@/lib/http"
+import { request, RequestError } from "@/lib/http"
 import type { Notification } from "@/lib/api/generated"
 import type {
   DashboardSnapshot,
@@ -90,7 +90,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     useState<DashboardContextValue["streamState"]>("idle")
   const streamRef = useRef<EventSource | null>(null)
   const streamWantedRef = useRef(false)
+  const streamEpochRef = useRef(0)
   const reconnectTimerRef = useRef<number | null>(null)
+  const probeAbortRef = useRef<AbortController | null>(null)
   const reconnectAttemptRef = useRef(0)
   const openStreamRef = useRef<() => void>(() => undefined)
   const lastServerStampRef = useRef(0)
@@ -334,40 +336,98 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     )
   }, [applySnapshot])
 
-  const clearReconnectTimer = useCallback(() => {
+  const cancelPendingReconnect = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
       window.clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = null
     }
+    if (probeAbortRef.current !== null) {
+      probeAbortRef.current.abort()
+      probeAbortRef.current = null
+    }
   }, [])
 
   const scheduleReconnect = useCallback(() => {
-    if (!streamWantedRef.current || reconnectTimerRef.current !== null) return
+    if (
+      !streamWantedRef.current ||
+      reconnectTimerRef.current !== null ||
+      probeAbortRef.current !== null
+    ) {
+      return
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return
+    const attempt = reconnectAttemptRef.current
+    const epoch = streamEpochRef.current
     const delay = Math.min(
-      sseReconnectBaseMs * 2 ** reconnectAttemptRef.current,
+      sseReconnectBaseMs * 2 ** attempt,
       sseReconnectMaxMs
     )
     reconnectAttemptRef.current += 1
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null
-      if (streamWantedRef.current) {
-        openStreamRef.current()
+      if (!streamWantedRef.current || epoch !== streamEpochRef.current) return
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return
+      if (attempt >= 2) {
+        const controller = new AbortController()
+        probeAbortRef.current = controller
+        void request(
+          "/api/auth/me",
+          { signal: controller.signal },
+          "检查登录状态失败"
+        )
+          .then(() => {
+            if (probeAbortRef.current === controller) {
+              probeAbortRef.current = null
+            }
+            if (
+              controller.signal.aborted ||
+              !streamWantedRef.current ||
+              epoch !== streamEpochRef.current
+            ) {
+              return
+            }
+            openStreamRef.current()
+          })
+          .catch((error: unknown) => {
+            if (probeAbortRef.current === controller) {
+              probeAbortRef.current = null
+            }
+            if (
+              controller.signal.aborted ||
+              !streamWantedRef.current ||
+              epoch !== streamEpochRef.current
+            ) {
+              return
+            }
+            if (error instanceof RequestError && error.status === 401) {
+              streamWantedRef.current = false
+              setStreamState("idle")
+              return
+            }
+            openStreamRef.current()
+          })
+        return
       }
+      openStreamRef.current()
     }, delay)
   }, [])
 
   const openStream = useCallback(() => {
     if (streamRef.current || typeof EventSource === "undefined") return
-    clearReconnectTimer()
+    streamEpochRef.current += 1
+    const epoch = streamEpochRef.current
+    cancelPendingReconnect()
     setStreamState("connecting")
     const stream = new EventSource("/api/stream", { withCredentials: true })
     streamRef.current = stream
     stream.onopen = () => {
+      if (epoch !== streamEpochRef.current) return
       reconnectAttemptRef.current = 0
       setStreamState("connected")
       streamOpenListenersRef.current.forEach((listener) => listener())
     }
     stream.addEventListener("snapshot", (event) => {
+      if (epoch !== streamEpochRef.current) return
       try {
         applySnapshot(
           JSON.parse((event as MessageEvent<string>).data) as DashboardSnapshot
@@ -379,6 +439,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
     })
     stream.addEventListener("notification", (event) => {
+      if (epoch !== streamEpochRef.current) return
       try {
         const notification = JSON.parse(
           (event as MessageEvent<string>).data
@@ -393,6 +454,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
     })
     stream.onerror = () => {
+      if (epoch !== streamEpochRef.current) return
       if (stream.readyState === EventSource.CLOSED) {
         stream.close()
         if (streamRef.current === stream) {
@@ -404,7 +466,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
       setStreamState("error")
     }
-  }, [applySnapshot, clearReconnectTimer, scheduleReconnect])
+  }, [applySnapshot, cancelPendingReconnect, scheduleReconnect])
 
   useEffect(() => {
     openStreamRef.current = openStream
@@ -415,12 +477,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const handleOnline = () => {
       if (!streamWantedRef.current || streamRef.current) return
       reconnectAttemptRef.current = 0
-      clearReconnectTimer()
+      cancelPendingReconnect()
       openStreamRef.current()
     }
     window.addEventListener("online", handleOnline)
     return () => window.removeEventListener("online", handleOnline)
-  }, [clearReconnectTimer])
+  }, [cancelPendingReconnect])
 
   const connectStream = useCallback(() => {
     streamWantedRef.current = true
@@ -430,22 +492,24 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [openStream])
 
   const disconnectStream = useCallback(() => {
+    streamEpochRef.current += 1
     streamWantedRef.current = false
     reconnectAttemptRef.current = 0
-    clearReconnectTimer()
+    cancelPendingReconnect()
     streamRef.current?.close()
     streamRef.current = null
     setStreamState("idle")
-  }, [clearReconnectTimer])
+  }, [cancelPendingReconnect])
 
   useEffect(
     () => () => {
+      streamEpochRef.current += 1
       streamWantedRef.current = false
-      clearReconnectTimer()
+      cancelPendingReconnect()
       streamRef.current?.close()
       streamRef.current = null
     },
-    [clearReconnectTimer]
+    [cancelPendingReconnect]
   )
 
   const value = useMemo(

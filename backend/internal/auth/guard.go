@@ -70,7 +70,7 @@ func (g *AuthGuard) AllowRequest(ip string) (bool, time.Duration) {
 	key := normalizeKey(ip)
 	entry := g.requests[key]
 	if entry == nil {
-		g.ensureCapacityLocked(g.requests, now, g.requestWindow)
+		g.ensureCapacityLocked(g.requests, now)
 		entry = &guardEntry{WindowStart: now}
 		g.requests[key] = entry
 	}
@@ -133,7 +133,7 @@ func (g *AuthGuard) RecordFailure(ip string, username string) (bool, time.Durati
 func (g *AuthGuard) bumpFailureEntryLocked(key string, now time.Time) *guardEntry {
 	entry := g.failures[key]
 	if entry == nil {
-		g.ensureCapacityLocked(g.failures, now, g.failureWindow)
+		g.ensureCapacityLocked(g.failures, now)
 		entry = &guardEntry{WindowStart: now}
 		g.failures[key] = entry
 	}
@@ -196,7 +196,7 @@ func normalizeKey(value string) string {
 	return value
 }
 
-func (g *AuthGuard) ensureCapacityLocked(target map[string]*guardEntry, now time.Time, window time.Duration) {
+func (g *AuthGuard) ensureCapacityLocked(target map[string]*guardEntry, now time.Time) {
 	if len(target) < maxAuthGuardEntries {
 		return
 	}
@@ -204,16 +204,29 @@ func (g *AuthGuard) ensureCapacityLocked(target map[string]*guardEntry, now time
 	if len(target) < maxAuthGuardEntries {
 		return
 	}
-	var oldestKey string
-	var oldestTime time.Time
+	var unlockedKey string
+	var unlockedTime time.Time
+	var lockedKey string
+	var earliestUnlock time.Time
 	for key, entry := range target {
-		if oldestKey == "" || entry.WindowStart.Before(oldestTime) {
-			oldestKey = key
-			oldestTime = entry.WindowStart
+		if !now.Before(entry.BlockedUntil) {
+			if unlockedKey == "" || entry.WindowStart.Before(unlockedTime) {
+				unlockedKey = key
+				unlockedTime = entry.WindowStart
+			}
+			continue
+		}
+		if lockedKey == "" || entry.BlockedUntil.Before(earliestUnlock) {
+			lockedKey = key
+			earliestUnlock = entry.BlockedUntil
 		}
 	}
-	if oldestKey != "" {
-		delete(target, oldestKey)
+	if unlockedKey != "" {
+		delete(target, unlockedKey)
+		return
+	}
+	if lockedKey != "" {
+		delete(target, lockedKey)
 	}
 }
 

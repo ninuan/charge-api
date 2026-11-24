@@ -157,7 +157,7 @@ export function AnnouncementReader({
                 "[data-announcement-list-trigger]"
               )
         }
-        className="workbench-dialog max-h-[85dvh] overflow-y-auto md:!top-0 md:!right-0 md:!left-auto md:!h-dvh md:!max-h-dvh md:!w-[32rem] md:!translate-x-0 md:!translate-y-0 md:content-start md:!rounded-none"
+        className="workbench-dialog max-h-[85dvh] overflow-y-auto md:!top-0 md:!right-0 md:!left-auto md:!h-dvh md:!max-h-dvh md:!w-[32rem] md:!max-w-[32rem] md:!translate-x-0 md:!translate-y-0 md:content-start md:!rounded-none"
       >
         <DialogHeader>
           <DialogTitle>

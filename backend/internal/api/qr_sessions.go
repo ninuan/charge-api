@@ -33,7 +33,10 @@ func (s *Server) rememberQR(id, userID string) bool {
 		}
 		if entry.userID == userID {
 			userCount++
-			if !entry.confirming && entry.result == nil && (oldestUserKey == "" || entry.expires.Before(oldestUserExpires)) {
+			entry.mu.Lock()
+			evictable := !entry.confirming && entry.result == nil
+			entry.mu.Unlock()
+			if evictable && (oldestUserKey == "" || entry.expires.Before(oldestUserExpires)) {
 				oldestUserKey = key
 				oldestUserExpires = entry.expires
 			}
@@ -59,6 +62,37 @@ func (s *Server) findQR(id, userID string) *ownedQRSession {
 		return nil
 	}
 	return entry
+}
+
+type qrConfirmClaim int
+
+const (
+	qrConfirmInvalid qrConfirmClaim = iota
+	qrConfirmCached
+	qrConfirmBusy
+	qrConfirmAcquired
+)
+
+// beginConfirmQR verifies registry ownership and transitions owned.confirming
+// atomically under s.qrMu -> entry.mu so rememberQR cannot evict the entry
+// between ownership lookup and confirming=true.
+func (s *Server) beginConfirmQR(id, userID string, expected *ownedQRSession) (qrConfirmClaim, map[string]any) {
+	s.qrMu.Lock()
+	defer s.qrMu.Unlock()
+	entry := s.qrSessions[id]
+	if entry == nil || entry != expected || entry.userID != userID || time.Now().After(entry.expires) {
+		return qrConfirmInvalid, nil
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.result != nil {
+		return qrConfirmCached, entry.result
+	}
+	if entry.confirming {
+		return qrConfirmBusy, nil
+	}
+	entry.confirming = true
+	return qrConfirmAcquired, nil
 }
 
 // Mutations are exclusive per user, across distinct QR sessions as well as

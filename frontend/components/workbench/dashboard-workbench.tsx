@@ -24,11 +24,12 @@ import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
-  Fragment,
   Suspense,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import type { DashboardSnapshot, Pile, Port, SharedPile } from "@/lib/types"
@@ -74,21 +75,78 @@ import {
   WorkbenchSearch,
 } from "./surfaces"
 
-const AddPileDialog = dynamic(
+const LazyAddPileDialog = dynamic(
   () =>
     import("@/components/add-pile-dialog").then(
       (module) => module.AddPileDialog
     ),
-  {
-    ssr: false,
-    loading: () => (
-      <WorkbenchButton disabled>
+  { ssr: false }
+)
+
+function AddPileDialog({
+  onAdded,
+  disabled = false,
+}: {
+  onAdded?: (pile: Pile) => void
+  disabled?: boolean
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const restoreFocusRef = useRef(false)
+  const addedSinceOpenRef = useRef(false)
+  const focusFrameRef = useRef<number | null>(null)
+  const cancelFocusFrame = useCallback(() => {
+    if (focusFrameRef.current !== null) {
+      window.cancelAnimationFrame(focusFrameRef.current)
+      focusFrameRef.current = null
+    }
+  }, [])
+  useEffect(() => cancelFocusFrame, [cancelFocusFrame])
+  return (
+    <>
+      <WorkbenchButton
+        ref={triggerRef}
+        disabled={disabled}
+        onClick={() => {
+          cancelFocusFrame()
+          addedSinceOpenRef.current = false
+          restoreFocusRef.current = true
+          setMounted(true)
+          setOpen(true)
+        }}
+      >
         <PlusIcon />
         添加充电桩
       </WorkbenchButton>
-    ),
-  }
-)
+      {mounted ? (
+        <LazyAddPileDialog
+          open={open}
+          hideTrigger
+          onOpenChange={(next) => {
+            setOpen(next)
+            if (!next && restoreFocusRef.current) {
+              restoreFocusRef.current = false
+              cancelFocusFrame()
+              focusFrameRef.current = window.requestAnimationFrame(() => {
+                focusFrameRef.current = null
+                if (!addedSinceOpenRef.current) {
+                  triggerRef.current?.focus()
+                }
+              })
+            }
+          }}
+          onAdded={(pile) => {
+            cancelFocusFrame()
+            addedSinceOpenRef.current = true
+            restoreFocusRef.current = false
+            onAdded?.(pile)
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
 
 const UsageGuideDialog = dynamic(
   () =>
@@ -236,7 +294,6 @@ function WorkbenchContent() {
     refreshPile,
     searchSharedPiles,
     reorderPiles,
-    fetchSnapshot,
   } = useDashboard()
   const { initialLoading, error, retry } = useDashboardSession()
   const { rules, loaded: watchLoaded } = useWatch()
@@ -318,19 +375,29 @@ function WorkbenchContent() {
     snapshot.refresh.partial ||
     snapshot.refresh.failedDevices > 0
 
-  const availablePiles = snapshot.piles.filter(
-    (p) => p.online && portCounts(p).idle > 0
-  )
-  const totalIdlePorts = availablePiles.reduce(
-    (sum, p) => sum + portCounts(p).idle,
-    0
-  )
-  const chargingPiles = snapshot.piles.filter(
-    (p) => p.online && portCounts(p).in_use > 0
-  ).length
-  const offlinePiles = snapshot.piles.filter(
-    (p) => !p.online || p.ports.length === 0 || portCounts(p).offline > 0
-  ).length
+  const { availablePiles, totalIdlePorts, chargingPiles, offlinePiles } =
+    useMemo(() => {
+      const available: Pile[] = []
+      let idleTotal = 0
+      let charging = 0
+      let offline = 0
+      for (const p of snapshot.piles) {
+        const counts = portCounts(p)
+        if (p.online && counts.idle > 0) {
+          available.push(p)
+          idleTotal += counts.idle
+        }
+        if (p.online && counts.in_use > 0) charging += 1
+        if (!p.online || p.ports.length === 0 || counts.offline > 0)
+          offline += 1
+      }
+      return {
+        availablePiles: available,
+        totalIdlePorts: idleTotal,
+        chargingPiles: charging,
+        offlinePiles: offline,
+      }
+    }, [snapshot.piles])
 
   const activeRules = rules.filter(
     (rule) => rule.mode === "temporary" && rule.enabled && !rule.completedAt
@@ -488,7 +555,7 @@ function WorkbenchContent() {
       {unlimitedQuotaLabel && (
         <Link
           href="/account?tab=connection"
-          className="wb-btn wb-btn-ghost"
+          className="wb-button wb-button-quiet"
           title="查看个人 Cookie 与刷新额度"
         >
           {unlimitedQuotaLabel}
@@ -513,7 +580,6 @@ function WorkbenchContent() {
             q: null,
             status: null,
           })
-          void fetchSnapshot().catch(() => undefined)
         }}
       />
     </>
@@ -918,7 +984,6 @@ function WorkbenchContent() {
                   disabled={!online}
                   onAdded={(pile) => {
                     updatePageQuery({ pile: pile.id })
-                    void fetchSnapshot().catch(() => undefined)
                   }}
                 />
               )
@@ -1379,7 +1444,7 @@ function PileDetail({
   refreshDisabled?: boolean
   activeReminder: boolean
 }) {
-  const { deletePile, updatePile, fetchSnapshot } = useDashboard()
+  const { deletePile, updatePile } = useDashboard()
   const { load: loadWatch, loaded: watchLoaded, error: watchError } = useWatch()
   const online = useOnline()
 
@@ -1422,7 +1487,7 @@ function PileDetail({
     setFormError("")
     try {
       await deletePile(pile.id)
-      await Promise.allSettled([fetchSnapshot(), loadWatch()])
+      await Promise.allSettled([loadWatch()])
       setModal(null)
       updatePageQuery({ pile: null, port: null, detail: null })
       notify.success("已移出常用桩，关联提醒已结束")

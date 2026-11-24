@@ -15,6 +15,7 @@ export function notificationActionLifecycle(
       return "action_required"
     case "pile_available":
     case "pile_recovered":
+    default:
       return "informational"
   }
 }
@@ -46,6 +47,11 @@ export function notificationPresentation(notification: Notification) {
       return {
         title: "充电桩恢复连接",
         message: notification.message,
+      }
+    default:
+      return {
+        title: notification.title || "站内通知",
+        message: notification.message || "",
       }
   }
 }

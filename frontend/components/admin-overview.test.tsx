@@ -1,9 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react"
-import { ActivityIcon } from "lucide-react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AdminOverview } from "@/components/admin-overview"
-import { MetricCard } from "@/components/metric-card"
 import type { AdminTrendsResponse } from "@/lib/api/generated"
 import type { AdminStats, MetricPoint } from "@/lib/types"
 
@@ -105,24 +103,5 @@ describe("AdminOverview", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("100.0%")).toBeInTheDocument()
     expect(screen.getByText("0 条")).toBeInTheDocument()
-  })
-})
-
-describe("MetricCard", () => {
-  afterEach(cleanup)
-
-  it("renders a suffix next to the value", () => {
-    render(
-      <MetricCard
-        compact
-        label="成功率"
-        value={100}
-        suffix="%"
-        detail="近期"
-        icon={ActivityIcon}
-      />
-    )
-
-    expect(screen.getByLabelText("成功率 指标")).toHaveTextContent("100%")
   })
 })

@@ -21,6 +21,7 @@ var (
 	ErrInviteRequired           = errors.New("请输入有效邀请码")
 	ErrInviteInvalid            = errors.New("邀请码无效或已过期")
 	ErrUsernameExists           = errors.New("username already exists")
+	ErrInvalidRegisterInput     = errors.New("invalid register input")
 )
 
 func newUser(username string, password string, role model.UserRole, enabled bool) (model.User, error) {
@@ -87,14 +88,17 @@ func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) (m
 	if err != nil {
 		return model.CurrentUser{}, err
 	}
+	m.saveMu.Lock()
 	m.mu.Lock()
 	current, ok := m.users[userID]
 	if !ok || !current.Enabled {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("用户不存在")
 	}
 	if current.PasswordHash != originalHash {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("密码已被其他操作更新，请重试")
 	}
 	previous := current
@@ -103,12 +107,14 @@ func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) (m
 	current.UpdatedAt = time.Now()
 	m.users[userID] = current
 	m.mu.Unlock()
-	if err := m.saveUserState(userID); err != nil {
+	if err := m.saveUserStateLocked(userID); err != nil {
 		m.mu.Lock()
 		m.users[userID] = previous
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return model.CurrentUser{}, err
 	}
+	m.saveMu.Unlock()
 	m.cleanupInitialPasswordFile(userID)
 	return publicUser(current), nil
 }
@@ -153,10 +159,12 @@ func (m *Manager) ResetUserPassword(userID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	m.saveMu.Lock()
 	m.mu.Lock()
 	user, ok := m.users[userID]
 	if !ok {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return "", fmt.Errorf("user not found")
 	}
 	previous := user
@@ -165,12 +173,14 @@ func (m *Manager) ResetUserPassword(userID string) (string, error) {
 	user.UpdatedAt = time.Now()
 	m.users[userID] = user
 	m.mu.Unlock()
-	if err := m.saveUserState(userID); err != nil {
+	if err := m.saveUserStateLocked(userID); err != nil {
 		m.mu.Lock()
 		m.users[userID] = previous
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return "", err
 	}
+	m.saveMu.Unlock()
 	return temporaryPassword, nil
 }
 
@@ -217,18 +227,33 @@ func (m *Manager) Authenticate(username string, password string) (model.CurrentU
 		if err != nil {
 			return model.CurrentUser{}, err
 		}
+		m.saveMu.Lock()
 		m.mu.Lock()
 		current, ok := m.users[matched.ID]
-		if ok {
-			current.PasswordHash = hash
-			current.UpdatedAt = time.Now()
-			m.users[matched.ID] = current
-			matched = current
+		if !ok || !current.Enabled {
+			m.mu.Unlock()
+			m.saveMu.Unlock()
+			return model.CurrentUser{}, fmt.Errorf("用户已被禁用")
 		}
+		if current.PasswordHash != matched.PasswordHash {
+			m.mu.Unlock()
+			m.saveMu.Unlock()
+			return model.CurrentUser{}, fmt.Errorf("用户名或密码错误")
+		}
+		previous := current
+		current.PasswordHash = hash
+		current.UpdatedAt = time.Now()
+		m.users[matched.ID] = current
+		matched = current
 		m.mu.Unlock()
-		if err := m.saveUserState(matched.ID); err != nil {
+		if err := m.saveUserStateLocked(matched.ID); err != nil {
+			m.mu.Lock()
+			m.users[matched.ID] = previous
+			m.mu.Unlock()
+			m.saveMu.Unlock()
 			return model.CurrentUser{}, err
 		}
+		m.saveMu.Unlock()
 	}
 	return publicUser(matched), nil
 }
@@ -259,6 +284,8 @@ func (m *Manager) UserIDByUsername(username string) (string, bool) {
 }
 
 func (m *Manager) AcknowledgeUsageGuide(userID string) (model.CurrentUser, error) {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	user, ok := m.users[userID]
 	if !ok || !user.Enabled {
@@ -273,7 +300,7 @@ func (m *Manager) AcknowledgeUsageGuide(userID string) (model.CurrentUser, error
 		m.users[userID] = user
 	}
 	m.mu.Unlock()
-	if err := m.saveUserState(userID); err != nil {
+	if err := m.saveUserStateLocked(userID); err != nil {
 		m.mu.Lock()
 		m.users[userID] = previous
 		m.mu.Unlock()
@@ -553,6 +580,8 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 		return model.CurrentUser{}, fmt.Errorf("设备额度需要在 1 到 100 之间")
 	}
 
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	for _, existing := range m.users {
 		if existing.Username == user.Username {
@@ -564,7 +593,7 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 	m.runtimes[user.ID] = newUserRuntime(m.requests, persistence.UserState{}, m.minInterval)
 	m.mu.Unlock()
 
-	if err := m.saveUserState(user.ID); err != nil {
+	if err := m.saveUserStateLocked(user.ID); err != nil {
 		m.mu.Lock()
 		delete(m.users, user.ID)
 		delete(m.runtimes, user.ID)
@@ -576,17 +605,19 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 
 func (m *Manager) RegisterUser(username string, password string, inviteCode string) (model.CurrentUser, error) {
 	username = strings.TrimSpace(username)
-	if len(username) < 3 || len(username) > 32 {
-		return model.CurrentUser{}, fmt.Errorf("用户名长度需要在 3 到 32 个字符之间")
+	if len(username) < 3 || len(username) > 64 {
+		return model.CurrentUser{}, fmt.Errorf("%w: 用户名长度需要在 3 到 64 个字符之间", ErrInvalidRegisterInput)
 	}
 	if len(password) < 8 || len(password) > 128 {
-		return model.CurrentUser{}, fmt.Errorf("密码长度需要在 8 到 128 个字符之间")
+		return model.CurrentUser{}, fmt.Errorf("%w: 密码长度需要在 8 到 128 个字符之间", ErrInvalidRegisterInput)
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return model.CurrentUser{}, err
 	}
 
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	if !m.settings.OpenRegistration && !m.settings.InviteRequired {
 		m.mu.Unlock()
@@ -648,10 +679,7 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 	}
 	m.mu.Unlock()
 
-	m.saveMu.Lock()
-	saveErr := m.repository.SaveUserAndInvite(user, persistence.UserState{}, updatedInvite)
-	m.saveMu.Unlock()
-	if saveErr != nil {
+	if saveErr := m.repository.SaveUserAndInvite(user, persistence.UserState{}, updatedInvite); saveErr != nil {
 		m.mu.Lock()
 		delete(m.users, user.ID)
 		delete(m.runtimes, user.ID)
@@ -668,10 +696,12 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 }
 
 func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.CurrentUser, error) {
+	m.saveMu.Lock()
 	m.mu.Lock()
 	user, ok := m.users[id]
 	if !ok {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("user not found")
 	}
 	previous := user
@@ -679,6 +709,7 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	if req.Role != nil {
 		if *req.Role != model.RoleAdmin && *req.Role != model.RoleUser {
 			m.mu.Unlock()
+			m.saveMu.Unlock()
 			return model.CurrentUser{}, fmt.Errorf("invalid role")
 		}
 		user.Role = *req.Role
@@ -689,6 +720,7 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	if req.DeviceLimit != nil {
 		if *req.DeviceLimit < 1 || *req.DeviceLimit > 100 {
 			m.mu.Unlock()
+			m.saveMu.Unlock()
 			return model.CurrentUser{}, fmt.Errorf("设备额度需要在 1 到 100 之间")
 		}
 		user.DeviceLimit = *req.DeviceLimit
@@ -707,18 +739,21 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	}
 	if activeAdmins == 0 {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("至少保留一个可用管理员")
 	}
 	user.UpdatedAt = time.Now()
 	m.users[id] = user
 	m.mu.Unlock()
 
-	if err := m.saveUserState(id); err != nil {
+	if err := m.saveUserStateLocked(id); err != nil {
 		m.mu.Lock()
 		m.users[id] = previous
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return model.CurrentUser{}, err
 	}
+	m.saveMu.Unlock()
 	m.wakeReminderScheduler()
 	return publicUser(user), nil
 }
@@ -726,10 +761,12 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 func (m *Manager) DeleteUser(id string) error {
 	m.watchMu.Lock()
 	defer m.watchMu.Unlock()
+	m.saveMu.Lock()
 	m.mu.Lock()
 	prevUser, ok := m.users[id]
 	if !ok {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return fmt.Errorf("user not found")
 	}
 	prevRuntime := m.runtimes[id]
@@ -741,15 +778,14 @@ func (m *Manager) DeleteUser(id string) error {
 	}
 	if prevUser.Role == model.RoleAdmin && adminCount == 0 {
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return fmt.Errorf("至少保留一个可用管理员")
 	}
 	delete(m.users, id)
 	delete(m.runtimes, id)
 	m.mu.Unlock()
 
-	m.saveMu.Lock()
 	err := m.repository.DeleteUser(id)
-	m.saveMu.Unlock()
 	if err != nil {
 		m.mu.Lock()
 		m.users[id] = prevUser
@@ -757,8 +793,10 @@ func (m *Manager) DeleteUser(id string) error {
 			m.runtimes[id] = prevRuntime
 		}
 		m.mu.Unlock()
+		m.saveMu.Unlock()
 		return err
 	}
+	m.saveMu.Unlock()
 	m.wxPusherMu.Lock()
 	delete(m.wxPusherAttempts, id)
 	delete(m.wxPusherAttempts, "test_recheck:"+id)

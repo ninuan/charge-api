@@ -313,3 +313,51 @@ func TestStaticHandlerCachesHTMLWithETagAndInvalidatesOnChange(t *testing.T) {
 		t.Fatalf("body=%q, want %q", rec2.Body.String(), v2)
 	}
 }
+
+func TestStaticHandlerNotFoundRoutesAndCacheHeaders(t *testing.T) {
+	dir := t.TempDir()
+	notFoundHTML := "<html><script>console.log('404')</script><body>Not Found Page</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "404.html"), []byte(notFoundHTML), 0o644); err != nil {
+		t.Fatalf("write 404.html: %v", err)
+	}
+
+	handler := WithCacheHeaders(StaticHandler(dir))
+
+	// Missing frontend route serves 404.html with hashed CSP and no-store cache header.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing-page", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /missing-page status=%d, want 404", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Not Found Page") {
+		t.Fatalf("GET /missing-page body=%q, want 404.html content", rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sha256-") {
+		t.Fatalf("GET /missing-page missing CSP hash: %q", rec.Header().Get("Content-Security-Policy"))
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("GET /missing-page Cache-Control=%q, want no-store", rec.Header().Get("Cache-Control"))
+	}
+
+	// HEAD skips body write.
+	headRec := httptest.NewRecorder()
+	handler.ServeHTTP(headRec, httptest.NewRequest(http.MethodHead, "/missing-page", nil))
+	if headRec.Code != http.StatusNotFound || headRec.Body.Len() != 0 {
+		t.Fatalf("HEAD /missing-page status=%d len=%d", headRec.Code, headRec.Body.Len())
+	}
+
+	// Unknown /api/ and missing /_next/static/ assets must stay plain 404 with no-store.
+	for _, target := range []string{"/api/unknown", "/_next/static/chunks/missing.js", "/_next/static/chunks"} {
+		assetRec := httptest.NewRecorder()
+		handler.ServeHTTP(assetRec, httptest.NewRequest(http.MethodGet, target, nil))
+		if assetRec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status=%d, want 404", target, assetRec.Code)
+		}
+		if strings.Contains(assetRec.Body.String(), "Not Found Page") {
+			t.Fatalf("GET %s must not serve 404.html", target)
+		}
+		if assetRec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("GET %s Cache-Control=%q, want no-store", target, assetRec.Header().Get("Cache-Control"))
+		}
+	}
+}

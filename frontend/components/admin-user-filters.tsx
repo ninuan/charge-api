@@ -79,11 +79,11 @@ export function AdminUserFilters({
 
   return (
     <section
-      className="rounded-xl border bg-card p-4 shadow-xs"
+      className="@container rounded-xl border bg-card p-4 shadow-xs"
       aria-label="用户筛选"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">筛选用户</h2>
           <p className="mt-1 hidden text-xs leading-5 text-muted-foreground sm:block">
             组合账户状态、个人 Cookie 凭据和设备健康度，快速定位需要处理的账户。
@@ -94,10 +94,10 @@ export function AdminUserFilters({
         </Button>
       </div>
       <form
-        className="mt-3 grid gap-3 md:grid-cols-[minmax(12rem,1fr)_9.5rem_13.5rem_9rem_auto]"
+        className="mt-3 grid gap-3 md:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] lg:grid-cols-[minmax(11rem,1.2fr)_minmax(8.5rem,0.9fr)_minmax(11rem,1.2fr)_minmax(8.5rem,0.9fr)_auto]"
         onSubmit={apply}
       >
-        <Field>
+        <Field className="min-w-0">
           <FieldLabel htmlFor="user-search">搜索用户</FieldLabel>
           <Input
             id="user-search"
@@ -135,7 +135,7 @@ export function AdminUserFilters({
             !advancedOpen && "hidden md:contents"
           )}
         >
-          <Field>
+          <Field className="min-w-0">
             <FieldLabel htmlFor="user-account">账户状态</FieldLabel>
             <Select
               items={accountOptions}
@@ -147,7 +147,7 @@ export function AdminUserFilters({
               <SelectTrigger
                 id="user-account"
                 aria-label="账户状态"
-                className="w-full"
+                className="w-full min-w-0"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -162,7 +162,7 @@ export function AdminUserFilters({
               </SelectContent>
             </Select>
           </Field>
-          <Field>
+          <Field className="min-w-0">
             <FieldLabel htmlFor="user-credential">凭据状态</FieldLabel>
             <Select
               items={credentialOptions}
@@ -174,7 +174,7 @@ export function AdminUserFilters({
               <SelectTrigger
                 id="user-credential"
                 aria-label="凭据状态"
-                className="w-full"
+                className="w-full min-w-0"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -189,7 +189,7 @@ export function AdminUserFilters({
               </SelectContent>
             </Select>
           </Field>
-          <Field>
+          <Field className="min-w-0">
             <FieldLabel htmlFor="user-health">设备健康</FieldLabel>
             <Select
               items={healthOptions}
@@ -201,7 +201,7 @@ export function AdminUserFilters({
               <SelectTrigger
                 id="user-health"
                 aria-label="设备健康"
-                className="w-full"
+                className="w-full min-w-0"
               >
                 <SelectValue />
               </SelectTrigger>

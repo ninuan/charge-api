@@ -1162,8 +1162,20 @@ func (s *Store) SaveUserAndInvite(user model.User, userState UserState, invite *
 		return err
 	}
 	if invite != nil {
-		if err := upsertInviteTx(tx, *invite); err != nil {
-			return err
+		res, err := tx.Exec(
+			`UPDATE invite_codes SET used_count = ? WHERE id = ?`,
+			invite.UsedCount,
+			invite.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("update invite usage %s: %w", invite.ID, err)
+		}
+		rows, rowsErr := res.RowsAffected()
+		if rowsErr != nil {
+			return fmt.Errorf("check invite usage %s: %w", invite.ID, rowsErr)
+		}
+		if rows == 0 {
+			return fmt.Errorf("invite %s not found", invite.ID)
 		}
 	}
 	if _, err := tx.Exec(`

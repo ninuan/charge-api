@@ -134,6 +134,16 @@ export function AppShell({
   const closeMenu = useCallback(() => setMenuOpen(false), [])
 
   useEffect(() => {
+    const media = window.matchMedia?.("(min-width: 768px)")
+    if (!media) return
+    const handleChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setMenuOpen(false)
+    }
+    media.addEventListener("change", handleChange)
+    return () => media.removeEventListener("change", handleChange)
+  }, [])
+
+  useEffect(() => {
     const expired = () => {
       clearSession()
       router.replace("/login")
@@ -377,10 +387,12 @@ export function AppShell({
                     </SheetTrigger>
                     <SheetContent
                       side="left"
-                      className="wb-theme workbench-drawer w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto"
+                      className="wb-theme workbench-drawer overflow-y-auto"
                     >
-                      <SheetTitle>账户与操作</SheetTitle>
-                      <nav aria-label="移动导航" className="mt-5">
+                      <div className="wb-drawer-header">
+                        <SheetTitle>账户与操作</SheetTitle>
+                      </div>
+                      <nav aria-label="移动导航" className="wb-drawer-nav">
                         {renderDrawerLinks(primary)}
                         <div className="wb-nav-group-label wb-nav-second">
                           {isAdmin ? "系统管理" : "偏好与连接"}
@@ -481,7 +493,7 @@ export function AppShell({
                       }
                       pulse={online && connectionState !== "offline" && connectionState !== "reconnecting"}
                     />
-                    <span>
+                    <span className="wb-conn-chip-label">
                       {!online || connectionState === "offline"
                         ? "离线"
                         : connectionState === "reconnecting"

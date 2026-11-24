@@ -6,7 +6,9 @@ const key = "charge:reduce-motion",
 let memory = false
 function snapshot() {
   try {
-    return window.localStorage.getItem(key) === "1" || memory
+    const stored = window.localStorage.getItem(key)
+    if (stored !== null) return stored === "1"
+    return memory
   } catch {
     return memory
   }

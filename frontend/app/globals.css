@@ -192,50 +192,6 @@ body {
   }
 }
 
-.workbench-band {
-  overflow: hidden;
-  border: 1px solid color-mix(in oklab, var(--border) 88%, transparent);
-  border-radius: 1rem;
-  background: color-mix(in oklab, var(--card) 94%, var(--primary) 6%);
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--foreground) 4%, transparent),
-    0 14px 35px color-mix(in oklab, var(--foreground) 3%, transparent);
-}
-
-.workbench-band [data-slot="metric-card"] {
-  min-height: 6.4rem;
-}
-
-.workspace-index {
-  border-right: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
-  padding-right: 1rem;
-}
-
-.workspace-index button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.pile-card-focused > [data-slot="card"] {
-  border-color: color-mix(in oklab, var(--primary) 38%, var(--border));
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--primary) 12%, transparent),
-    0 12px 30px color-mix(in oklab, var(--foreground) 4%, transparent);
-}
-
-@media (max-width: 1023px) {
-  .workspace-index {
-    border-right: 0;
-    padding-right: 0;
-  }
-}
-
-@media (max-width: 640px) {
-  .workbench-band {
-    border-radius: 0.85rem;
-  }
-}
-
 @keyframes health-recovered {
   0% {
     box-shadow: 0 0 0 0 color-mix(in oklab, var(--success) 35%, transparent);
@@ -248,51 +204,6 @@ body {
   }
 }
 
-@keyframes port-state-glow {
-  0% {
-    box-shadow: 0 0 0 0 currentColor;
-  }
-  55% {
-    box-shadow: 0 0 0 4px color-mix(in oklab, currentColor 12%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 8px transparent;
-  }
-}
-
-@keyframes pile-card-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes port-card-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes history-panel-enter {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @keyframes admin-trend-enter {
   from {
     opacity: 0;
@@ -301,17 +212,6 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes history-heatmap-cell-change {
-  from {
-    transform: scale(0.72);
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
-  }
-  to {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 transparent;
   }
 }
 
@@ -383,28 +283,8 @@ body {
   }
 }
 
-.pile-card-enter {
-  animation: pile-card-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.port-card-enter {
-  animation: port-card-enter 340ms cubic-bezier(0.22, 1, 0.36, 1) 70ms both;
-}
-
-.port-state-changed {
-  animation: port-state-glow 240ms ease-out;
-}
-
-.history-panel-enter {
-  animation: history-panel-enter 180ms ease-out both;
-}
-
 .admin-trend-enter {
   animation: admin-trend-enter 220ms ease-out both;
-}
-
-.history-heatmap-cell {
-  animation: history-heatmap-cell-change 260ms ease-out both;
 }
 
 .feedback-status-change {
@@ -436,12 +316,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   [class*="health-recovered"],
-  .pile-card-enter,
-  .port-card-enter,
-  .port-state-changed,
-  .history-panel-enter,
   .admin-trend-enter,
-  .history-heatmap-cell,
   .feedback-status-change,
   .feedback-success-once,
   .feedback-banner-transition,
@@ -450,8 +325,6 @@ body {
     animation: none !important;
   }
 
-  .history-chart-bar,
-  .history-heatmap-cell,
   .admin-trend-content,
   .admin-trend-bar,
   .feedback-status-card,

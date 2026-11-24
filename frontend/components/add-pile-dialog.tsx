@@ -38,11 +38,21 @@ import type { Pile, SharedPile } from "@/lib/types"
 export function AddPileDialog({
   onAdded,
   disabled = false,
-}: { onAdded?: (pile: Pile) => void; disabled?: boolean } = {}) {
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: {
+  onAdded?: (pile: Pile) => void
+  disabled?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  hideTrigger?: boolean
+} = {}) {
   const { currentUser } = useAuth()
   const { snapshot, addPile, searchSharedPiles } = useDashboard()
   const closeAppShellMenu = useCloseAppShellMenu()
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
   const [mode, setMode] = useState<"catalog" | "contribute">("catalog")
   const online = useOnline()
 
@@ -98,10 +108,11 @@ export function AddPileDialog({
     setForm((current) => ({ ...current, [name]: value }))
 
   const handleOpenChange = (next: boolean) => {
-    if (next) {
-      setError("")
+    setError("")
+    if (controlledOpen === undefined) {
+      setInternalOpen(next)
     }
-    setOpen(next)
+    onOpenChange?.(next)
     if (!next) closeAppShellMenu()
   }
 
@@ -181,14 +192,16 @@ export function AddPileDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <Button disabled={disabled}>
-            <PlusIcon />
-            添加充电桩
-          </Button>
-        }
-      />
+      {!hideTrigger ? (
+        <DialogTrigger
+          render={
+            <Button disabled={disabled}>
+              <PlusIcon />
+              添加充电桩
+            </Button>
+          }
+        />
+      ) : null}
       <DialogContent className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-xl">
         <DialogHeader className="min-w-0 pr-7">
           <DialogTitle className="flex items-center gap-2">

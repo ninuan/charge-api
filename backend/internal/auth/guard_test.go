@@ -1,6 +1,10 @@
 package auth
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+	"time"
+)
 
 func TestAuthGuardLocksAfterFailures(t *testing.T) {
 	guard := NewAuthGuard()
@@ -53,5 +57,30 @@ func TestAuthGuardDoesNotLockOtherIPsByUsername(t *testing.T) {
 	}
 	if !guard.RequiresCaptcha("203.0.113.99", "admin") {
 		t.Fatal("distributed password guesses against a username should still require CAPTCHA")
+	}
+}
+
+func TestAuthGuardEvictsUnlockedEntriesBeforeLockedOnes(t *testing.T) {
+	guard := NewAuthGuard()
+	now := time.Now()
+	guard.mu.Lock()
+	// Add an actively locked entry with an older WindowStart than all unlocked entries.
+	guard.failures["ip:locked"] = &guardEntry{
+		Count:        5,
+		WindowStart:  now.Add(-10 * time.Minute),
+		BlockedUntil: now.Add(15 * time.Minute),
+	}
+	for i := 0; i < maxAuthGuardEntries-1; i++ {
+		guard.failures[fmt.Sprintf("ip:unlocked-%d", i)] = &guardEntry{
+			Count:       1,
+			WindowStart: now.Add(-time.Duration(i+1) * time.Millisecond),
+		}
+	}
+	guard.ensureCapacityLocked(guard.failures, now)
+	_, stillLocked := guard.failures["ip:locked"]
+	guard.mu.Unlock()
+
+	if !stillLocked {
+		t.Fatal("actively locked entry must not be evicted while unlocked entries exist")
 	}
 }

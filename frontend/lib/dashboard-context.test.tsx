@@ -210,4 +210,90 @@ describe("DashboardProvider", () => {
       vi.useRealTimers()
     }
   })
+
+  it("stops SSE reconnect after repeated failures when /api/auth/me returns 401 and aborts stale probes on disconnect", async () => {
+    vi.useFakeTimers()
+    try {
+      class MockEventSource {
+        static CLOSED = 2
+        static instances: MockEventSource[] = []
+        readyState = 0
+        onerror: ((event: Event) => void) | null = null
+        onopen: ((event: Event) => void) | null = null
+        constructor() {
+          MockEventSource.instances.push(this)
+        }
+        addEventListener = vi.fn()
+        close = vi.fn()
+      }
+      vi.stubGlobal("EventSource", MockEventSource)
+      const fetchMock = vi.fn<typeof fetch>()
+      vi.stubGlobal("fetch", fetchMock)
+      const { result } = renderHook(() => useDashboard(), {
+        wrapper: DashboardProvider,
+      })
+
+      act(() => result.current.connectStream())
+      // Attempt 0 (2s) -> Attempt 1 (4s) -> Attempt 2 (8s, triggers /api/auth/me probe)
+      act(() => {
+        MockEventSource.instances[0].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[0].onerror?.(new Event("error"))
+        vi.advanceTimersByTime(2_000)
+      })
+      act(() => {
+        MockEventSource.instances[1].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[1].onerror?.(new Event("error"))
+        vi.advanceTimersByTime(4_000)
+      })
+
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: "UNAUTHORIZED" }), { status: 401 })
+      )
+      act(() => {
+        MockEventSource.instances[2].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[2].onerror?.(new Event("error"))
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(8_000)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/auth/me",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+      expect(result.current.streamState).toBe("idle")
+      expect(MockEventSource.instances).toHaveLength(3)
+
+      // Disconnecting while a probe is in-flight aborts it so a stale response cannot affect a later session.
+      let capturedSignal: AbortSignal | undefined
+      fetchMock.mockImplementationOnce((_input, init) => {
+        capturedSignal = init?.signal ?? undefined
+        return new Promise<Response>(() => {})
+      })
+      act(() => result.current.connectStream())
+      act(() => {
+        MockEventSource.instances[3].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[3].onerror?.(new Event("error"))
+        vi.advanceTimersByTime(2_000)
+      })
+      act(() => {
+        MockEventSource.instances[4].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[4].onerror?.(new Event("error"))
+        vi.advanceTimersByTime(4_000)
+      })
+      act(() => {
+        MockEventSource.instances[5].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[5].onerror?.(new Event("error"))
+        vi.advanceTimersByTime(8_000)
+      })
+      expect(capturedSignal?.aborted).toBe(false)
+
+      act(() => result.current.disconnectStream())
+      expect(capturedSignal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

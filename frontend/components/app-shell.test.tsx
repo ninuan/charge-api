@@ -132,11 +132,7 @@ describe("AppShell", () => {
     const drawer = (await screen.findByText("账户与操作")).closest(
       "[data-slot=sheet-content]"
     )
-    expect(drawer).toHaveClass(
-      "w-[calc(100vw-1rem)]",
-      "max-w-[22rem]",
-      "overflow-y-auto"
-    )
+    expect(drawer).toHaveClass("workbench-drawer", "overflow-y-auto")
     expect(
       within(drawer as HTMLElement).getByRole("link", { name: "空闲提醒" })
     ).toHaveAttribute("href", "/dashboard/reminders")
