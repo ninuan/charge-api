@@ -323,14 +323,23 @@ const numericSettings: [keyof RegistrationSettings, string, number, number][] =
     ["pileContributionBonusQuota", "贡献新桩奖励永久次数 / 次", 0, 20],
     ["sharedPileCacheTTLSeconds", "全站桩状态共享缓存 / 秒", 15, 600],
   ]
+type PolicySection = "pool" | "registration" | "reminders" | "retention"
+
 export function WorkbenchPolicies() {
   const { data, error, reload, setData } = useRemote<RegistrationSettings>(
     adminApi.settings
   )
+  const [section, setSection] = useState<PolicySection>("pool")
   if (error && !data) return <WorkbenchError message={error} retry={reload} />
   if (!data) return <WorkbenchLoading label="正在读取系统策略" />
   return (
-    <PolicyForm key={JSON.stringify(data)} initial={data} onSaved={setData} />
+    <PolicyForm
+      key={JSON.stringify(data)}
+      initial={data}
+      section={section}
+      onSectionChange={setSection}
+      onSaved={setData}
+    />
   )
 }
 
@@ -585,15 +594,17 @@ export function WorkbenchSharedPiles() {
 }
 function PolicyForm({
   initial,
+  section,
+  onSectionChange,
   onSaved,
 }: {
   initial: RegistrationSettings
+  section: PolicySection
+  onSectionChange: (value: PolicySection) => void
   onSaved: (value: RegistrationSettings) => void
 }) {
   const online = useOnline()
-  const [section, setSection] = useState<
-    "pool" | "registration" | "reminders" | "retention"
-  >("pool")
+  const setSection = onSectionChange
   const [draft, setDraft] = useState(initial),
     [saving, setSaving] = useState(false),
     [error, setError] = useState("")

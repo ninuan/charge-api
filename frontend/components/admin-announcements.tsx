@@ -128,18 +128,31 @@ export function AdminAnnouncements() {
     const current = epoch.current
     try {
       const base = "/api/admin/announcements"
-      const path = id && id !== "new" ? `${base}/${id}` : base
-      const payload =
-        action === "save"
-          ? {
-              ...form,
-              startAt: new Date(`${form.startAt}:00+08:00`).toISOString(),
-              endAt: form.endAt
-                ? new Date(`${form.endAt}:00+08:00`).toISOString()
-                : null,
-              remindAgain: again,
-            }
-          : { version: form.version }
+      const path =
+        id && id !== "new" ? `${base}/${encodeURIComponent(id)}` : base
+      let payload: Record<string, unknown> = { version: form.version }
+      if (action === "save") {
+        const startDate = new Date(`${form.startAt}:00+08:00`)
+        if (!form.startAt.trim() || Number.isNaN(startDate.getTime())) {
+          setError("请填写有效的开始时间")
+          return
+        }
+        let endISO: string | null = null
+        if (form.endAt) {
+          const endDate = new Date(`${form.endAt}:00+08:00`)
+          if (Number.isNaN(endDate.getTime())) {
+            setError("请填写有效的结束时间")
+            return
+          }
+          endISO = endDate.toISOString()
+        }
+        payload = {
+          ...form,
+          startAt: startDate.toISOString(),
+          endAt: endISO,
+          remindAgain: again,
+        }
+      }
       const result = await announcementRequest<Announcement>(
         action === "publish" || action === "withdraw"
           ? `${path}/${action}`

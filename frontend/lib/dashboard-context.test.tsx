@@ -147,4 +147,67 @@ describe("DashboardProvider", () => {
       expect.objectContaining({ id: "notice-1", type: "pile_available" })
     )
   })
+
+  it("reconnects with backoff after EventSource.CLOSED and cancels on disconnect", () => {
+    vi.useFakeTimers()
+    try {
+      class MockEventSource {
+        static CLOSED = 2
+        static instances: MockEventSource[] = []
+        readyState = 0
+        onerror: ((event: Event) => void) | null = null
+        onopen: ((event: Event) => void) | null = null
+        constructor() {
+          MockEventSource.instances.push(this)
+        }
+        addEventListener = vi.fn()
+        close = vi.fn()
+      }
+      vi.stubGlobal("EventSource", MockEventSource)
+      const { result } = renderHook(() => useDashboard(), {
+        wrapper: DashboardProvider,
+      })
+
+      act(() => result.current.connectStream())
+      expect(MockEventSource.instances).toHaveLength(1)
+
+      act(() => {
+        MockEventSource.instances[0].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[0].onerror?.(new Event("error"))
+      })
+      expect(result.current.streamState).toBe("error")
+
+      act(() => {
+        vi.advanceTimersByTime(1999)
+      })
+      expect(MockEventSource.instances).toHaveLength(1)
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(MockEventSource.instances).toHaveLength(2)
+
+      // Second failure backs off to 4s, but coming back online reconnects immediately.
+      act(() => {
+        MockEventSource.instances[1].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[1].onerror?.(new Event("error"))
+      })
+      act(() => {
+        window.dispatchEvent(new Event("online"))
+      })
+      expect(MockEventSource.instances).toHaveLength(3)
+
+      // Disconnecting cancels any scheduled reconnect.
+      act(() => {
+        MockEventSource.instances[2].readyState = MockEventSource.CLOSED
+        MockEventSource.instances[2].onerror?.(new Event("error"))
+        result.current.disconnectStream()
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(MockEventSource.instances).toHaveLength(3)
+      expect(result.current.streamState).toBe("idle")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	captchaTTL       = 2 * time.Minute
-	captchaMaxAnswer = 12
-	captchaWidth     = 168
-	captchaHeight    = 54
+	captchaTTL             = 2 * time.Minute
+	captchaMaxAnswer       = 12
+	captchaWidth           = 168
+	captchaHeight          = 54
+	maxCaptchaEntries      = 4096
+	captchaCleanupInterval = 30 * time.Second
 )
 
 // 易混淆的 0、1 不参与验证码；五位数字配合限流和失败锁定，足以阻止
@@ -36,9 +38,10 @@ type captchaEntry struct {
 }
 
 type CaptchaStore struct {
-	mu         sync.Mutex
-	challenges map[string]captchaEntry
-	now        func() time.Time
+	mu          sync.Mutex
+	challenges  map[string]captchaEntry
+	now         func() time.Time
+	lastCleanup time.Time
 }
 
 func NewCaptchaStore() *CaptchaStore {
@@ -77,7 +80,21 @@ func (s *CaptchaStore) Generate() (CaptchaChallenge, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cleanupLocked(s.now())
+	now := s.now()
+	s.cleanupLocked(now, len(s.challenges) >= maxCaptchaEntries)
+	if len(s.challenges) >= maxCaptchaEntries {
+		var oldestID string
+		var oldestExp time.Time
+		for existingID, entry := range s.challenges {
+			if oldestID == "" || entry.expiresAt.Before(oldestExp) {
+				oldestID = existingID
+				oldestExp = entry.expiresAt
+			}
+		}
+		if oldestID != "" {
+			delete(s.challenges, oldestID)
+		}
+	}
 	s.challenges[id] = captchaEntry{answer: answer, expiresAt: expiresAt}
 
 	return CaptchaChallenge{ID: id, Image: imageData, ExpiresAt: expiresAt}, nil
@@ -102,7 +119,7 @@ func (s *CaptchaStore) Verify(id string, answer string) error {
 	entry, ok := s.challenges[id]
 	// 无论答案是否正确都立即销毁，避免同一挑战被重复试探。
 	delete(s.challenges, id)
-	s.cleanupLocked(now)
+	s.cleanupLocked(now, false)
 	if !ok || now.After(entry.expiresAt) {
 		return fmt.Errorf("验证码已过期，请刷新后重试")
 	}
@@ -112,12 +129,16 @@ func (s *CaptchaStore) Verify(id string, answer string) error {
 	return nil
 }
 
-func (s *CaptchaStore) cleanupLocked(now time.Time) {
+func (s *CaptchaStore) cleanupLocked(now time.Time, force bool) {
+	if !force && !s.lastCleanup.IsZero() && now.Sub(s.lastCleanup) < captchaCleanupInterval {
+		return
+	}
 	for id, entry := range s.challenges {
 		if now.After(entry.expiresAt) {
 			delete(s.challenges, id)
 		}
 	}
+	s.lastCleanup = now
 }
 
 var digitSegments = map[byte][]int{

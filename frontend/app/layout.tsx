@@ -16,14 +16,13 @@ export default function RootLayout({
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="min-h-dvh bg-background text-foreground antialiased">
         <Providers>{children}</Providers>
+        <Script
+          id="cloudflare-web-analytics"
+          src="https://static.cloudflareinsights.com/beacon.min.js"
+          data-cf-beacon='{"token":"40a997d22bb446098457e51a3e6cdf84"}'
+          strategy="afterInteractive"
+        />
       </body>
-      <Script
-        id="cloudflare-web-analytics"
-        type="module"
-        src="https://static.cloudflareinsights.com/beacon.min.js"
-        data-cf-beacon='{"token":"40a997d22bb446098457e51a3e6cdf84"}'
-        strategy="lazyOnload"
-      />
     </html>
   )
 }

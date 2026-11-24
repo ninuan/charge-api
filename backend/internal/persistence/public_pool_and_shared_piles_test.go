@@ -162,3 +162,56 @@ func TestPublicPoolCookieDeduplicatesByWXOpenID(t *testing.T) {
 		t.Fatalf("u-b upsert after u-a left should succeed: %v", err)
 	}
 }
+
+func TestGranularPersistenceAndSharedPileBatchLookup(t *testing.T) {
+	store := openPoolTestStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	user1 := model.User{
+		ID: "usr_1", Username: "alice", PasswordHash: "hash1", Role: model.RoleUser,
+		Enabled: true, DeviceLimit: 10, RefreshEnabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	user2 := model.User{
+		ID: "usr_2", Username: "bob", PasswordHash: "hash2", Role: model.RoleUser,
+		Enabled: true, DeviceLimit: 10, RefreshEnabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.SaveUserState(user1, UserState{Cookie: "wxopenid=alice; info=1", DeviceIDs: []string{"100001"}}); err != nil {
+		t.Fatalf("SaveUserState user1: %v", err)
+	}
+	invite := model.InviteCode{ID: "inv_1", Code: "CHG-TEST1", Enabled: true, CreatedAt: now, UsedCount: 1}
+	if err := store.SaveUserAndInvite(user2, UserState{Cookie: "wxopenid=bob; info=2"}, &invite); err != nil {
+		t.Fatalf("SaveUserAndInvite user2: %v", err)
+	}
+	loaded, exists, err := store.Load()
+	if err != nil || !exists || len(loaded.Users) != 2 || len(loaded.Invites) != 1 || loaded.Invites[0].UsedCount != 1 {
+		t.Fatalf("unexpected loaded state: exists=%v users=%d invites=%+v err=%v", exists, len(loaded.Users), loaded.Invites, err)
+	}
+	if loaded.UserStates["usr_1"].Cookie != "wxopenid=alice; info=1" || loaded.UserStates["usr_2"].Cookie != "wxopenid=bob; info=2" {
+		t.Fatalf("granular user state mismatch: %+v", loaded.UserStates)
+	}
+	if err := store.DeleteUser("usr_2"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if err := store.DeleteInvite("inv_1"); err != nil {
+		t.Fatalf("DeleteInvite: %v", err)
+	}
+	loaded, _, err = store.Load()
+	if err != nil || len(loaded.Users) != 1 || loaded.Users[0].ID != "usr_1" || len(loaded.Invites) != 0 {
+		t.Fatalf("unexpected state after delete: users=%+v invites=%+v err=%v", loaded.Users, loaded.Invites, err)
+	}
+
+	if _, err := store.UpsertSharedPile(model.Pile{ID: "200001", Number: "610001", Name: "100%满电区", Address: "西门", OpenNum: 10}, "usr_1", now); err != nil {
+		t.Fatalf("UpsertSharedPile 200001: %v", err)
+	}
+	if _, err := store.UpsertSharedPile(model.Pile{ID: "200002", Number: "610002", Name: "普通车棚", Address: "东门", OpenNum: 10}, "usr_1", now); err != nil {
+		t.Fatalf("UpsertSharedPile 200002: %v", err)
+	}
+	batch, err := store.GetSharedPiles([]string{"200001", "200002", "200001", "missing"})
+	if err != nil || len(batch) != 2 || batch["200001"].Name != "100%满电区" || batch["200002"].Name != "普通车棚" {
+		t.Fatalf("GetSharedPiles = %+v, err=%v", batch, err)
+	}
+	escaped, err := store.SearchSharedPiles("%", 20)
+	if err != nil || len(escaped) != 1 || escaped[0].DeviceID != "200001" {
+		t.Fatalf("SearchSharedPiles('%%') should match literal percent only: got %+v err=%v", escaped, err)
+	}
+}

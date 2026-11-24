@@ -102,6 +102,8 @@ func (m *Manager) wakeNotificationDispatcher() {
 	}
 }
 
+const maxDispatcherDrainSteps = 32
+
 func (m *Manager) runNotificationDispatcher(ctx context.Context, wake <-chan struct{}, done chan struct{}) {
 	defer func() {
 		coordinator := &m.notificationDispatcher
@@ -120,8 +122,17 @@ func (m *Manager) runNotificationDispatcher(ctx context.Context, wake <-chan str
 			stopAndDrainTimer(timer)
 			timer.Reset(0)
 		case <-timer.C:
-			if err := m.runNotificationDispatcherOnce(ctx, m.notificationDispatcherNow()); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("notification dispatcher: %v", security.SanitizeLogText(err.Error(), 1024))
+			for step := 0; step < maxDispatcherDrainSteps && ctx.Err() == nil; step++ {
+				worked, err := m.runNotificationDispatcherStep(ctx, m.notificationDispatcherNow())
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						log.Printf("notification dispatcher: %v", security.SanitizeLogText(err.Error(), 1024))
+					}
+					break
+				}
+				if !worked {
+					break
+				}
 			}
 			timer.Reset(m.notificationDispatcherPollInterval())
 		}
@@ -129,27 +140,37 @@ func (m *Manager) runNotificationDispatcher(ctx context.Context, wake <-chan str
 }
 
 func (m *Manager) runNotificationDispatcherOnce(ctx context.Context, now time.Time) error {
+	_, err := m.runNotificationDispatcherStep(ctx, now)
+	return err
+}
+
+func (m *Manager) runNotificationDispatcherStep(ctx context.Context, now time.Time) (bool, error) {
 	staleBefore := now.Add(-notificationDeliveryLease)
 	if _, err := m.repository.RecoverStaleSendingDeliveries(staleBefore, now); err != nil {
-		return err
+		return false, err
 	}
+	worked := false
 	accepted, err := m.repository.ClaimAcceptedNotificationDeliveries(now, staleBefore, 1)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(accepted) == 1 {
+		worked = true
 		if err := m.confirmNotificationDelivery(ctx, accepted[0], now); err != nil {
-			return err
+			return worked, err
 		}
 	}
 	deliveries, err := m.repository.ClaimNotificationDeliveries(now, staleBefore, 1)
 	if err != nil {
-		return err
+		return worked, err
 	}
 	if len(deliveries) == 1 {
-		return m.sendNotificationDelivery(ctx, deliveries[0], now)
+		worked = true
+		if err := m.sendNotificationDelivery(ctx, deliveries[0], now); err != nil {
+			return worked, err
+		}
 	}
-	return nil
+	return worked, nil
 }
 
 func (m *Manager) sendNotificationDelivery(ctx context.Context, delivery model.NotificationDelivery, now time.Time) error {
@@ -230,7 +251,13 @@ func (m *Manager) handleNotificationSendError(binding model.WxPusherBinding, del
 		status = model.NotificationDeliveryUncertain
 	} else if wxpusher.IsRetryable(sendErr) && delivery.AttemptCount < maxNotificationSendAttempts {
 		status = model.NotificationDeliveryRetryWait
-		backoff := notificationSendBackoffs[delivery.AttemptCount-1]
+		idx := delivery.AttemptCount - 1
+		if idx < 0 {
+			idx = 0
+		} else if idx >= len(notificationSendBackoffs) {
+			idx = len(notificationSendBackoffs) - 1
+		}
+		backoff := notificationSendBackoffs[idx]
 		if retryAfter := wxpusher.RetryAfterOf(sendErr); retryAfter > backoff {
 			backoff = retryAfter
 		}

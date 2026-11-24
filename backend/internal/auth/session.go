@@ -100,11 +100,6 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 		IPLabel:      client.IPLabel,
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanupExpiredLocked(now)
-	m.sessions[session.Token] = session
-	m.limitUserSessionsLocked(userID)
 	if m.store != nil {
 		if err := m.store.SaveSession(persistence.SessionRecord{
 			TokenHash:    hashSessionToken(session.Token),
@@ -117,12 +112,16 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 			DeviceType:   session.DeviceType,
 			IPLabel:      session.IPLabel,
 		}, m.maxSessionsPerUser); err != nil {
-			delete(m.sessions, session.Token)
 			return Session{}, err
 		}
+		records, listErr := m.store.ListUserSessions(userID)
+		m.mu.Lock()
+		m.cleanupExpiredLocked(now)
+		m.sessions[session.Token] = session
+		m.limitUserSessionsLocked(userID)
 		// Keep in-memory cache in sync with SQLite eviction (including sessions
 		// cached before a restart-evicted limit was hit).
-		if records, err := m.store.ListUserSessions(userID); err == nil {
+		if listErr == nil {
 			active := make(map[string]struct{}, len(records))
 			for _, record := range records {
 				active[string(record.TokenHash)] = struct{}{}
@@ -136,57 +135,84 @@ func (m *SessionManager) Create(userID string, clients ...SessionClientInfo) (Se
 				}
 			}
 		}
+		m.mu.Unlock()
+		return session, nil
 	}
+
+	m.mu.Lock()
+	m.cleanupExpiredLocked(now)
+	m.sessions[session.Token] = session
+	m.limitUserSessionsLocked(userID)
+	m.mu.Unlock()
 	return session, nil
 }
 
 func (m *SessionManager) Get(token string) (Session, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	now := time.Now()
+	m.mu.RLock()
 	session, ok := m.sessions[token]
-	if !ok {
-		if m.store == nil {
+	m.mu.RUnlock()
+
+	if ok {
+		if now.After(session.ExpiresAt) {
+			m.mu.Lock()
+			delete(m.sessions, token)
+			m.mu.Unlock()
+			if m.store != nil {
+				_ = m.store.DeleteSession(hashSessionToken(token))
+			}
 			return Session{}, false
 		}
-		record, found, err := m.store.LoadSession(hashSessionToken(token))
-		if err != nil || !found {
-			return Session{}, false
-		}
-		session = Session{
-			Token:        token,
-			UserID:       record.UserID,
-			CreatedAt:    record.CreatedAt,
-			ExpiresAt:    record.ExpiresAt,
-			LastActiveAt: record.LastActiveAt,
-			Browser:      record.Browser,
-			OS:           record.OS,
-			DeviceType:   record.DeviceType,
-			IPLabel:      record.IPLabel,
-		}
-		m.sessions[token] = session
+		return session, true
 	}
 
-	if time.Now().After(session.ExpiresAt) {
-		delete(m.sessions, token)
-		if m.store != nil {
-			_ = m.store.DeleteSession(hashSessionToken(token))
-		}
+	if m.store == nil {
 		return Session{}, false
 	}
+	tokenHash := hashSessionToken(token)
+	record, found, err := m.store.LoadSession(tokenHash)
+	if err != nil || !found {
+		return Session{}, false
+	}
+	session = Session{
+		Token:        token,
+		UserID:       record.UserID,
+		CreatedAt:    record.CreatedAt,
+		ExpiresAt:    record.ExpiresAt,
+		LastActiveAt: record.LastActiveAt,
+		Browser:      record.Browser,
+		OS:           record.OS,
+		DeviceType:   record.DeviceType,
+		IPLabel:      record.IPLabel,
+	}
+	if now.After(session.ExpiresAt) {
+		_ = m.store.DeleteSession(tokenHash)
+		return Session{}, false
+	}
+	m.mu.Lock()
+	m.sessions[token] = session
+	m.mu.Unlock()
 	return session, true
 }
 
 func (m *SessionManager) Touch(token string) {
 	now := time.Now()
-	m.mu.Lock()
+	m.mu.RLock()
 	session, ok := m.sessions[token]
 	if ok && now.Sub(session.LastActiveAt) < time.Minute {
-		m.mu.Unlock()
+		m.mu.RUnlock()
 		return
 	}
-	if ok {
-		session.LastActiveAt = now
-		m.sessions[token] = session
+	m.mu.RUnlock()
+
+	m.mu.Lock()
+	if cached, exists := m.sessions[token]; exists {
+		if now.Sub(cached.LastActiveAt) < time.Minute {
+			m.mu.Unlock()
+			return
+		}
+		cached.LastActiveAt = now
+		m.sessions[token] = cached
 	}
 	m.mu.Unlock()
 	if m.store != nil {
@@ -196,8 +222,8 @@ func (m *SessionManager) Touch(token string) {
 
 func (m *SessionManager) Delete(token string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	delete(m.sessions, token)
+	m.mu.Unlock()
 	if m.store != nil {
 		_ = m.store.DeleteSession(hashSessionToken(token))
 	}
@@ -205,12 +231,12 @@ func (m *SessionManager) Delete(token string) {
 
 func (m *SessionManager) DeleteUser(userID string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for token, session := range m.sessions {
 		if session.UserID == userID {
 			delete(m.sessions, token)
 		}
 	}
+	m.mu.Unlock()
 	if m.store != nil {
 		if err := m.store.DeleteUserSessions(userID); err != nil {
 			return err
@@ -262,12 +288,12 @@ func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView,
 
 func (m *SessionManager) DeleteOthers(userID, currentToken string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for token, session := range m.sessions {
 		if session.UserID == userID && token != currentToken {
 			delete(m.sessions, token)
 		}
 	}
+	m.mu.Unlock()
 	if m.store != nil {
 		return m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken))
 	}

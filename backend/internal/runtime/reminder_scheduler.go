@@ -249,45 +249,50 @@ func (m *Manager) reminderSchedulerRunning() bool {
 }
 
 func (m *Manager) reminderTargets() ([]reminderTarget, error) {
-	type schedulerUser struct {
-		id             string
-		refreshEnabled bool
-	}
 	m.mu.RLock()
-	users := make([]schedulerUser, 0, len(m.users))
+	enabledUsers := make(map[string]bool, len(m.users))
 	for _, user := range m.users {
 		if user.Enabled && user.Role == model.RoleUser {
-			users = append(users, schedulerUser{id: user.ID, refreshEnabled: user.RefreshEnabled})
+			enabledUsers[user.ID] = user.RefreshEnabled
 		}
 	}
 	m.mu.RUnlock()
-	sort.Slice(users, func(i, j int) bool { return users[i].id < users[j].id })
 
 	now := m.reminderSchedulerNow()
-	targets := make([]reminderTarget, 0)
-	for _, user := range users {
-		rules, err := m.repository.ListWatchRules(user.id)
-		if err != nil {
-			return nil, fmt.Errorf("list scheduler watch rules for user %s: %w", user.id, err)
+	rules, err := m.repository.ListActiveTemporaryWatchRules(now)
+	if err != nil {
+		return nil, fmt.Errorf("list active scheduler watch rules: %w", err)
+	}
+	type targetKey struct {
+		userID   string
+		deviceID string
+	}
+	grouped := make(map[targetKey][]model.WatchRule)
+	keys := make([]targetKey, 0)
+	for _, rule := range rules {
+		if _, ok := enabledUsers[rule.UserID]; !ok {
+			continue
 		}
-		byPile := make(map[string][]model.WatchRule)
-		for _, rule := range rules {
-			if rule.Mode == model.WatchRuleTemporary && rule.Enabled &&
-				rule.CompletedAt == nil && rule.ExpiresAt != nil && rule.ExpiresAt.After(now) {
-				byPile[rule.DeviceID] = append(byPile[rule.DeviceID], rule)
-			}
+		key := targetKey{userID: rule.UserID, deviceID: rule.DeviceID}
+		if _, exists := grouped[key]; !exists {
+			keys = append(keys, key)
 		}
-		deviceIDs := make([]string, 0, len(byPile))
-		for deviceID := range byPile {
-			deviceIDs = append(deviceIDs, deviceID)
+		grouped[key] = append(grouped[key], rule)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].userID != keys[j].userID {
+			return keys[i].userID < keys[j].userID
 		}
-		sort.Strings(deviceIDs)
-		for _, deviceID := range deviceIDs {
-			targets = append(targets, reminderTarget{
-				userID: user.id, deviceID: deviceID, refreshEnabled: user.refreshEnabled,
-				rules: byPile[deviceID],
-			})
-		}
+		return keys[i].deviceID < keys[j].deviceID
+	})
+	targets := make([]reminderTarget, 0, len(keys))
+	for _, key := range keys {
+		targets = append(targets, reminderTarget{
+			userID:         key.userID,
+			deviceID:       key.deviceID,
+			refreshEnabled: enabledUsers[key.userID],
+			rules:          grouped[key],
+		})
 	}
 	return targets, nil
 }
@@ -602,7 +607,10 @@ func (m *Manager) executeReminderTarget(
 		}
 		return m.pauseReminderState(&state, watchPauseInactiveRule, next, now)
 	case charger.IsAuthExpired(refreshErr):
-		return m.notifyCredentialExpired(item.target.userID, now)
+		runtime, _ := m.runtimeFor(item.target.userID)
+		err := m.markPersonalCookieExpired(item.target.userID, runtime, now)
+		_ = m.saveUserState(item.target.userID)
+		return err
 	case result.Skipped:
 		next := now.Add(initialReminderFailureBackoff)
 		if result.NextRetryAt != nil && result.NextRetryAt.After(next) {

@@ -132,6 +132,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return
+    const version = requestVersionRef.current
     setLoadingMore(true)
     setError(null)
     try {
@@ -139,6 +140,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         status: statusRef.current,
         cursor: nextCursor,
       })
+      if (version !== requestVersionRef.current) return
       setItems((current) => mergeNotifications(current, page.items))
       for (const notification of page.items)
         notificationUnreadStateRef.current.set(
@@ -148,10 +150,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setUnreadCount(page.unreadCount)
       setNextCursor(page.nextCursor)
     } catch (reason) {
-      setError((reason as Error).message)
+      if (version !== requestVersionRef.current) return
+      setError(reason instanceof Error ? reason.message : "加载通知失败")
       throw reason
     } finally {
-      setLoadingMore(false)
+      if (version === requestVersionRef.current) setLoadingMore(false)
     }
   }, [loadingMore, nextCursor])
 

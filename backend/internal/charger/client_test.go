@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/security"
 )
@@ -366,4 +367,50 @@ func TestBuildCnumURLKeepsRemoteHostsOnHTTPS(t *testing.T) {
 	if !strings.HasPrefix(local, "http://127.0.0.1:8080/i/cnum?") {
 		t.Fatalf("loopback cnum URL = %q, want the http scheme preserved", local)
 	}
+}
+
+func TestFetchPileWithCookieRejectsCorruptSnapshot(t *testing.T) {
+	template := []parser.CaptureRequest{{
+		Name:   "template",
+		Method: http.MethodPost,
+		URL:    "https://example.invalid/action/i/api/devicewithnumbers",
+		Body:   "id=template",
+		Headers: map[string]string{
+			"Referer": "https://example.invalid/i/device/opening?id=template",
+		},
+	}}
+
+	t.Run("mismatched device id", func(t *testing.T) {
+		client := NewClientTemplateOnly(template)
+		client.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return testResponse(http.StatusOK, `{"id":"other-device","status":"在线","opennum":1}`), nil
+		})}
+		if _, err := client.FetchPileWithCookie("wanted-device", "wxopenid=abc"); err == nil || !strings.Contains(err.Error(), "mismatch") {
+			t.Fatalf("expected device mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("valid snapshot", func(t *testing.T) {
+		client := NewClientTemplateOnly(template)
+		client.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return testResponse(http.StatusOK, `{"id":"wanted-device","status":"在线","opennum":2}`), nil
+		})}
+		pile, err := client.FetchPileWithCookie("wanted-device", "wxopenid=abc")
+		if err != nil || pile.ID != "wanted-device" || len(pile.Ports) != 2 {
+			t.Fatalf("valid snapshot failed: pile=%+v err=%v", pile, err)
+		}
+	})
+
+	t.Run("validateFetchedPile rejects incomplete and out-of-order ports", func(t *testing.T) {
+		if err := validateFetchedPile("wanted-device", model.Pile{ID: "wanted-device", OpenNum: 2}); err == nil || !strings.Contains(err.Error(), "incomplete") {
+			t.Fatalf("expected incomplete port snapshot error, got %v", err)
+		}
+		if err := validateFetchedPile("wanted-device", model.Pile{
+			ID:      "wanted-device",
+			OpenNum: 2,
+			Ports:   []model.Port{{ID: 1}, {ID: 3}},
+		}); err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Fatalf("expected invalid port snapshot error, got %v", err)
+		}
+	})
 }

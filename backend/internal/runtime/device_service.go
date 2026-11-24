@@ -47,14 +47,14 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 		resolvedID, err := runtime.client.ResolveDeviceIDByNumber(req.Number)
 		if err != nil {
 			runtime.recordFailure(false)
-			_ = m.Save()
+			_ = m.saveUserState(userID)
 			return model.Pile{}, err
 		}
 		req.ID = resolvedID
 	}
 	if err := runtime.client.AddDeviceWithLimit(req.ID, user.DeviceLimit); err != nil {
 		runtime.recordFailure(false)
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		if charger.IsDeviceLimit(err) {
 			return model.Pile{}, fmt.Errorf("当前账户最多添加 %d 台充电桩", user.DeviceLimit)
 		}
@@ -69,7 +69,7 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 		}
 		runtime.client.RemoveDevice(req.ID)
 		runtime.recordFailure(charger.IsAuthExpired(err))
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return model.Pile{}, err
 	}
 	snapshot := runtime.store.Snapshot()
@@ -148,12 +148,12 @@ func (m *Manager) DeletePile(userID string, id string) error {
 	m.recordMetric(userID, "request")
 	if !runtime.store.DeletePile(id) {
 		runtime.recordFailure(false)
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return fmt.Errorf("pile not found")
 	}
 	runtime.client.RemoveDevice(id)
 	m.invalidateBackgroundPileValidation(userID, id)
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return err
 	}
 	if err := m.repository.DeleteWatchDataForPile(userID, id); err != nil {
@@ -175,7 +175,7 @@ func (m *Manager) UpdatePile(userID, id, name, address string, sortOrder int) (m
 	if !ok {
 		return model.Pile{}, fmt.Errorf("pile not found")
 	}
-	return pile, m.Save()
+	return pile, m.saveUserState(userID)
 }
 
 func (m *Manager) ReorderPiles(userID string, ids []string) (model.DashboardSnapshot, error) {
@@ -190,7 +190,7 @@ func (m *Manager) ReorderPiles(userID string, ids []string) (model.DashboardSnap
 		runtime.recordFailure(false)
 		return model.DashboardSnapshot{}, err
 	}
-	return snapshot, m.Save()
+	return snapshot, m.saveUserState(userID)
 }
 
 func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, error) {
@@ -224,11 +224,11 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 			if m.PublicPoolAvailableCount() > 0 {
 				return m.refreshViaPublicPool(userID, runtime, true)
 			}
-			_ = m.Save()
+			_ = m.saveUserState(userID)
 			return model.DashboardSnapshot{}, err
 		}
 		runtime.recordFailure(false)
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return model.DashboardSnapshot{}, err
 	}
 	runtime.setPersonalCookieExpired(false)
@@ -296,7 +296,7 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 	previous := runtime.client.Cookie()
 	if err := runtime.client.UpdateCookie(cookie); err != nil {
 		runtime.recordFailure(false)
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return model.DashboardSnapshot{}, err
 	}
 	m.invalidateBackgroundCredentialValidation(userID)
@@ -332,7 +332,7 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 		snapshot.Refresh.Cached = true
 		snapshot.Refresh.Message = "Cookie 已保存；远端刷新当前已暂停，继续展示缓存数据"
 		runtime.store.SetRefreshInfo(snapshot.Refresh)
-		if err := m.Save(); err != nil {
+		if err := m.saveUserState(userID); err != nil {
 			return model.DashboardSnapshot{}, err
 		}
 		return m.attachQuota(userID, snapshot), nil
@@ -342,7 +342,7 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 			if _, probeErr := runtime.client.FetchPileWithCookie(shared[0].DeviceID, cookie); probeErr != nil {
 				_ = runtime.client.UpdateCookie(previous)
 				runtime.recordFailure(false)
-				_ = m.Save()
+				_ = m.saveUserState(userID)
 				return model.DashboardSnapshot{}, probeErr
 			}
 		}
@@ -361,7 +361,7 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 			snapshot.Refresh.Message = "个人 Cookie 已保存"
 		}
 		runtime.store.SetRefreshInfo(snapshot.Refresh)
-		if err := m.Save(); err != nil {
+		if err := m.saveUserState(userID); err != nil {
 			return model.DashboardSnapshot{}, err
 		}
 		return m.attachQuota(userID, snapshot), nil
@@ -372,7 +372,7 @@ func (m *Manager) UpdateCookieWithPoolOption(userID string, rawCookie string, jo
 		m.recordRefreshMetrics(userID, info)
 		_ = runtime.client.UpdateCookie(previous)
 		runtime.recordFailure(false)
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return model.DashboardSnapshot{}, err
 	}
 	if err := syncPool(); err != nil {
@@ -399,7 +399,7 @@ func (m *Manager) saveAndRecordPoolPiles(userID string, piles []model.Pile) erro
 }
 
 func (m *Manager) saveAndRecordPiles(userID string, piles []model.Pile, validatePersonalCredential bool) error {
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return err
 	}
 	if len(piles) == 0 {

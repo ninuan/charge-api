@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -128,7 +129,7 @@ func (s *Store) UpsertIncident(issue model.SystemException) error {
 }
 
 func (s *Store) ListIncidents(status, issueType, level string) ([]model.SystemException, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, user_id, username, device_id, type, level, message, status,
 		       note, occurrences, handled_by, handled_at, first_seen_at, last_seen_at
 		FROM admin_incidents
@@ -186,16 +187,33 @@ func (s *Store) UpdateIncident(id, status, note, handler string, at time.Time) (
 	if changed == 0 {
 		return model.SystemException{}, fmt.Errorf("incident not found")
 	}
-	items, err := s.ListIncidents("", "", "")
+	var issue model.SystemException
+	var handledAt sql.NullInt64
+	var firstSeenAt, lastSeenAt int64
+	err = s.db.QueryRow(`
+		SELECT id, user_id, username, device_id, type, level, message, status,
+		       note, occurrences, handled_by, handled_at, first_seen_at, last_seen_at
+		FROM admin_incidents
+		WHERE id = ?
+	`, id).Scan(
+		&issue.ID, &issue.UserID, &issue.Username, &issue.DeviceID,
+		&issue.Type, &issue.Level, &issue.Message, &issue.Status,
+		&issue.Note, &issue.Occurrences, &issue.HandledBy, &handledAt,
+		&firstSeenAt, &lastSeenAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.SystemException{}, fmt.Errorf("incident not found")
+	}
 	if err != nil {
-		return model.SystemException{}, err
+		return model.SystemException{}, fmt.Errorf("load updated admin incident: %w", err)
 	}
-	for _, item := range items {
-		if item.ID == id {
-			return item, nil
-		}
+	issue.FirstSeenAt = time.Unix(0, firstSeenAt)
+	issue.Time = time.Unix(0, lastSeenAt)
+	if handledAt.Valid {
+		at := time.Unix(0, handledAt.Int64)
+		issue.HandledAt = &at
 	}
-	return model.SystemException{}, fmt.Errorf("incident not found")
+	return issue, nil
 }
 
 func (s *Store) RecordHealthCheck(service string, health model.ServiceHealth, at time.Time) error {
@@ -296,9 +314,11 @@ func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays i
 		at := time.Unix(newestHistory.Int64, 0)
 		result.PortHistoryNewestAt = &at
 	}
-	if err := s.db.QueryRow(`PRAGMA quick_check`).Scan(&result.IntegrityResult); err != nil {
-		return result, fmt.Errorf("check database integrity: %w", err)
+	integrity, err := s.cachedIntegrityCheck()
+	if err != nil {
+		return result, err
 	}
+	result.IntegrityResult = integrity
 
 	backupDir := strings.TrimSpace(os.Getenv("CHARGE_BACKUP_DIR"))
 	if backupDir == "" {
@@ -324,6 +344,30 @@ func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays i
 		result.BackupMessage = "最近数据库备份已超过 48 小时，请检查定时任务。"
 	}
 	return result, nil
+}
+
+// RefreshIntegrityCheck executes PRAGMA quick_check and updates the cached result.
+func (s *Store) RefreshIntegrityCheck() (string, error) {
+	var integrity string
+	if err := s.db.QueryRow(`PRAGMA quick_check`).Scan(&integrity); err != nil {
+		return "", fmt.Errorf("check database integrity: %w", err)
+	}
+	s.integrityMu.Lock()
+	s.integrityResult = integrity
+	s.integrityCheckedAt = time.Now()
+	s.integrityMu.Unlock()
+	return integrity, nil
+}
+
+func (s *Store) cachedIntegrityCheck() (string, error) {
+	s.integrityMu.RLock()
+	cached := s.integrityResult
+	checkedAt := s.integrityCheckedAt
+	s.integrityMu.RUnlock()
+	if cached != "" && time.Since(checkedAt) < integrityCheckTTL {
+		return cached, nil
+	}
+	return s.RefreshIntegrityCheck()
 }
 
 func (s *Store) ReminderMetricCounts(since time.Time) (map[string]int, error) {

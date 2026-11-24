@@ -39,3 +39,19 @@ func TestAuthGuardRequiresCaptchaAfterTwoFailures(t *testing.T) {
 		t.Fatal("captcha requirement remained after successful login")
 	}
 }
+
+func TestAuthGuardDoesNotLockOtherIPsByUsername(t *testing.T) {
+	guard := NewAuthGuard()
+	for i := 0; i < 5; i++ {
+		guard.RecordFailure("198.51.100.10", "admin")
+	}
+	if locked, _ := guard.Locked("198.51.100.10", "admin"); !locked {
+		t.Fatal("attacker IP should be locked after five failures")
+	}
+	if locked, _ := guard.Locked("203.0.113.99", "admin"); locked {
+		t.Fatal("legitimate IP must not be globally locked out by another IP guessing the username")
+	}
+	if !guard.RequiresCaptcha("203.0.113.99", "admin") {
+		t.Fatal("distributed password guesses against a username should still require CAPTCHA")
+	}
+}

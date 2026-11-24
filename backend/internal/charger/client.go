@@ -349,7 +349,14 @@ func (c *Client) FetchPileWithCookie(deviceID string, cookie string) (model.Pile
 	request.Headers = cloneHeaders(request.Headers)
 	request.Headers["Referer"] = withURLQueryValue(request.Headers["Referer"], "id", deviceID)
 	request.Headers["Cookie"] = withCookieValue(strings.TrimSpace(cookie), "deviceid", deviceID)
-	return c.fetchPile(request)
+	pile, err := c.fetchPile(request)
+	if err != nil {
+		return model.Pile{}, err
+	}
+	if err := validateFetchedPile(deviceID, pile); err != nil {
+		return model.Pile{}, err
+	}
+	return pile, nil
 }
 
 func (c *Client) HasPersonalCookie() bool {
@@ -516,18 +523,25 @@ func (c *Client) fetchDevice(request deviceRequest) (model.Pile, error) {
 	if err != nil {
 		return model.Pile{}, err
 	}
-	if pile.ID != request.id {
-		return model.Pile{}, fmt.Errorf("remote device ID mismatch: got %q, want %q", pile.ID, request.id)
+	if err := validateFetchedPile(request.id, pile); err != nil {
+		return model.Pile{}, err
+	}
+	return pile, nil
+}
+
+func validateFetchedPile(deviceID string, pile model.Pile) error {
+	if pile.ID != deviceID {
+		return fmt.Errorf("remote device ID mismatch: got %q, want %q", pile.ID, deviceID)
 	}
 	if pile.OpenNum <= 0 || len(pile.Ports) != pile.OpenNum {
-		return model.Pile{}, fmt.Errorf("remote pile %s returned an incomplete port snapshot", request.id)
+		return fmt.Errorf("remote pile %s returned an incomplete port snapshot", deviceID)
 	}
 	for index, port := range pile.Ports {
 		if port.ID != index+1 {
-			return model.Pile{}, fmt.Errorf("remote pile %s returned an invalid port snapshot", request.id)
+			return fmt.Errorf("remote pile %s returned an invalid port snapshot", deviceID)
 		}
 	}
-	return pile, nil
+	return nil
 }
 
 func (c *Client) snapshotRequests() []deviceRequest {

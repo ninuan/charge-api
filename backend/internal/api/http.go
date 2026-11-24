@@ -50,6 +50,8 @@ type Server struct {
 	healthMu            sync.RWMutex
 	healthDegradations  map[string]string
 	streams             streamLimits
+	streamStop          chan struct{}
+	streamStopOnce      sync.Once
 	authSem             chan struct{}
 	qrMu                sync.Mutex
 	bindingBusy         map[string]bool
@@ -106,8 +108,19 @@ func NewServer(
 		authGuard:          authGuard,
 		captcha:            auth.NewCaptchaStore(),
 		healthDegradations: make(map[string]string),
+		streamStop:         make(chan struct{}),
 		authSem:            make(chan struct{}, 4),
 	}
+}
+
+// ShutdownStreams closes all active SSE stream loops so http.Server.Shutdown
+// can drain regular in-flight HTTP requests without cancelling their contexts.
+func (s *Server) ShutdownStreams() {
+	s.streamStopOnce.Do(func() {
+		if s.streamStop != nil {
+			close(s.streamStop)
+		}
+	})
 }
 
 func (s *Server) acquireAuthSlot(w http.ResponseWriter) (func(), bool) {
@@ -235,6 +248,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	_, ok = w.(http.Flusher)
 	if !ok {
@@ -261,6 +275,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.streamStop:
 			return
 		case <-heartbeat.C:
 			if !s.streamSessionValid(r, user.ID) || writeStreamEvent(w, "", nil) != nil {

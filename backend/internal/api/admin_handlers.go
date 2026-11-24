@@ -322,7 +322,12 @@ func (s *Server) handleAdminUserActions(w http.ResponseWriter, r *http.Request) 
 		quota, err := s.manager.AdminSetUserBonusQuota(parts[3], req.BonusRemaining)
 		if err != nil {
 			s.recordAdminAuditMessage(admin, "user.quota_update", "user", parts[3], targetLabel, "failure", err.Error())
-			writeCodedError(w, http.StatusBadRequest, "USER_QUOTA_INVALID", err.Error())
+			var valErr *appruntime.ValidationError
+			if errors.As(err, &valErr) {
+				writeCodedError(w, http.StatusBadRequest, "USER_QUOTA_INVALID", valErr.Message)
+				return
+			}
+			writePublicOperationError(w, http.StatusInternalServerError, "update user bonus quota", "更新奖励刷新次数失败，请稍后重试。", err)
 			return
 		}
 		s.recordAdminAuditMessage(admin, "user.quota_update", "user", parts[3], targetLabel, "success", fmt.Sprintf("永久奖励次数设为 %d", req.BonusRemaining))

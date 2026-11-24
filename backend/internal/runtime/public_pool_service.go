@@ -90,17 +90,30 @@ func (m *Manager) ListPublicPoolCookies() ([]model.PublicPoolCookie, error) {
 	return m.repository.ListPublicPoolCookies()
 }
 
+// ValidationError represents a safe, user-facing input validation failure.
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Message
+}
+
+func validationError(message string) error {
+	return &ValidationError{Message: message}
+}
+
 func (m *Manager) CreatePublicPoolCookie(req model.PublicPoolCookieCreateRequest) (model.PublicPoolCookie, error) {
 	label := strings.TrimSpace(req.Label)
 	if label == "" {
-		return model.PublicPoolCookie{}, fmt.Errorf("请填写公共 Cookie 备注名")
+		return model.PublicPoolCookie{}, validationError("请填写公共 Cookie 备注名")
 	}
 	if len(label) > 64 {
-		return model.PublicPoolCookie{}, fmt.Errorf("备注名不能超过 64 个字符")
+		return model.PublicPoolCookie{}, validationError("备注名不能超过 64 个字符")
 	}
 	cookie, err := charger.ExtractCookie(req.Cookie)
 	if err != nil {
-		return model.PublicPoolCookie{}, err
+		return model.PublicPoolCookie{}, validationError(err.Error())
 	}
 	enabled := true
 	if req.Enabled != nil {
@@ -121,12 +134,12 @@ func (m *Manager) CreatePublicPoolCookie(req model.PublicPoolCookieCreateRequest
 func (m *Manager) UpdatePublicPoolCookie(id string, req model.PublicPoolCookieUpdateRequest) (model.PublicPoolCookie, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return model.PublicPoolCookie{}, fmt.Errorf("cookie id is required")
+		return model.PublicPoolCookie{}, validationError("cookie id is required")
 	}
 	if req.Label != nil {
 		trimmed := strings.TrimSpace(*req.Label)
 		if trimmed == "" || len(trimmed) > 64 {
-			return model.PublicPoolCookie{}, fmt.Errorf("备注名长度需要在 1-64 个字符之间")
+			return model.PublicPoolCookie{}, validationError("备注名长度需要在 1-64 个字符之间")
 		}
 		req.Label = &trimmed
 	}
@@ -136,11 +149,11 @@ func (m *Manager) UpdatePublicPoolCookie(id string, req model.PublicPoolCookieUp
 			return model.PublicPoolCookie{}, err
 		}
 		if existing != nil && existing.OwnerUserID != "" {
-			return model.PublicPoolCookie{}, fmt.Errorf("用户互助 Cookie 仅可由用户本人在账号页更新，管理员仅可修改备注或启停状态")
+			return model.PublicPoolCookie{}, validationError("用户互助 Cookie 仅可由用户本人在账号页更新，管理员仅可修改备注或启停状态")
 		}
 		extracted, err := charger.ExtractCookie(*req.Cookie)
 		if err != nil {
-			return model.PublicPoolCookie{}, err
+			return model.PublicPoolCookie{}, validationError(err.Error())
 		}
 		req.Cookie = &extracted
 	}
@@ -169,7 +182,7 @@ func (m *Manager) handlePoolCookieExpired(rec persistence.PublicPoolCookieRecord
 			ownerRT.recordFailure(true)
 			m.recordMetric(rec.OwnerUserID, "cookie_error")
 			_ = m.notifyCredentialExpired(rec.OwnerUserID, now)
-			_ = m.Save()
+			_ = m.saveUserState(rec.OwnerUserID)
 		}
 	}
 }
@@ -222,7 +235,7 @@ func (m *Manager) TestPersonalCookie(userID string) (model.DashboardSnapshot, er
 	if fetchErr != nil {
 		if charger.IsAuthExpired(fetchErr) {
 			_ = m.markPersonalCookieExpired(userID, runtime, now)
-			_ = m.Save()
+			_ = m.saveUserState(userID)
 			return m.attachQuota(userID, runtime.store.Snapshot()), charger.ErrAuthExpired
 		}
 		return model.DashboardSnapshot{}, fetchErr
@@ -234,7 +247,7 @@ func (m *Manager) TestPersonalCookie(userID string) (model.DashboardSnapshot, er
 	}
 	m.recordSharedPiles(userID, []model.Pile{pile})
 	_ = m.resolveCredentialExpired(userID, now)
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return model.DashboardSnapshot{}, err
 	}
 	return m.attachQuota(userID, runtime.store.Snapshot()), nil
@@ -282,12 +295,22 @@ func (m *Manager) fetchPileViaPublicPool(deviceID string) (model.Pile, error) {
 	if err != nil {
 		return model.Pile{}, err
 	}
+	pile, _, err := m.fetchPileWithPoolCandidates(deviceID, m.poolClient(), cookies)
+	return pile, err
+}
+
+func (m *Manager) fetchPileWithPoolCandidates(
+	deviceID string,
+	client *charger.Client,
+	cookies []persistence.PublicPoolCookieRecord,
+) (model.Pile, []persistence.PublicPoolCookieRecord, error) {
 	if len(cookies) == 0 {
 		m.notifyAdminsPublicPoolDegraded(0)
-		return model.Pile{}, ErrPublicPoolUnavailable
+		return model.Pile{}, cookies, ErrPublicPoolUnavailable
 	}
-	client := m.poolClient()
 	start := m.nextPoolStart(len(cookies))
+	remaining := make([]persistence.PublicPoolCookieRecord, 0, len(cookies))
+	expiredIDs := make(map[string]bool)
 	remainingHealthy := len(cookies)
 	var lastErr error
 	for i := 0; i < len(cookies); i++ {
@@ -295,9 +318,15 @@ func (m *Manager) fetchPileViaPublicPool(deviceID string) (model.Pile, error) {
 		pile, fetchErr := client.FetchPileWithCookie(deviceID, rec.Cookie)
 		if fetchErr == nil {
 			_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, "")
-			return pile, nil
+			for _, c := range cookies {
+				if !expiredIDs[c.ID] {
+					remaining = append(remaining, c)
+				}
+			}
+			return pile, remaining, nil
 		}
 		if charger.IsAuthExpired(fetchErr) {
+			expiredIDs[rec.ID] = true
 			m.handlePoolCookieExpired(rec, "远端返回鉴权失效", time.Now().UTC())
 			remainingHealthy--
 			if remainingHealthy <= 1 {
@@ -307,12 +336,17 @@ func (m *Manager) fetchPileViaPublicPool(deviceID string) (model.Pile, error) {
 			continue
 		}
 		_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, fetchErr.Error())
-		return model.Pile{}, fetchErr
+		for _, c := range cookies {
+			if !expiredIDs[c.ID] {
+				remaining = append(remaining, c)
+			}
+		}
+		return model.Pile{}, remaining, fetchErr
 	}
 	if lastErr != nil {
-		return model.Pile{}, ErrPublicPoolUnavailable
+		return model.Pile{}, nil, ErrPublicPoolUnavailable
 	}
-	return model.Pile{}, ErrPublicPoolUnavailable
+	return model.Pile{}, nil, ErrPublicPoolUnavailable
 }
 
 func (m *Manager) resolveDeviceIDViaPublicPool(number string) (string, error) {
@@ -473,10 +507,10 @@ func (m *Manager) AdminUpdateSharedPile(deviceID, name, address string) (*model.
 	trimmedName := strings.TrimSpace(name)
 	trimmedAddr := strings.TrimSpace(address)
 	if trimmedName == "" {
-		return nil, fmt.Errorf("充电桩名称不能为空")
+		return nil, validationError("充电桩名称不能为空")
 	}
 	if len(trimmedName) > 128 || len(trimmedAddr) > 256 {
-		return nil, fmt.Errorf("名称或地址长度超出限制")
+		return nil, validationError("名称或地址长度超出限制")
 	}
 	return m.repository.UpdateSharedPileMeta(deviceID, trimmedName, trimmedAddr)
 }
@@ -512,10 +546,10 @@ func (m *Manager) AdminDeleteSharedPile(deviceID string) error {
 
 func (m *Manager) AdminSetUserBonusQuota(userID string, bonus int) (model.UserRefreshQuota, error) {
 	if bonus < 0 || bonus > 10000 {
-		return model.UserRefreshQuota{}, fmt.Errorf("奖励刷新次数需要在 0 到 10000 之间")
+		return model.UserRefreshQuota{}, validationError("奖励刷新次数需要在 0 到 10000 之间")
 	}
 	if _, err := m.runtimeFor(userID); err != nil {
-		return model.UserRefreshQuota{}, err
+		return model.UserRefreshQuota{}, validationError("未找到对应的启用用户")
 	}
 	today := quotaTodayString(time.Now())
 	if err := m.repository.SetUserBonusQuota(userID, today, bonus); err != nil {
@@ -537,7 +571,7 @@ func (m *Manager) ClearPersonalCookie(userID string) (model.DashboardSnapshot, e
 	_ = m.repository.DeleteUserPublicPoolCookie(userID)
 	runtime.setPersonalCookieExpired(false)
 	m.invalidateBackgroundCredentialValidation(userID)
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return model.DashboardSnapshot{}, err
 	}
 	m.wakeReminderScheduler()
@@ -679,7 +713,7 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 				fetchErr = fmt.Errorf("远端未返回该充电桩数据")
 			}
 			runtime.recordFailure(false)
-			_ = m.Save()
+			_ = m.saveUserState(userID)
 			return model.DashboardSnapshot{}, fetchErr
 		}
 		// Personal cookie expired -> record notification & smoothly fall back to public pool!
@@ -701,7 +735,7 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 		}
 		runtime.store.SetRefreshInfo(info)
 		m.recordMetric(userID, "cache")
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return m.attachQuota(userID, runtime.store.Snapshot()), nil
 	}
 
@@ -719,7 +753,7 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 	if fetchErr != nil {
 		_ = m.repository.RefundRefreshQuota(userID, today, receipt)
 		runtime.recordFailure(false)
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return model.DashboardSnapshot{}, fetchErr
 	}
 
@@ -761,11 +795,13 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 	}
 
 	now := time.Now().UTC()
+	ttl := m.sharedPileCacheTTL()
+	sharedByID, _ := m.repository.GetSharedPiles(ids)
 	cachedPiles := make([]model.Pile, 0, len(ids))
 	expiredIDs := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if pile, ok := m.freshSharedPileSnapshot(id, now); ok {
-			cachedPiles = append(cachedPiles, *pile)
+		if shared, ok := sharedByID[id]; ok && shared.LastSnapshot != nil && shared.LastFetchedAt != nil && now.Sub(*shared.LastFetchedAt) < ttl {
+			cachedPiles = append(cachedPiles, *shared.LastSnapshot)
 		} else {
 			expiredIDs = append(expiredIDs, id)
 		}
@@ -786,7 +822,7 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 		}
 		runtime.store.SetRefreshInfo(info)
 		m.recordMetric(userID, "cache")
-		_ = m.Save()
+		_ = m.saveUserState(userID)
 		return m.attachQuota(userID, runtime.store.Snapshot()), nil
 	}
 
@@ -812,6 +848,11 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 		partialByQuota = true
 	}
 
+	poolCookies, poolErr := m.repository.ListHealthyPublicPoolCookies()
+	if poolErr != nil {
+		return model.DashboardSnapshot{}, poolErr
+	}
+	poolClient := m.poolClient()
 	fetchedPiles := make([]model.Pile, 0, len(toFetch))
 	var firstErr error
 	for _, id := range toFetch {
@@ -824,7 +865,9 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 			partialByQuota = true
 			break
 		}
-		pile, fetchErr := m.fetchPileViaPublicPool(id)
+		var pile model.Pile
+		var fetchErr error
+		pile, poolCookies, fetchErr = m.fetchPileWithPoolCandidates(id, poolClient, poolCookies)
 		if fetchErr != nil {
 			_ = m.repository.RefundRefreshQuota(userID, today, receipt)
 			if firstErr == nil {
@@ -941,7 +984,7 @@ func (m *Manager) AddPileWithCatalog(userID string, req model.PileUpsertRequest)
 			runtime.refreshMu.Unlock()
 			if resolveErr != nil && charger.IsAuthExpired(resolveErr) {
 				_ = m.markPersonalCookieExpired(userID, runtime, now)
-				_ = m.Save()
+				_ = m.saveUserState(userID)
 				usePersonal = false
 			}
 		}
@@ -975,7 +1018,7 @@ func (m *Manager) AddPileWithCatalog(userID string, req model.PileUpsertRequest)
 		fetchedPile, fetchErr = runtime.client.FetchPileWithCookie(req.ID, runtime.client.Cookie())
 		if fetchErr != nil && charger.IsAuthExpired(fetchErr) {
 			_ = m.markPersonalCookieExpired(userID, runtime, now)
-			_ = m.Save()
+			_ = m.saveUserState(userID)
 			usePersonal = false
 		}
 	}
@@ -994,14 +1037,6 @@ func (m *Manager) AddPileWithCatalog(userID string, req model.PileUpsertRequest)
 		return model.PileCreateResponse{}, upsertErr
 	}
 
-	rewardGranted := 0
-	if inserted {
-		bonus := m.Settings().PileContributionBonusQuota
-		if err := m.repository.GrantContributionBonus(userID, today, bonus); err == nil {
-			rewardGranted = bonus
-		}
-	}
-
 	runtime.refreshMu.Lock()
 	defer runtime.refreshMu.Unlock()
 	if err := runtime.client.AddDeviceWithLimit(req.ID, user.DeviceLimit); err != nil {
@@ -1014,8 +1049,15 @@ func (m *Manager) AddPileWithCatalog(userID string, req model.PileUpsertRequest)
 		fetchedPile.Address = strings.TrimSpace(req.Address)
 	}
 	runtime.store.MergeCapturePiles([]model.Pile{fetchedPile})
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return model.PileCreateResponse{}, err
+	}
+	rewardGranted := 0
+	if inserted {
+		bonus := m.Settings().PileContributionBonusQuota
+		if err := m.repository.GrantContributionBonus(userID, today, bonus); err == nil {
+			rewardGranted = bonus
+		}
 	}
 	pile := fetchedPile
 	for _, candidate := range runtime.store.Snapshot().Piles {
@@ -1065,7 +1107,7 @@ func (m *Manager) attachSharedPileToUser(
 		pile.Address = strings.TrimSpace(req.Address)
 	}
 	runtime.store.MergeCapturePiles([]model.Pile{pile})
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return model.Pile{}, err
 	}
 	for _, candidate := range runtime.store.Snapshot().Piles {

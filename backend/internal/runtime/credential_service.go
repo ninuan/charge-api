@@ -154,7 +154,7 @@ func (m *Manager) setYYBBinding(userID string, binding *model.YYBBinding) error 
 	runtime.mu.Lock()
 	runtime.yybBinding = cloneYYBBinding(binding)
 	runtime.mu.Unlock()
-	return m.Save()
+	return m.saveUserState(userID)
 }
 
 func cloneYYBBinding(binding *model.YYBBinding) *model.YYBBinding {
@@ -225,7 +225,7 @@ func (m *Manager) recordDiagnostic(userID string, diagnostic model.RecoveryDiagn
 		runtime.recoveryDiagnostics = append([]model.RecoveryDiagnostic(nil), runtime.recoveryDiagnostics[overflow:]...)
 	}
 	runtime.mu.Unlock()
-	_ = m.Save()
+	_ = m.saveUserState(userID)
 }
 
 func recoveryDiagnostic(code string, deviceID string, statusCode int) model.RecoveryDiagnostic {

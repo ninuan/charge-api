@@ -55,7 +55,7 @@ describe("notification semantic contract", () => {
       })
     ).toEqual({
       title: "需要重新登录",
-      message: "登录已过期，请重新扫码后继续查看和接收提醒。",
+      message: "个人 Cookie 已过期，请前往账号页更新后继续查看和接收提醒。",
     })
   })
 

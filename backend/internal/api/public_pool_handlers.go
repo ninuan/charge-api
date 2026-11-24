@@ -78,7 +78,12 @@ func (s *Server) handleAdminPublicPool(w http.ResponseWriter, r *http.Request) {
 				writeCodedError(w, http.StatusConflict, "PUBLIC_POOL_COOKIE_DUPLICATE", "公共池中已存在相同的上游账号凭据，请勿重复添加。")
 				return
 			}
-			writeCodedError(w, http.StatusBadRequest, "PUBLIC_POOL_INVALID", err.Error())
+			var valErr *appruntime.ValidationError
+			if errors.As(err, &valErr) {
+				writeCodedError(w, http.StatusBadRequest, "PUBLIC_POOL_INVALID", valErr.Message)
+				return
+			}
+			writePublicOperationError(w, http.StatusInternalServerError, "create public pool cookie", "保存公共 Cookie 失败，请稍后重试。", err)
 			return
 		}
 		s.recordAdminAuditMessage(admin, "public_pool.create", "public_pool", item.ID, item.Label, "success", "新增公共池 Cookie")
@@ -140,7 +145,12 @@ func (s *Server) handleAdminPublicPoolActions(w http.ResponseWriter, r *http.Req
 				writeCodedError(w, http.StatusConflict, "PUBLIC_POOL_COOKIE_DUPLICATE", "公共池中已存在相同的上游账号凭据，请勿重复添加。")
 				return
 			}
-			writeCodedError(w, http.StatusBadRequest, "PUBLIC_POOL_INVALID", err.Error())
+			var valErr *appruntime.ValidationError
+			if errors.As(err, &valErr) {
+				writeCodedError(w, http.StatusBadRequest, "PUBLIC_POOL_INVALID", valErr.Message)
+				return
+			}
+			writePublicOperationError(w, http.StatusInternalServerError, "create public pool cookie", "保存公共 Cookie 失败，请稍后重试。", err)
 			return
 		}
 		s.recordAdminAuditMessage(admin, "public_pool.update", "public_pool", item.ID, item.Label, "success", "更新公共池 Cookie")
@@ -236,7 +246,12 @@ func (s *Server) handleAdminSharedPileActions(w http.ResponseWriter, r *http.Req
 				writeCodedError(w, http.StatusNotFound, "SHARED_PILE_NOT_FOUND", "未找到对应的公共充电桩")
 				return
 			}
-			writeCodedError(w, http.StatusBadRequest, "SHARED_PILE_INVALID", err.Error())
+			var valErr *appruntime.ValidationError
+			if errors.As(err, &valErr) {
+				writeCodedError(w, http.StatusBadRequest, "SHARED_PILE_INVALID", valErr.Message)
+				return
+			}
+			writePublicOperationError(w, http.StatusInternalServerError, "update shared pile", "更新公共桩信息失败，请稍后重试。", err)
 			return
 		}
 		s.recordAdminAuditMessage(admin, "shared_pile.update", "shared_pile", item.DeviceID, item.Name, "success", "更新公共桩名称/位置")

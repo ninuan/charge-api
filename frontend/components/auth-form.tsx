@@ -63,7 +63,7 @@ export function AuthForm({
       loginCaptchaRequired &&
       (config?.loginCaptchaEnabled ?? true))
 
-  const loadCaptcha = useCallback(async () => {
+  const loadCaptcha = useCallback(async (preserveError = false) => {
     setCaptchaLoading(true)
     setCaptchaAnswer("")
     try {
@@ -77,7 +77,13 @@ export function AuthForm({
     } catch (reason) {
       setCaptchaId("")
       setCaptchaImage("")
-      setError((reason as Error).message)
+      if (!preserveError) {
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "验证码加载失败，请稍后重试。"
+        )
+      }
     } finally {
       setCaptchaLoading(false)
     }
@@ -86,30 +92,40 @@ export function AuthForm({
   // 配置加载失败时提交按钮会一直禁用，必须给用户一个重试入口，
   // 所以抽成可重复调用的函数，失败状态与表单校验错误分开展示。
   const loadConfig = useCallback(
-    () =>
+    (signal?: AbortSignal) =>
       requestJSON<AuthConfig>(
         "/api/auth/config",
-        { cache: "no-store" },
+        { cache: "no-store", signal },
         "安全配置加载失败，请稍后重试。"
       )
         .then((nextConfig) => {
+          if (signal?.aborted) return
           setConfig(nextConfig)
           setConfigError("")
           if (mode === "register" && nextConfig.registerCaptchaEnabled)
             void loadCaptcha()
         })
-        .catch((reason: Error) => setConfigError(reason.message))
-        .finally(() => setConfigLoading(false)),
+        .catch((reason: unknown) => {
+          if (signal?.aborted) return
+          setConfigError(
+            reason instanceof Error
+              ? reason.message
+              : "安全配置加载失败，请稍后重试。"
+          )
+        })
+        .finally(() => {
+          if (!signal?.aborted) setConfigLoading(false)
+        }),
     [loadCaptcha, mode]
   )
 
   useEffect(() => {
-    let active = true
+    const controller = new AbortController()
     queueMicrotask(() => {
-      if (active) void loadConfig()
+      if (!controller.signal.aborted) void loadConfig(controller.signal)
     })
     return () => {
-      active = false
+      controller.abort()
     }
   }, [loadConfig])
 
@@ -160,7 +176,8 @@ export function AuthForm({
       setPassword("")
       onSuccess(resolveHomeRoute(user.role))
     } catch (reason) {
-      const message = (reason as Error).message
+      const message =
+        reason instanceof Error ? reason.message : "提交失败，请稍后重试。"
       const loginNeedsCaptcha =
         mode === "login" &&
         reason instanceof RequestError &&
@@ -168,7 +185,7 @@ export function AuthForm({
           reason.code === "LOGIN_CAPTCHA_INVALID")
       if (loginNeedsCaptcha) {
         setLoginCaptchaRequired(true)
-        await loadCaptcha()
+        await loadCaptcha(true)
       }
       setError(
         mode === "register" &&
@@ -177,7 +194,8 @@ export function AuthForm({
           ? "邀请码已填写，但系统暂未完成更新。请联系管理员后重试"
           : message
       )
-      if (mode === "register") await loadCaptcha()
+      if (mode === "register" && config?.registerCaptchaEnabled)
+        await loadCaptcha(true)
     } finally {
       setSubmitting(false)
     }

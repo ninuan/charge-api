@@ -109,7 +109,7 @@ func (m *Manager) refreshWatchedPileWithDelivery(
 	}
 
 	runtime.store.MergeCapturePiles([]model.Pile{cloneBackgroundPile(result.Pile)})
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
 		return WatchedPileRefreshResult{}, fmt.Errorf("save watched pile snapshot: %w", err)
 	}
 	events, err := m.repository.RecordPortStatusTransitions(userID, []model.Pile{result.Pile})

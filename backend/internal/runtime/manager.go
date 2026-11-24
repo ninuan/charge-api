@@ -310,6 +310,34 @@ func (m *Manager) Save() error {
 	})
 }
 
+func (m *Manager) saveUserState(userID string) error {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
+
+	m.mu.RLock()
+	user, ok := m.users[userID]
+	runtime := m.runtimes[userID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	var state persistence.UserState
+	if runtime != nil {
+		state = runtime.state()
+	}
+	return m.repository.SaveUserState(user, state)
+}
+
+func (m *Manager) saveSettings() error {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
+
+	m.mu.RLock()
+	settings := m.settings
+	m.mu.RUnlock()
+	return m.repository.SaveSettings(settings)
+}
+
 func (m *Manager) runtimeFor(userID string) (*UserRuntime, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

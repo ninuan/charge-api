@@ -79,7 +79,7 @@ const eventOptions: Array<{
   {
     value: "credential_expired",
     label: "需要重新登录",
-    description: "登录过期、需要重新扫码时通知你。",
+    description: "个人 Cookie 失效、需要重新更新时通知你。",
   },
   {
     value: "pile_offline",

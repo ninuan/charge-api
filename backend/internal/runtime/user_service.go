@@ -97,12 +97,16 @@ func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) (m
 		m.mu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("密码已被其他操作更新，请重试")
 	}
+	previous := current
 	current.PasswordHash = hash
 	current.MustChangePassword = false
 	current.UpdatedAt = time.Now()
 	m.users[userID] = current
 	m.mu.Unlock()
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
+		m.mu.Lock()
+		m.users[userID] = previous
+		m.mu.Unlock()
 		return model.CurrentUser{}, err
 	}
 	m.cleanupInitialPasswordFile(userID)
@@ -110,28 +114,34 @@ func (m *Manager) ChangePassword(userID, currentPassword, newPassword string) (m
 }
 
 func (m *Manager) AdminUserDetail(userID string) (model.AdminUserDetail, error) {
-	var selected *model.AdminUserSummary
-	for _, summary := range m.ListUsers() {
-		if summary.User.ID == userID {
-			copy := summary
-			selected = &copy
-			break
-		}
-	}
-	if selected == nil {
-		return model.AdminUserDetail{}, fmt.Errorf("user not found")
-	}
-	piles := []model.Pile{}
 	m.mu.RLock()
+	user, ok := m.users[userID]
 	runtime := m.runtimes[userID]
 	m.mu.RUnlock()
+	if !ok {
+		return model.AdminUserDetail{}, fmt.Errorf("user not found")
+	}
+	settings := m.Settings()
+	now := time.Now()
+	today := quotaTodayString(now)
+	poolAvail := m.PublicPoolAvailableCount()
+	var quota *model.UserRefreshQuota
+	if user.Enabled && runtime != nil {
+		if q, qErr := m.userRefreshQuotaWithPoolCount(user.ID, poolAvail); qErr == nil {
+			quota = &q
+		}
+	}
+	summary := buildAdminUserSummary(user, runtime, quota)
+	_ = settings
+	_ = today
+	piles := []model.Pile{}
 	if runtime != nil {
 		piles = runtime.store.Snapshot().Piles
 		if piles == nil {
 			piles = []model.Pile{}
 		}
 	}
-	return model.AdminUserDetail{Summary: *selected, Piles: piles}, nil
+	return model.AdminUserDetail{Summary: summary, Piles: piles}, nil
 }
 
 func (m *Manager) ResetUserPassword(userID string) (string, error) {
@@ -149,12 +159,16 @@ func (m *Manager) ResetUserPassword(userID string) (string, error) {
 		m.mu.Unlock()
 		return "", fmt.Errorf("user not found")
 	}
+	previous := user
 	user.PasswordHash = hash
 	user.MustChangePassword = true
 	user.UpdatedAt = time.Now()
 	m.users[userID] = user
 	m.mu.Unlock()
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(userID); err != nil {
+		m.mu.Lock()
+		m.users[userID] = previous
+		m.mu.Unlock()
 		return "", err
 	}
 	return temporaryPassword, nil
@@ -212,7 +226,7 @@ func (m *Manager) Authenticate(username string, password string) (model.CurrentU
 			matched = current
 		}
 		m.mu.Unlock()
-		if err := m.Save(); err != nil {
+		if err := m.saveUserState(matched.ID); err != nil {
 			return model.CurrentUser{}, err
 		}
 	}
@@ -251,6 +265,7 @@ func (m *Manager) AcknowledgeUsageGuide(userID string) (model.CurrentUser, error
 		m.mu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("user not found or disabled")
 	}
+	previous := user
 	if user.UsageGuideAckAt == nil {
 		now := time.Now()
 		user.UsageGuideAckAt = &now
@@ -258,7 +273,13 @@ func (m *Manager) AcknowledgeUsageGuide(userID string) (model.CurrentUser, error
 		m.users[userID] = user
 	}
 	m.mu.Unlock()
-	return publicUser(user), m.Save()
+	if err := m.saveUserState(userID); err != nil {
+		m.mu.Lock()
+		m.users[userID] = previous
+		m.mu.Unlock()
+		return model.CurrentUser{}, err
+	}
+	return publicUser(user), nil
 }
 
 func (m *Manager) ListUsers() []model.AdminUserSummary {
@@ -287,46 +308,52 @@ func (m *Manager) ListUsers() []model.AdminUserSummary {
 	summaries := make([]model.AdminUserSummary, 0, len(users))
 	for i, user := range users {
 		runtime := runtimes[i]
-		summary := model.AdminUserSummary{
-			User:              publicUser(user),
-			DeviceIDs:         []string{},
-			Credential:        model.CredentialSummary{State: model.CredentialUnbound},
-			SnapshotUpdatedAt: user.CreatedAt,
-		}
-		if runtime != nil {
-			snapshot := runtime.store.Snapshot()
-			summary.Stats = runtime.statsSnapshot()
-			summary.Dashboard = snapshot.Statistics
-			summary.DeviceIDs = runtime.client.DeviceIDs()
-			summary.Credential = credentialSummary(runtime, len(summary.DeviceIDs))
-			summary.HasCookie = summary.Credential.HasCredential
-			summary.SnapshotUpdatedAt = latestSnapshotDataTime(snapshot, user.CreatedAt)
-			summary.LastRefresh = snapshot.Refresh
-			if user.Enabled {
-				if quotasErr == nil && poolOwnersErr == nil {
-					rec, ok := quotasByUser[user.ID]
-					if !ok {
-						rec = persistence.UserQuotaRecord{UserID: user.ID, DailyDate: today, DailyProbeDate: today}
-					}
-					quota := buildUserRefreshQuota(runtime, settings, now, poolAvail, rec, healthyPoolOwners[user.ID])
-					summary.Quota = &quota
-				} else if quota, qErr := m.userRefreshQuotaWithPoolCount(user.ID, poolAvail); qErr == nil {
-					summary.Quota = &quota
+		var quota *model.UserRefreshQuota
+		if runtime != nil && user.Enabled {
+			if quotasErr == nil && poolOwnersErr == nil {
+				rec, ok := quotasByUser[user.ID]
+				if !ok {
+					rec = persistence.UserQuotaRecord{UserID: user.ID, DailyDate: today, DailyProbeDate: today}
 				}
+				q := buildUserRefreshQuota(runtime, settings, now, poolAvail, rec, healthyPoolOwners[user.ID])
+				quota = &q
+			} else if q, qErr := m.userRefreshQuotaWithPoolCount(user.ID, poolAvail); qErr == nil {
+				quota = &q
 			}
-			rawDiagnostics := runtime.recoveryDiagnosticsSnapshot()
-			filteredDiagnostics := make([]model.RecoveryDiagnostic, 0, len(rawDiagnostics))
-			for _, d := range rawDiagnostics {
-				if isRetiredDiagnostic(d) {
-					continue
-				}
-				filteredDiagnostics = append(filteredDiagnostics, d)
-			}
-			summary.RecoveryDiagnostics = filteredDiagnostics
 		}
-		summaries = append(summaries, summary)
+		summaries = append(summaries, buildAdminUserSummary(user, runtime, quota))
 	}
 	return summaries
+}
+
+func buildAdminUserSummary(user model.User, runtime *UserRuntime, quota *model.UserRefreshQuota) model.AdminUserSummary {
+	summary := model.AdminUserSummary{
+		User:              publicUser(user),
+		DeviceIDs:         []string{},
+		Credential:        model.CredentialSummary{State: model.CredentialUnbound},
+		SnapshotUpdatedAt: user.CreatedAt,
+		Quota:             quota,
+	}
+	if runtime != nil {
+		snapshot := runtime.store.Snapshot()
+		summary.Stats = runtime.statsSnapshot()
+		summary.Dashboard = snapshot.Statistics
+		summary.DeviceIDs = runtime.client.DeviceIDs()
+		summary.Credential = credentialSummary(runtime, len(summary.DeviceIDs))
+		summary.HasCookie = summary.Credential.HasCredential
+		summary.SnapshotUpdatedAt = latestSnapshotDataTime(snapshot, user.CreatedAt)
+		summary.LastRefresh = snapshot.Refresh
+		rawDiagnostics := runtime.recoveryDiagnosticsSnapshot()
+		filteredDiagnostics := make([]model.RecoveryDiagnostic, 0, len(rawDiagnostics))
+		for _, d := range rawDiagnostics {
+			if isRetiredDiagnostic(d) {
+				continue
+			}
+			filteredDiagnostics = append(filteredDiagnostics, d)
+		}
+		summary.RecoveryDiagnostics = filteredDiagnostics
+	}
+	return summary
 }
 
 func (m *Manager) ListUsersPage(query model.AdminUserListQuery) model.AdminUserPage {
@@ -537,7 +564,7 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 	m.runtimes[user.ID] = newUserRuntime(m.requests, persistence.UserState{}, m.minInterval)
 	m.mu.Unlock()
 
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(user.ID); err != nil {
 		m.mu.Lock()
 		delete(m.users, user.ID)
 		delete(m.runtimes, user.ID)
@@ -548,19 +575,32 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 }
 
 func (m *Manager) RegisterUser(username string, password string, inviteCode string) (model.CurrentUser, error) {
+	username = strings.TrimSpace(username)
+	if len(username) < 3 || len(username) > 32 {
+		return model.CurrentUser{}, fmt.Errorf("用户名长度需要在 3 到 32 个字符之间")
+	}
+	if len(password) < 8 || len(password) > 128 {
+		return model.CurrentUser{}, fmt.Errorf("密码长度需要在 8 到 128 个字符之间")
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return model.CurrentUser{}, err
+	}
+
 	m.mu.Lock()
 	if !m.settings.OpenRegistration && !m.settings.InviteRequired {
 		m.mu.Unlock()
 		return model.CurrentUser{}, ErrRegistrationClosed
 	}
 	var usedInviteID string
+	var updatedInvite *model.InviteCode
 	inviteCode = strings.TrimSpace(inviteCode)
+	now := time.Now()
 	if inviteCode != "" {
 		if !m.settings.InviteRequired {
 			m.mu.Unlock()
 			return model.CurrentUser{}, ErrInviteRegistrationClosed
 		}
-		now := time.Now()
 		for id, invite := range m.invites {
 			if invite.Enabled && invite.Code == inviteCode &&
 				(invite.ExpiresAt == nil || invite.ExpiresAt.After(now)) {
@@ -576,33 +616,55 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 		m.mu.Unlock()
 		return model.CurrentUser{}, ErrInviteRequired
 	}
-	m.mu.Unlock()
-	user, err := m.CreateUser(model.UserCreateRequest{
-		Username: username,
-		Password: password,
-		Role:     model.RoleUser,
-	})
-	if err != nil {
-		return model.CurrentUser{}, err
-	}
-	if usedInviteID != "" {
-		m.mu.Lock()
-		if invite, ok := m.invites[usedInviteID]; ok {
-			invite.UsedCount++
-			m.invites[usedInviteID] = invite
+	for _, existing := range m.users {
+		if existing.Username == username {
+			m.mu.Unlock()
+			return model.CurrentUser{}, ErrUsernameExists
 		}
+	}
+	user := model.User{
+		ID:             randomID("usr"),
+		Username:       username,
+		PasswordHash:   hash,
+		Role:           model.RoleUser,
+		Enabled:        true,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		DeviceLimit:    m.settings.DefaultDeviceLimit,
+		RefreshEnabled: m.settings.DefaultRefreshEnabled,
+	}
+	if user.DeviceLimit < 1 || user.DeviceLimit > 100 {
 		m.mu.Unlock()
-		if err := m.Save(); err != nil {
-			m.mu.Lock()
+		return model.CurrentUser{}, fmt.Errorf("设备额度需要在 1 到 100 之间")
+	}
+	m.users[user.ID] = user
+	m.runtimes[user.ID] = newUserRuntime(m.requests, persistence.UserState{}, m.minInterval)
+	if usedInviteID != "" {
+		invite := m.invites[usedInviteID]
+		invite.UsedCount++
+		m.invites[usedInviteID] = invite
+		copyInvite := invite
+		updatedInvite = &copyInvite
+	}
+	m.mu.Unlock()
+
+	m.saveMu.Lock()
+	saveErr := m.repository.SaveUserAndInvite(user, persistence.UserState{}, updatedInvite)
+	m.saveMu.Unlock()
+	if saveErr != nil {
+		m.mu.Lock()
+		delete(m.users, user.ID)
+		delete(m.runtimes, user.ID)
+		if usedInviteID != "" {
 			if invite, ok := m.invites[usedInviteID]; ok && invite.UsedCount > 0 {
 				invite.UsedCount--
 				m.invites[usedInviteID] = invite
 			}
-			m.mu.Unlock()
-			return model.CurrentUser{}, err
 		}
+		m.mu.Unlock()
+		return model.CurrentUser{}, saveErr
 	}
-	return user, nil
+	return publicUser(user), nil
 }
 
 func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.CurrentUser, error) {
@@ -612,6 +674,7 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 		m.mu.Unlock()
 		return model.CurrentUser{}, fmt.Errorf("user not found")
 	}
+	previous := user
 
 	if req.Role != nil {
 		if *req.Role != model.RoleAdmin && *req.Role != model.RoleUser {
@@ -650,7 +713,10 @@ func (m *Manager) UpdateUser(id string, req model.UserUpdateRequest) (model.Curr
 	m.users[id] = user
 	m.mu.Unlock()
 
-	if err := m.Save(); err != nil {
+	if err := m.saveUserState(id); err != nil {
+		m.mu.Lock()
+		m.users[id] = previous
+		m.mu.Unlock()
 		return model.CurrentUser{}, err
 	}
 	m.wakeReminderScheduler()
@@ -661,26 +727,43 @@ func (m *Manager) DeleteUser(id string) error {
 	m.watchMu.Lock()
 	defer m.watchMu.Unlock()
 	m.mu.Lock()
-	if _, ok := m.users[id]; !ok {
+	prevUser, ok := m.users[id]
+	if !ok {
 		m.mu.Unlock()
 		return fmt.Errorf("user not found")
 	}
+	prevRuntime := m.runtimes[id]
 	adminCount := 0
 	for userID, user := range m.users {
 		if userID != id && user.Role == model.RoleAdmin && user.Enabled {
 			adminCount++
 		}
 	}
-	if m.users[id].Role == model.RoleAdmin && adminCount == 0 {
+	if prevUser.Role == model.RoleAdmin && adminCount == 0 {
 		m.mu.Unlock()
 		return fmt.Errorf("至少保留一个可用管理员")
 	}
 	delete(m.users, id)
 	delete(m.runtimes, id)
 	m.mu.Unlock()
-	_ = m.repository.DeleteUserPublicPoolCookie(id)
+
+	m.saveMu.Lock()
+	err := m.repository.DeleteUser(id)
+	m.saveMu.Unlock()
+	if err != nil {
+		m.mu.Lock()
+		m.users[id] = prevUser
+		if prevRuntime != nil {
+			m.runtimes[id] = prevRuntime
+		}
+		m.mu.Unlock()
+		return err
+	}
+	m.wxPusherMu.Lock()
+	delete(m.wxPusherAttempts, id)
+	delete(m.wxPusherAttempts, "test_recheck:"+id)
+	m.wxPusherMu.Unlock()
 	m.invalidateBackgroundCredentialValidation(id)
 	m.wakeReminderScheduler()
-
-	return m.Save()
+	return nil
 }

@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"charge-dashboard/internal/model"
@@ -16,10 +18,16 @@ import (
 
 const schemaVersion = 14
 
+const integrityCheckTTL = 6 * time.Hour
+
 type Store struct {
-	db     *sql.DB
-	cipher *secretCipher
-	path   string
+	db                 *sql.DB
+	readDB             *sql.DB
+	cipher             *secretCipher
+	path               string
+	integrityMu        sync.RWMutex
+	integrityResult    string
+	integrityCheckedAt time.Time
 }
 
 func OpenSQLite(path string, cookieKey []byte) (*Store, error) {
@@ -45,21 +53,50 @@ func OpenSQLite(path string, cookieKey []byte) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("secure database permissions: %w", err)
 	}
+	readDSN := (&url.URL{
+		Scheme:   "file",
+		Path:     filepath.ToSlash(path),
+		RawQuery: "_pragma=busy_timeout(5000)&_pragma=query_only(ON)&_pragma=foreign_keys(ON)",
+	}).String()
+	if readDB, readErr := sql.Open("sqlite", readDSN); readErr == nil {
+		readDB.SetMaxOpenConns(4)
+		readDB.SetMaxIdleConns(4)
+		if pingErr := readDB.Ping(); pingErr == nil {
+			store.readDB = readDB
+		} else {
+			_ = readDB.Close()
+		}
+	}
 	return store, nil
 }
 
+func (s *Store) reader() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
+}
+
 func (s *Store) Close() error {
-	return s.db.Close()
+	var readErr error
+	if s.readDB != nil {
+		readErr = s.readDB.Close()
+	}
+	writeErr := s.db.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return readErr
 }
 
 func (s *Store) Ping(ctx context.Context) error {
-	return s.db.PingContext(ctx)
+	return s.reader().PingContext(ctx)
 }
 
 func (s *Store) initialize() error {
 	statements := []string{
 		`PRAGMA journal_mode = WAL`,
-		`PRAGMA synchronous = FULL`,
+		`PRAGMA synchronous = NORMAL`,
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA busy_timeout = 5000`,
 		`CREATE TABLE IF NOT EXISTS metadata (
@@ -311,6 +348,7 @@ func (s *Store) initialize() error {
 			checked_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS service_health_service_time_idx ON service_health_checks(service, checked_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS service_health_checked_at_idx ON service_health_checks(checked_at)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {
@@ -705,7 +743,7 @@ func (s *Store) SaveSession(record SessionRecord, maxPerUser int) error {
 func (s *Store) LoadSession(tokenHash []byte) (SessionRecord, bool, error) {
 	var record SessionRecord
 	var createdAt, expiresAt, lastActiveAt int64
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT token_hash, user_id, created_at, expires_at, last_active_at,
 		       browser, os, device_type, ip_label
 		FROM sessions WHERE token_hash = ?
@@ -988,6 +1026,217 @@ func formatOptionalTime(value *time.Time) any {
 	return value.Format(time.RFC3339Nano)
 }
 
+func (s *Store) upsertUserAndStateTx(tx *sql.Tx, user model.User, userState UserState) error {
+	if _, err := tx.Exec(`
+		INSERT INTO users(
+			id, username, password_hash, role, enabled, created_at, updated_at,
+			device_limit, refresh_enabled, must_change_password, usage_guide_ack_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			username=excluded.username, password_hash=excluded.password_hash,
+			role=excluded.role, enabled=excluded.enabled, updated_at=excluded.updated_at,
+			device_limit=excluded.device_limit, refresh_enabled=excluded.refresh_enabled,
+			must_change_password=excluded.must_change_password,
+			usage_guide_ack_at=excluded.usage_guide_ack_at
+	`,
+		user.ID,
+		user.Username,
+		user.PasswordHash,
+		string(user.Role),
+		user.Enabled,
+		user.CreatedAt.Format(time.RFC3339Nano),
+		user.UpdatedAt.Format(time.RFC3339Nano),
+		user.DeviceLimit,
+		user.RefreshEnabled,
+		user.MustChangePassword,
+		formatOptionalTime(user.UsageGuideAckAt),
+	); err != nil {
+		return fmt.Errorf("insert user %s: %w", user.ID, err)
+	}
+
+	pilesJSON, err := json.Marshal(userState.Piles)
+	if err != nil {
+		return fmt.Errorf("encode piles for user %s: %w", user.ID, err)
+	}
+	refreshJSON, err := json.Marshal(userState.Refresh)
+	if err != nil {
+		return fmt.Errorf("encode refresh for user %s: %w", user.ID, err)
+	}
+	deviceIDsJSON, err := json.Marshal(userState.DeviceIDs)
+	if err != nil {
+		return fmt.Errorf("encode device IDs for user %s: %w", user.ID, err)
+	}
+	statsJSON, err := json.Marshal(userState.Stats)
+	if err != nil {
+		return fmt.Errorf("encode stats for user %s: %w", user.ID, err)
+	}
+	recoveryDiagnosticsJSON, err := json.Marshal(userState.RecoveryDiagnostics)
+	if err != nil {
+		return fmt.Errorf("encode recovery diagnostics for user %s: %w", user.ID, err)
+	}
+	nonce, ciphertext, err := s.cipher.encrypt(user.ID, userState.Cookie)
+	if err != nil {
+		return err
+	}
+	var yybBindingNonce, yybBindingCiphertext []byte
+	if userState.YYBBinding != nil {
+		bindingJSON, err := json.Marshal(userState.YYBBinding)
+		if err != nil {
+			return fmt.Errorf("encode yyb binding for user %s: %w", user.ID, err)
+		}
+		yybBindingNonce, yybBindingCiphertext, err = s.cipher.encryptWithAAD(yybBindingAAD(user.ID), bindingJSON)
+		if err != nil {
+			return fmt.Errorf("encrypt yyb binding for user %s: %w", user.ID, err)
+		}
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO user_states(
+			user_id, piles_json, refresh_json, device_ids_json,
+			cookie_nonce, cookie_ciphertext, stats_json,
+			yyb_binding_nonce, yyb_binding_ciphertext, recovery_diagnostics_json
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET
+			piles_json=excluded.piles_json,
+			refresh_json=excluded.refresh_json,
+			device_ids_json=excluded.device_ids_json,
+			cookie_nonce=excluded.cookie_nonce,
+			cookie_ciphertext=excluded.cookie_ciphertext,
+			stats_json=excluded.stats_json,
+			yyb_binding_nonce=excluded.yyb_binding_nonce,
+			yyb_binding_ciphertext=excluded.yyb_binding_ciphertext,
+			recovery_diagnostics_json=excluded.recovery_diagnostics_json
+	`,
+		user.ID,
+		pilesJSON,
+		refreshJSON,
+		deviceIDsJSON,
+		nonce,
+		ciphertext,
+		statsJSON,
+		yybBindingNonce,
+		yybBindingCiphertext,
+		recoveryDiagnosticsJSON,
+	); err != nil {
+		return fmt.Errorf("insert state for user %s: %w", user.ID, err)
+	}
+	return nil
+}
+
+func upsertInviteTx(tx *sql.Tx, invite model.InviteCode) error {
+	var expiresAt any
+	if invite.ExpiresAt != nil {
+		expiresAt = invite.ExpiresAt.Format(time.RFC3339Nano)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO invite_codes(id, code, enabled, created_at, expires_at, used_count)
+		VALUES(?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			code=excluded.code,
+			enabled=excluded.enabled,
+			expires_at=excluded.expires_at,
+			used_count=excluded.used_count
+	`, invite.ID, invite.Code, invite.Enabled, invite.CreatedAt.Format(time.RFC3339Nano), expiresAt, invite.UsedCount); err != nil {
+		return fmt.Errorf("upsert invite %s: %w", invite.ID, err)
+	}
+	return nil
+}
+
+// SaveUserState persists a single user's profile and state without rewriting
+// or re-encrypting unrelated users.
+func (s *Store) SaveUserState(user model.User, userState UserState) error {
+	return s.SaveUserAndInvite(user, userState, nil)
+}
+
+// SaveUserAndInvite atomically persists a single user, its runtime state, and
+// an optional invite code update in one SQLite transaction.
+func (s *Store) SaveUserAndInvite(user model.User, userState UserState, invite *model.InviteCode) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("begin user state transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	if err := s.upsertUserAndStateTx(tx, user, userState); err != nil {
+		return err
+	}
+	if invite != nil {
+		if err := upsertInviteTx(tx, *invite); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO metadata(key, value) VALUES('saved_at', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, time.Now().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("write saved timestamp: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit user state transaction: %w", err)
+	}
+	return nil
+}
+
+// DeleteUser removes a single user (cascading to user_states) and any public
+// cookie pool entries owned by that user in one transaction.
+func (s *Store) DeleteUser(userID string) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("begin delete user transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	if _, err := tx.Exec(`DELETE FROM public_cookie_pool WHERE owner_user_id = ?`, userID); err != nil {
+		return fmt.Errorf("delete user public pool cookie: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
+		return fmt.Errorf("delete user %s: %w", userID, err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO metadata(key, value) VALUES('saved_at', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, time.Now().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("write saved timestamp: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete user transaction: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SaveInvite(invite model.InviteCode) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("begin invite transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	if err := upsertInviteTx(tx, invite); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteInvite(id string) error {
+	_, err := s.db.Exec(`DELETE FROM invite_codes WHERE id = ?`, id)
+	return err
+}
+
+func (s *Store) SaveSettings(settings model.RegistrationSettings) error {
+	settingsJSON, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO metadata(key, value) VALUES('registration_settings', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, string(settingsJSON))
+	return err
+}
+
 func (s *Store) Save(state State) error {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -1001,89 +1250,8 @@ func (s *Store) Save(state State) error {
 		return fmt.Errorf("clear user states: %w", err)
 	}
 	for _, user := range state.Users {
-		if _, err := tx.Exec(`
-			INSERT INTO users(
-				id, username, password_hash, role, enabled, created_at, updated_at,
-				device_limit, refresh_enabled, must_change_password, usage_guide_ack_at
-			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
-				username=excluded.username, password_hash=excluded.password_hash,
-				role=excluded.role, enabled=excluded.enabled, updated_at=excluded.updated_at,
-				device_limit=excluded.device_limit, refresh_enabled=excluded.refresh_enabled,
-				must_change_password=excluded.must_change_password,
-				usage_guide_ack_at=excluded.usage_guide_ack_at
-		`,
-			user.ID,
-			user.Username,
-			user.PasswordHash,
-			string(user.Role),
-			user.Enabled,
-			user.CreatedAt.Format(time.RFC3339Nano),
-			user.UpdatedAt.Format(time.RFC3339Nano),
-			user.DeviceLimit,
-			user.RefreshEnabled,
-			user.MustChangePassword,
-			formatOptionalTime(user.UsageGuideAckAt),
-		); err != nil {
-			return fmt.Errorf("insert user %s: %w", user.ID, err)
-		}
-
-		userState := state.UserStates[user.ID]
-		pilesJSON, err := json.Marshal(userState.Piles)
-		if err != nil {
-			return fmt.Errorf("encode piles for user %s: %w", user.ID, err)
-		}
-		refreshJSON, err := json.Marshal(userState.Refresh)
-		if err != nil {
-			return fmt.Errorf("encode refresh for user %s: %w", user.ID, err)
-		}
-		deviceIDsJSON, err := json.Marshal(userState.DeviceIDs)
-		if err != nil {
-			return fmt.Errorf("encode device IDs for user %s: %w", user.ID, err)
-		}
-		statsJSON, err := json.Marshal(userState.Stats)
-		if err != nil {
-			return fmt.Errorf("encode stats for user %s: %w", user.ID, err)
-		}
-		recoveryDiagnosticsJSON, err := json.Marshal(userState.RecoveryDiagnostics)
-		if err != nil {
-			return fmt.Errorf("encode recovery diagnostics for user %s: %w", user.ID, err)
-		}
-		nonce, ciphertext, err := s.cipher.encrypt(user.ID, userState.Cookie)
-		if err != nil {
+		if err := s.upsertUserAndStateTx(tx, user, state.UserStates[user.ID]); err != nil {
 			return err
-		}
-		var yybBindingNonce, yybBindingCiphertext []byte
-		if userState.YYBBinding != nil {
-			bindingJSON, err := json.Marshal(userState.YYBBinding)
-			if err != nil {
-				return fmt.Errorf("encode yyb binding for user %s: %w", user.ID, err)
-			}
-			yybBindingNonce, yybBindingCiphertext, err = s.cipher.encryptWithAAD(yybBindingAAD(user.ID), bindingJSON)
-			if err != nil {
-				return fmt.Errorf("encrypt yyb binding for user %s: %w", user.ID, err)
-			}
-		}
-
-		if _, err := tx.Exec(`
-			INSERT INTO user_states(
-				user_id, piles_json, refresh_json, device_ids_json,
-				cookie_nonce, cookie_ciphertext, stats_json,
-				yyb_binding_nonce, yyb_binding_ciphertext, recovery_diagnostics_json
-			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			user.ID,
-			pilesJSON,
-			refreshJSON,
-			deviceIDsJSON,
-			nonce,
-			ciphertext,
-			statsJSON,
-			yybBindingNonce,
-			yybBindingCiphertext,
-			recoveryDiagnosticsJSON,
-		); err != nil {
-			return fmt.Errorf("insert state for user %s: %w", user.ID, err)
 		}
 	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE id NOT IN (SELECT user_id FROM user_states)`); err != nil {
@@ -1093,12 +1261,7 @@ func (s *Store) Save(state State) error {
 		return err
 	}
 	for _, invite := range state.Invites {
-		var expiresAt any
-		if invite.ExpiresAt != nil {
-			expiresAt = invite.ExpiresAt.Format(time.RFC3339Nano)
-		}
-		if _, err := tx.Exec(`INSERT INTO invite_codes(id, code, enabled, created_at, expires_at, used_count) VALUES(?,?,?,?,?,?)`,
-			invite.ID, invite.Code, invite.Enabled, invite.CreatedAt.Format(time.RFC3339Nano), expiresAt, invite.UsedCount); err != nil {
+		if err := upsertInviteTx(tx, invite); err != nil {
 			return err
 		}
 	}

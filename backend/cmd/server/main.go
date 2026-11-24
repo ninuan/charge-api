@@ -208,7 +208,6 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           handler,
-		BaseContext:       func(net.Listener) context.Context { return schedulerCtx },
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		IdleTimeout:       90 * time.Second,
@@ -243,6 +242,7 @@ func main() {
 		}
 	case sig := <-signals:
 		log.Printf("received %s, shutting down", sig)
+		server.ShutdownStreams()
 		stopScheduler()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()

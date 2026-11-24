@@ -56,10 +56,17 @@ func (m *Manager) WatchRules(userID string) ([]model.WatchRule, error) {
 		return nil, fmt.Errorf("list watch rules: %w", err)
 	}
 	settings := normalizeRegistrationSettings(m.Settings())
+	states, err := m.repository.ListWatchRefreshStates(userID)
+	if err != nil {
+		return nil, fmt.Errorf("list watch rule schedules: %w", err)
+	}
+	statesByDevice := make(map[string]model.WatchRefreshState, len(states))
+	for _, state := range states {
+		statesByDevice[state.DeviceID] = state
+	}
 	for index := range rules {
-		if err := decorateWatchRule(&rules[index], now, settings, m.repository); err != nil {
-			return nil, err
-		}
+		state, ok := statesByDevice[rules[index].DeviceID]
+		decorateWatchRuleWithState(&rules[index], now, settings, state, ok)
 	}
 	return rules, nil
 }
@@ -153,6 +160,9 @@ func (m *Manager) CreateWatchRuleWithInitialCheck(userID string, request model.W
 		if charger.IsAuthExpired(refreshErr) {
 			_, _ = m.repository.DeleteWatchRule(userID, rule.ID)
 			_ = m.clearWatchRefreshStatePreservingTodayQuota(userID, rule.DeviceID, now)
+			runtime, _ := m.runtimeFor(userID)
+			_ = m.markPersonalCookieExpired(userID, runtime, now)
+			_ = m.saveUserState(userID)
 			return model.WatchRuleCreateResult{}, ErrWatchCredentialExpired
 		}
 		attemptedAt := m.reminderSchedulerNow().UTC().Truncate(time.Second)
@@ -620,25 +630,38 @@ func decorateWatchRule(rule *model.WatchRule, now time.Time, settings model.Regi
 	if rule == nil || rule.Mode != model.WatchRuleTemporary || !rule.Enabled || rule.CompletedAt != nil {
 		return nil
 	}
-	next := now.UTC()
 	state, ok, err := repository.LoadWatchRefreshState(rule.UserID, rule.DeviceID)
 	if err != nil {
 		return fmt.Errorf("load watch rule schedule: %w", err)
 	}
-	if ok && state.NextAttemptAt.After(next) {
+	decorateWatchRuleWithState(rule, now, settings, state, ok)
+	return nil
+}
+
+func decorateWatchRuleWithState(
+	rule *model.WatchRule,
+	now time.Time,
+	settings model.RegistrationSettings,
+	state model.WatchRefreshState,
+	hasState bool,
+) {
+	if rule == nil || rule.Mode != model.WatchRuleTemporary || !rule.Enabled || rule.CompletedAt != nil {
+		return
+	}
+	next := now.UTC()
+	if hasState && state.NextAttemptAt.After(next) {
 		next = state.NextAttemptAt
 	}
 	rule.NextCheckAt = &next
 	if rule.ExpiresAt == nil || !rule.ExpiresAt.After(next) {
-		return nil
+		return
 	}
 	interval := time.Duration(settings.WatchRefreshIntervalMinutes) * time.Minute
 	if interval <= 0 {
-		return nil
+		return
 	}
 	remaining := rule.ExpiresAt.Sub(next)
 	rule.EstimatedRemainingChecks = int((remaining + interval - 1) / interval)
-	return nil
 }
 
 func sameWatchTarget(left, right model.WatchRule) bool {

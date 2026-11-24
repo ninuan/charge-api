@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const maxRateLimiterEntries = 10_000
+
 type IPRateLimiter struct {
 	mu          sync.Mutex
 	limit       int
@@ -58,7 +60,28 @@ func (l *IPRateLimiter) allow(ip string, now time.Time) (bool, time.Duration) {
 		l.lastCleanup = now
 	}
 
-	entry := l.entries[ip]
+	entry, exists := l.entries[ip]
+	if !exists && len(l.entries) >= maxRateLimiterEntries {
+		for key, item := range l.entries {
+			if now.Sub(item.windowStart) >= l.window {
+				delete(l.entries, key)
+			}
+		}
+		l.lastCleanup = now
+		if len(l.entries) >= maxRateLimiterEntries {
+			var oldestKey string
+			var oldestStart time.Time
+			for key, item := range l.entries {
+				if oldestKey == "" || item.windowStart.Before(oldestStart) {
+					oldestKey = key
+					oldestStart = item.windowStart
+				}
+			}
+			if oldestKey != "" {
+				delete(l.entries, oldestKey)
+			}
+		}
+	}
 	if entry.windowStart.IsZero() || now.Sub(entry.windowStart) >= l.window {
 		entry = rateEntry{windowStart: now}
 	}

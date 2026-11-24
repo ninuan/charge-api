@@ -18,7 +18,12 @@ import type {
   UserRole,
 } from "@/lib/types"
 import type { AdminTrendRange, AdminTrendsResponse } from "@/lib/api/generated"
-import { request, RequestError, responseErrorMessage } from "@/lib/http"
+import {
+  request,
+  RequestError,
+  responseErrorMessage,
+  sessionExpiredEvent,
+} from "@/lib/http"
 
 export type DownloadedTrendCSV = {
   blob: Blob
@@ -52,6 +57,9 @@ export const adminApi = {
         { credentials: "include", signal: controller.signal }
       )
       if (!response.ok) {
+        if (response.status === 401 && typeof window !== "undefined") {
+          window.dispatchEvent(new Event(sessionExpiredEvent))
+        }
         throw new RequestError(
           await responseErrorMessage(response, "导出运营趋势失败"),
           response.status
@@ -94,19 +102,19 @@ export const adminApi = {
     ),
   userDetail: (id: string) =>
     request<AdminUserDetail>(
-      `/api/admin/users/${id}/detail`,
+      `/api/admin/users/${encodeURIComponent(id)}/detail`,
       {},
       "加载用户详情失败"
     ),
   refreshUser: (id: string) =>
     request<void>(
-      `/api/admin/users/${id}/refresh`,
+      `/api/admin/users/${encodeURIComponent(id)}/refresh`,
       { method: "POST" },
       "刷新用户设备失败"
     ),
   resetUserPassword: (id: string) =>
     request<TemporaryPasswordResponse>(
-      `/api/admin/users/${id}/reset-password`,
+      `/api/admin/users/${encodeURIComponent(id)}/reset-password`,
       { method: "POST" },
       "重置用户密码失败"
     ),
@@ -125,7 +133,7 @@ export const adminApi = {
     payload: { status: SystemException["status"]; note: string }
   ) =>
     request<SystemException>(
-      `/api/admin/incidents/${id}`,
+      `/api/admin/incidents/${encodeURIComponent(id)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -169,7 +177,7 @@ export const adminApi = {
     }
   ) =>
     request<CurrentUser>(
-      `/api/admin/users/${id}`,
+      `/api/admin/users/${encodeURIComponent(id)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -179,7 +187,7 @@ export const adminApi = {
     ),
   removeUser: (id: string) =>
     request<void>(
-      `/api/admin/users/${id}`,
+      `/api/admin/users/${encodeURIComponent(id)}`,
       { method: "DELETE" },
       "删除用户失败"
     ),
@@ -205,7 +213,7 @@ export const adminApi = {
     ),
   removeInvite: (id: string) =>
     request<void>(
-      `/api/admin/invites/${id}`,
+      `/api/admin/invites/${encodeURIComponent(id)}`,
       { method: "DELETE" },
       "删除邀请码失败"
     ),

@@ -122,7 +122,7 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	previous := m.settings
 	m.settings = settings
 	m.mu.Unlock()
-	if err := m.Save(); err != nil {
+	if err := m.saveSettings(); err != nil {
 		m.mu.Lock()
 		m.settings = previous
 		m.mu.Unlock()
@@ -163,6 +163,12 @@ func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, int64, e
 	); err != nil {
 		return metricRows, historyRows, notificationRows, fmt.Errorf("prune wxpusher history: %w", err)
 	}
+	if _, err := m.repository.PruneCompletedWatchRules(
+		now.UTC().AddDate(0, 0, -settings.NotificationRetentionDays),
+	); err != nil {
+		return metricRows, historyRows, notificationRows, fmt.Errorf("prune completed watch rules: %w", err)
+	}
+	_, _ = m.repository.RefreshIntegrityCheck()
 	m.lastRetentionRun = now.UTC()
 	return metricRows, historyRows, notificationRows, nil
 }
@@ -255,7 +261,16 @@ func (m *Manager) CreateInvite(code string, expiresAt *time.Time) (model.InviteC
 	}
 	m.invites[invite.ID] = invite
 	m.mu.Unlock()
-	return invite, m.Save()
+	m.saveMu.Lock()
+	err := m.repository.SaveInvite(invite)
+	m.saveMu.Unlock()
+	if err != nil {
+		m.mu.Lock()
+		delete(m.invites, invite.ID)
+		m.mu.Unlock()
+		return model.InviteCode{}, err
+	}
+	return invite, nil
 }
 
 func randomInviteCode() (string, error) {
@@ -269,11 +284,21 @@ func randomInviteCode() (string, error) {
 
 func (m *Manager) DeleteInvite(id string) error {
 	m.mu.Lock()
-	if _, ok := m.invites[id]; !ok {
+	prev, ok := m.invites[id]
+	if !ok {
 		m.mu.Unlock()
 		return fmt.Errorf("邀请码不存在")
 	}
 	delete(m.invites, id)
 	m.mu.Unlock()
-	return m.Save()
+	m.saveMu.Lock()
+	err := m.repository.DeleteInvite(id)
+	m.saveMu.Unlock()
+	if err != nil {
+		m.mu.Lock()
+		m.invites[id] = prev
+		m.mu.Unlock()
+		return err
+	}
+	return nil
 }

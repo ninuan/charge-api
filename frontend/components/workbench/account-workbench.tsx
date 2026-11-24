@@ -200,7 +200,13 @@ function PlatformConnection() {
     clearCookie,
   } = useDashboard()
   const quota = snapshot.quota
-  const [cookieOpen, setCookieOpen] = useState(params.get("connect") === "1")
+  const connectParam = params.get("connect") === "1"
+  const [cookieOpen, setCookieOpen] = useState(false)
+  const dialogOpen = cookieOpen || connectParam
+  function closeCookieDialog() {
+    setCookieOpen(false)
+    if (connectParam) updatePageQuery({ connect: null }, true)
+  }
   const [clearOpen, setClearOpen] = useState(false)
   const [cookie, setCookie] = useState("")
   const [joinPoolChecked, setJoinPoolChecked] = useState(true)
@@ -496,11 +502,11 @@ function PlatformConnection() {
       </div>
 
       <Dialog
-        open={cookieOpen}
+        open={dialogOpen}
         onOpenChange={(open) => {
           if (!pending) {
-            setCookieOpen(open)
-            if (!open) updatePageQuery({ connect: null }, true)
+            if (open) setCookieOpen(true)
+            else closeCookieDialog()
           }
         }}
       >
@@ -560,7 +566,7 @@ function PlatformConnection() {
                 type="button"
                 variant="outline"
                 disabled={pending}
-                onClick={() => setCookieOpen(false)}
+                onClick={closeCookieDialog}
               >
                 取消
               </WorkbenchButton>

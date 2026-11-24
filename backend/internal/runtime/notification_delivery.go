@@ -402,7 +402,7 @@ func (m *Manager) notifyCredentialExpired(userID string, at time.Time) error {
 	defer m.notificationMu.Unlock()
 	if _, _, err := m.recordNotificationOnceLocked(model.Notification{
 		UserID: userID, Type: model.NotificationCredentialExpired, Severity: "warning",
-		Title: "需要重新登录", Message: "登录已过期，请重新扫码后继续查看和接收提醒。",
+		Title: "需要重新登录", Message: "个人 Cookie 已过期，请前往账号页更新后继续查看和接收提醒。",
 		DedupeKey: credentialExpiredDedupeKey, CreatedAt: at,
 	}); err != nil {
 		return err

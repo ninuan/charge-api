@@ -84,7 +84,7 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("watch rules require a user")
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, user_id, device_id, mode, enabled,
 		       active_weekdays, active_start_minute, active_end_minute, timezone,
 		       expires_at, completed_at, completion_reason, stop_after_notify,
@@ -97,7 +97,41 @@ func (s *Store) ListWatchRules(userID string) ([]model.WatchRule, error) {
 		return nil, fmt.Errorf("list watch rules: %w", err)
 	}
 	defer rows.Close()
+	return scanWatchRules(rows)
+}
 
+// ListActiveTemporaryWatchRules uses watch_rules_scheduler_v10_idx to fetch all
+// active temporary watch rules across users in a single indexed query.
+func (s *Store) ListActiveTemporaryWatchRules(now time.Time) ([]model.WatchRule, error) {
+	rows, err := s.reader().Query(`
+		SELECT id, user_id, device_id, mode, enabled,
+		       active_weekdays, active_start_minute, active_end_minute, timezone,
+		       expires_at, completed_at, completion_reason, stop_after_notify,
+		       created_at, updated_at
+		FROM watch_rules
+		WHERE enabled = 1 AND mode = 'temporary' AND completed_at IS NULL AND expires_at > ?
+		ORDER BY user_id, device_id, updated_at DESC, id
+	`, now.UTC().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("list active temporary watch rules: %w", err)
+	}
+	defer rows.Close()
+	return scanWatchRules(rows)
+}
+
+func (s *Store) PruneCompletedWatchRules(before time.Time) (int64, error) {
+	if before.IsZero() {
+		return 0, fmt.Errorf("watch rule retention boundary is required")
+	}
+	return s.pruneRowsInBatchesWhere(
+		"watch_rules",
+		"completed_at",
+		before.UTC().Unix(),
+		"completed_at IS NOT NULL",
+	)
+}
+
+func scanWatchRules(rows *sql.Rows) ([]model.WatchRule, error) {
 	rules := make([]model.WatchRule, 0)
 	for rows.Next() {
 		var rule model.WatchRule

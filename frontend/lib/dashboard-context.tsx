@@ -43,6 +43,8 @@ const initialSnapshot: DashboardSnapshot = {
 
 // 刷新和添加桩会串联多次上游 12 秒超时的远端请求，比默认超时放宽。
 const remoteOperationTimeoutMs = 120_000
+const sseReconnectBaseMs = 2_000
+const sseReconnectMaxMs = 30_000
 
 type PilePayload = Pick<
   Pile,
@@ -88,6 +90,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     useState<DashboardContextValue["streamState"]>("idle")
   const streamRef = useRef<EventSource | null>(null)
   const streamWantedRef = useRef(false)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptRef = useRef(0)
+  const openStreamRef = useRef<() => void>(() => undefined)
   const lastServerStampRef = useRef(0)
   const notificationListenersRef = useRef(
     new Set<(notification: Notification) => void>()
@@ -187,7 +192,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const deletePile = useCallback(
     async (id: string) => {
       await request<void>(
-        `/api/piles/${id}`,
+        `/api/piles/${encodeURIComponent(id)}`,
         { method: "DELETE" },
         "删除充电桩失败，请稍后重试。"
       )
@@ -202,7 +207,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       payload: { name: string; address: string; sortOrder: number }
     ) => {
       await request<void>(
-        `/api/piles/${id}`,
+        `/api/piles/${encodeURIComponent(id)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -329,12 +334,36 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     )
   }, [applySnapshot])
 
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleReconnect = useCallback(() => {
+    if (!streamWantedRef.current || reconnectTimerRef.current !== null) return
+    const delay = Math.min(
+      sseReconnectBaseMs * 2 ** reconnectAttemptRef.current,
+      sseReconnectMaxMs
+    )
+    reconnectAttemptRef.current += 1
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null
+      if (streamWantedRef.current) {
+        openStreamRef.current()
+      }
+    }, delay)
+  }, [])
+
   const openStream = useCallback(() => {
     if (streamRef.current || typeof EventSource === "undefined") return
+    clearReconnectTimer()
     setStreamState("connecting")
     const stream = new EventSource("/api/stream", { withCredentials: true })
     streamRef.current = stream
     stream.onopen = () => {
+      reconnectAttemptRef.current = 0
       setStreamState("connected")
       streamOpenListenersRef.current.forEach((listener) => listener())
     }
@@ -343,6 +372,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         applySnapshot(
           JSON.parse((event as MessageEvent<string>).data) as DashboardSnapshot
         )
+        reconnectAttemptRef.current = 0
         setStreamState("connected")
       } catch {
         setStreamState("error")
@@ -356,6 +386,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         notificationListenersRef.current.forEach((listener) =>
           listener(notification)
         )
+        reconnectAttemptRef.current = 0
         setStreamState("connected")
       } catch {
         setStreamState("error")
@@ -367,30 +398,54 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         if (streamRef.current === stream) {
           streamRef.current = null
         }
+        setStreamState("error")
+        scheduleReconnect()
+        return
       }
       setStreamState("error")
     }
-  }, [applySnapshot])
+  }, [applySnapshot, clearReconnectTimer, scheduleReconnect])
+
+  useEffect(() => {
+    openStreamRef.current = openStream
+  }, [openStream])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleOnline = () => {
+      if (!streamWantedRef.current || streamRef.current) return
+      reconnectAttemptRef.current = 0
+      clearReconnectTimer()
+      openStreamRef.current()
+    }
+    window.addEventListener("online", handleOnline)
+    return () => window.removeEventListener("online", handleOnline)
+  }, [clearReconnectTimer])
 
   const connectStream = useCallback(() => {
     streamWantedRef.current = true
+    reconnectAttemptRef.current = 0
     // 1.5.1 的浏览器提醒依赖网页打开期间的 SSE，后台标签页也保持连接。
     openStream()
   }, [openStream])
 
   const disconnectStream = useCallback(() => {
     streamWantedRef.current = false
+    reconnectAttemptRef.current = 0
+    clearReconnectTimer()
     streamRef.current?.close()
     streamRef.current = null
     setStreamState("idle")
-  }, [])
+  }, [clearReconnectTimer])
 
   useEffect(
     () => () => {
+      streamWantedRef.current = false
+      clearReconnectTimer()
       streamRef.current?.close()
       streamRef.current = null
     },
-    []
+    [clearReconnectTimer]
   )
 
   const value = useMemo(

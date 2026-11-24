@@ -171,6 +171,16 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 		status.PortHistoryNewestAt == nil || !status.PortHistoryNewestAt.Equal(now) {
 		t.Fatalf("unexpected operations status: %+v", status)
 	}
+	firstCheckedAt := store.integrityCheckedAt
+	if firstCheckedAt.IsZero() {
+		t.Fatalf("expected integrityCheckedAt to be populated")
+	}
+	if _, err := store.OperationsStatus(90, 120); err != nil {
+		t.Fatalf("cached OperationsStatus: %v", err)
+	}
+	if !store.integrityCheckedAt.Equal(firstCheckedAt) {
+		t.Fatalf("expected OperationsStatus to reuse cached PRAGMA quick_check within TTL")
+	}
 	metrics, err := store.ReminderMetricCounts(now.Add(-time.Hour))
 	if err != nil || metrics["watch_remote"] != 4 || metrics["watch_remote_ok"] != 3 {
 		t.Fatalf("ReminderMetricCounts = %+v, err %v", metrics, err)
@@ -179,6 +189,14 @@ func TestAuditAndOperationsStatusAreQueryable(t *testing.T) {
 	if err != nil || ruleStats.ActiveTemporaryRules != 1 ||
 		ruleStats.CompletedNotified24Hours != 1 || ruleStats.AverageTemporaryMinutes != 30 {
 		t.Fatalf("ReminderRuleOperationsStats = %+v, err %v", ruleStats, err)
+	}
+	activeTemp, err := store.ListActiveTemporaryWatchRules(now)
+	if err != nil || len(activeTemp) != 1 || activeTemp[0].ID != "temporary-active" {
+		t.Fatalf("ListActiveTemporaryWatchRules = %+v, err %v", activeTemp, err)
+	}
+	prunedRules, err := store.PruneCompletedWatchRules(now.Add(time.Minute))
+	if err != nil || prunedRules != 1 {
+		t.Fatalf("PruneCompletedWatchRules = %d, err %v", prunedRules, err)
 	}
 }
 

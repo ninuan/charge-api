@@ -111,6 +111,11 @@ func (s *Store) cookieFingerprint(cookie string) string {
 }
 
 func (s *Store) backfillPublicPoolFingerprints() error {
+	if _, ok, err := s.metadata("schema_v14_pool_fingerprints_backfilled"); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
 	rows, err := s.db.Query(
 		`SELECT id, cookie_nonce, cookie_ciphertext, COALESCE(cookie_fingerprint, '')
 		 FROM public_cookie_pool
@@ -166,7 +171,11 @@ func (s *Store) backfillPublicPoolFingerprints() error {
 			return fmt.Errorf("backfill public pool fingerprint %s: %w", r.id, err)
 		}
 	}
-	return nil
+	_, err = s.db.Exec(
+		`INSERT INTO metadata(key, value) VALUES('schema_v14_pool_fingerprints_backfilled', '1')
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+	)
+	return err
 }
 
 func (s *Store) HasPublicPoolCookieDuplicate(excludeID, cookie string) (bool, error) {
@@ -688,7 +697,14 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 	if strings.TrimSpace(contributorUserID) != "" {
 		contributor = strings.TrimSpace(contributorUserID)
 	}
-	res, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin shared pile upsert: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	res, err := tx.Exec(
 		`INSERT OR IGNORE INTO shared_piles
 		 (device_id, number, name, address, open_num, contributed_by_user_id, last_snapshot_json, last_fetched_at, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -708,11 +724,14 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 	}
 	rows, _ := res.RowsAffected()
 	if rows > 0 {
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("commit shared pile insert: %w", err)
+		}
 		return true, nil
 	}
 	var metaLocked int
 	var existingName, existingAddress string
-	if scanErr := s.db.QueryRow(
+	if scanErr := tx.QueryRow(
 		`SELECT COALESCE(meta_locked, 0), name, address FROM shared_piles WHERE device_id = ?`,
 		deviceID,
 	).Scan(&metaLocked, &existingName, &existingAddress); scanErr == nil && metaLocked != 0 {
@@ -722,7 +741,7 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 			snapshotBytes = updatedBytes
 		}
 	}
-	_, err = s.db.Exec(
+	_, err = tx.Exec(
 		`UPDATE shared_piles
 		 SET number = CASE WHEN ? <> '' THEN ? ELSE number END,
 		     name = CASE WHEN COALESCE(meta_locked, 0) = 1 THEN name WHEN ? <> '' THEN ? ELSE name END,
@@ -744,7 +763,70 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 	if err != nil {
 		return false, fmt.Errorf("update shared pile: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit shared pile update: %w", err)
+	}
 	return false, nil
+}
+
+// GetSharedPiles batch-fetches shared piles for the given device IDs using a
+// single SQL query instead of per-device lookups.
+func (s *Store) GetSharedPiles(deviceIDs []string) (map[string]model.SharedPile, error) {
+	result := make(map[string]model.SharedPile, len(deviceIDs))
+	if len(deviceIDs) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, 0, len(deviceIDs))
+	args := make([]any, 0, len(deviceIDs))
+	seen := make(map[string]bool, len(deviceIDs))
+	for _, raw := range deviceIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return result, nil
+	}
+	rows, err := s.reader().Query(
+		`SELECT device_id, number, name, address, open_num, COALESCE(contributed_by_user_id, ''), last_snapshot_json, last_fetched_at, created_at, updated_at
+		 FROM shared_piles
+		 WHERE device_id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get shared piles: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item model.SharedPile
+		var snapshotRaw []byte
+		var lastFetched sql.NullInt64
+		var createdAt, updatedAt int64
+		if err := rows.Scan(
+			&item.DeviceID, &item.Number, &item.Name, &item.Address, &item.OpenNum,
+			&item.ContributedByUserID, &snapshotRaw, &lastFetched, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan shared pile batch: %w", err)
+		}
+		if lastFetched.Valid {
+			t := time.Unix(lastFetched.Int64, 0).UTC()
+			item.LastFetchedAt = &t
+		}
+		if len(snapshotRaw) > 0 {
+			var p model.Pile
+			if json.Unmarshal(snapshotRaw, &p) == nil {
+				item.LastSnapshot = &p
+			}
+		}
+		item.CreatedAt = time.Unix(createdAt, 0).UTC()
+		item.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		result[item.DeviceID] = item
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) GetSharedPile(deviceID string) (*model.SharedPile, error) {
@@ -809,11 +891,11 @@ func (s *Store) SearchSharedPiles(query string, limit int) ([]model.SharedPile, 
 			limit,
 		)
 	} else {
-		like := "%" + q + "%"
-		rows, err = s.db.Query(
+		like := "%" + escapeLikePattern(q) + "%"
+		rows, err = s.reader().Query(
 			`SELECT device_id, number, name, address, open_num, COALESCE(contributed_by_user_id, ''), last_snapshot_json, last_fetched_at, created_at, updated_at
 			 FROM shared_piles
-			 WHERE device_id LIKE ? OR number LIKE ? OR name LIKE ? OR address LIKE ?
+			 WHERE device_id LIKE ? ESCAPE '\' OR number LIKE ? ESCAPE '\' OR name LIKE ? ESCAPE '\' OR address LIKE ? ESCAPE '\'
 			 ORDER BY CASE WHEN number = ? OR device_id = ? THEN 0 ELSE 1 END, updated_at DESC
 			 LIMIT ?`,
 			like, like, like, like, q, q, limit,
@@ -881,8 +963,13 @@ func (s *Store) GetUserQuota(userID string, today string) (UserQuotaRecord, erro
 	return rec, nil
 }
 
+func escapeLikePattern(raw string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(raw)
+}
+
 func (s *Store) ListAllUserQuotas(today string) (map[string]UserQuotaRecord, error) {
-	rows, err := s.db.Query(
+	rows, err := s.reader().Query(
 		`SELECT user_id, daily_date, daily_used, bonus_remaining, contributed_pile_count, daily_probe_date, daily_probe_count, updated_at
 		 FROM user_refresh_quotas`,
 	)
@@ -915,7 +1002,7 @@ func (s *Store) ListAllUserQuotas(today string) (map[string]UserQuotaRecord, err
 }
 
 func (s *Store) ListHealthyPoolOwnerIDs() (map[string]bool, error) {
-	rows, err := s.db.Query(
+	rows, err := s.reader().Query(
 		`SELECT DISTINCT owner_user_id FROM public_cookie_pool
 		 WHERE enabled = 1 AND status = 'healthy' AND owner_user_id <> ''`,
 	)

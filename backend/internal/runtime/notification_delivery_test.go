@@ -189,6 +189,9 @@ func TestCredentialExpiryNotifiesOncePausesAndResumesAfterValidation(t *testing.
 	if err := manager.runReminderSchedulerOnce(context.Background(), now); err != nil {
 		t.Fatalf("expired credential cycle: %v", err)
 	}
+	if quota, qErr := manager.UserRefreshQuota(owner.ID); qErr != nil || quota.PersonalCookieStatus != "expired" {
+		t.Fatalf("personal cookie quota status = %+v, err %v; want expired", quota, qErr)
+	}
 	state, ok, err := manager.repository.LoadWatchRefreshState(owner.ID, testBackgroundPileID)
 	if err != nil || !ok || state.PausedReason != watchPauseCredentialExpired {
 		t.Fatalf("credential pause state = %+v, ok %v, err %v", state, ok, err)
