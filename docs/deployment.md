@@ -5,15 +5,13 @@
 > [!IMPORTANT]
 > 升级已有实例前先备份 SQLite，并保存与数据库匹配的加密密钥。不要让旧版本程序直接打开已经由新版本升级过的数据库。
 
-## 升级至 1.5.4
+## 升级说明（1.5.5）
 
-- 前后端必须同时更新到 1.5.4；首次启动将 SQLite schema 从 12 增量升级到 13，新增公告、内容修订与账号确认记录，不删除原有业务数据。
-- 先用现有备份流程保存数据库及匹配密钥，再部署。回滚应停服后同时恢复旧版程序、前端与升级前数据库；恢复旧备份会丢失升级后新写入的数据。不要让旧程序直接打开 schema 13 数据库。
-- 更新后检查 `/healthz` 的版本为 1.5.4，并用管理员进入“公告管理”。新库默认没有公告，升级不会自动给用户发布消息。
-- 定时展示与结束按服务端时间计算，不需要新增 cron。管理员编辑时间采用北京时间，API 使用带时区的时间。
-- 公告确认状态在服务端按账号保存。普通公告确认后收起，重要公告在有效期内保留摘要；撤下后用户不可再访问，已结束公告可回看。
-- 公告接口及个性化状态不得配置 CDN 共享缓存；静态 hash 资源的缓存策略沿用原配置。
-- 上线后补测实际网络下的冷/暖加载、登录后 API 耗时；本地资源变化不能直接当作线上提速比例。本版未改变 Cloudflare 接入或扫码服务部署。
+- 前后端必须同时更新到同一版本；首次启动会自动增量迁移 SQLite schema，不删除原有业务数据。
+- **`yyb_go` 扫码 sidecar 已退役**：`charge-server` 现已忽略 `YYB_BASE_URL`，改为「个人 Cookie + 互助公共 Cookie 池 + 全站共享公共桩库」模式；旧实例升级后可停用并下线原有 `/opt/yyb_go/yyb-go`（原监听 `127.0.0.1:8000`）。
+- 更新后检查 `/healthz` 返回版本 `1.5.5`，并用管理员确认公共 Cookie 池、公共桩库与公告管理正常。
+- 公告与个性化状态接口不得配置 CDN 共享缓存；`/_next/static/` 资源由后端输出长期缓存头，404 响应统一返回 `Cache-Control: no-store`；页面严格 CSP 已放行 Cloudflare Web Analytics。
+- 回滚前若涉及数据库 schema 变更，应停服后同时恢复旧版程序、前端静态产物与升级前数据库备份；若仅因新版本启动失败触发自动回滚，部署脚本会自动恢复上一个版本的 `frontend/dist` 与 `charge-server`。
 
 ## 推荐拓扑
 
@@ -23,17 +21,15 @@ Internet
 Nginx / Caddy / Cloudflare
    │ http://127.0.0.1:8080
 charge-server
-   ├── /var/lib/charge-api/charge_state.db
-   ├── http://127.0.0.1:8000 → yyb_go（可选）
-   ├── 远端充电服务
+   ├── /var/lib/charge-api/charge_state.db (SQLite WAL)
+   ├── 远端充电服务（个人 Cookie / 互助公共 Cookie 池）
    └── WxPusher HTTPS API（可选）
 ```
 
 基本边界：
 
 - 只有 HTTPS 反向代理对公网开放。
-- `charge-server` 监听 `127.0.0.1:8080`。
-- `yyb_go` 监听 `127.0.0.1:8000`，不允许公网访问。
+- `charge-server` 仅监听 `127.0.0.1:8080`。
 - SQLite、环境文件和备份不放在 Git 仓库中。
 
 ## 服务器要求
@@ -100,15 +96,11 @@ cd /opt/charge-api
 ./scripts/gen_secrets.sh
 ```
 
-将实际值写入 `/etc/charge-api.env`：
+将实际值写入 `/etc/charge-api.env`（只需填入 `CHARGE_COOKIE_KEY` 及所需可选配置）：
 
 ```env
 CHARGE_ADMIN_PASSWORD=replace-with-a-strong-initial-password
 CHARGE_COOKIE_KEY=replace-with-base64-encoded-32-byte-key
-
-# 可选：扫码登录与凭据恢复
-YYB_BASE_URL=http://127.0.0.1:8000
-YYB_API_SECRET=replace-with-shared-hmac-secret
 
 # 可选：WxPusher 微信提醒
 WXPUSHER_APP_TOKEN=AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -129,36 +121,17 @@ sudo chmod 0600 /etc/charge-api.env
 
 - `CHARGE_ADMIN_PASSWORD` 只在首次创建数据库时生效，不会重置已有管理员密码。
 - 未提供初始密码时，服务会生成一次性密码并保存到 `/var/lib/charge-api/initial-admin-password.txt`；首次登录后应删除该文件。
-- `CHARGE_COOKIE_KEY` 用于加密 Cookie、WxPusher UID 等敏感数据，必须长期保存。
+- `CHARGE_COOKIE_KEY` 用于加密个人与公共池 Cookie、WxPusher UID 等敏感数据，必须长期保存。
 - `PUBLIC_BASE_URL` 必须是 HTTPS Origin，例如 `https://charge.example.com`；不能包含路径、查询参数、凭据或结尾斜杠。
 - 生产环境不要设置 `WXPUSHER_BASE_URL`，让程序使用 WxPusher 官方 HTTPS API。
 - AppToken 只能放在服务端环境文件中，不能使用 `NEXT_PUBLIC_*` 或提交到 Git。
 
-### 4. 可选：配置 yyb_go
-
-如果需要扫码登录和凭据自动恢复，`yyb_go` 应安装在 `/opt/yyb_go` 并读取 `/etc/yyb-go.env`：
-
-```env
-YYB_SECRET_KEY=replace-with-base64-encoded-32-byte-key
-YYB_API_SECRET=replace-with-the-same-secret-used-by-charge
-```
-
-其中两边的 `YYB_API_SECRET` 必须完全一致。设置权限：
-
-```bash
-sudo chown root:yyb /etc/yyb-go.env
-sudo chmod 0600 /etc/yyb-go.env
-```
-
-`YYB_SECRET_KEY` 用于加密 sidecar 数据库中的登录状态；更换后既有数据无法解密。
-
-### 5. 安装 systemd 服务
+### 4. 安装 systemd 服务
 
 仓库提供：
 
 ```text
 deploy/systemd/charge.service
-deploy/systemd/yyb-go.service
 deploy/systemd/charge-backup.service
 deploy/systemd/charge-backup.timer
 ```
@@ -169,25 +142,6 @@ deploy/systemd/charge-backup.timer
 sudo cp /opt/charge-api/deploy/systemd/charge.service /etc/systemd/system/charge-api.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now charge-api
-```
-
-启用了 `yyb_go` 时再安装 sidecar：
-
-```bash
-sudo cp /opt/charge-api/deploy/systemd/yyb-go.service /etc/systemd/system/yyb-go.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now yyb-go
-sudo systemctl restart charge-api
-```
-
-sidecar 模板会执行：
-
-```bash
-/opt/yyb_go/yyb-go \
-  -host 127.0.0.1 \
-  -port 8000 \
-  -resource-root /opt/yyb_go/resource \
-  -db yyb.db
 ```
 
 模板中的 Charge 启动命令为：
@@ -201,7 +155,7 @@ sidecar 模板会执行：
 
 服务模板启用了 `NoNewPrivileges`、`PrivateTmp`、`ProtectSystem=strict` 和 `UMask=0077`；Charge 只允许写入 `/var/lib/charge-api`。
 
-### 6. 配置反向代理
+### 5. 配置反向代理
 
 Nginx 最小示例：
 
@@ -236,7 +190,7 @@ server {
 
 生产环境默认只允许同源请求。只有前后端确实使用不同 Origin 时，才配置 `CORS_ALLOWED_ORIGINS`；不要使用 `*`。
 
-### 7. 验证服务
+### 6. 验证服务
 
 ```bash
 curl -fsS http://127.0.0.1:8080/healthz
@@ -244,7 +198,7 @@ sudo systemctl status charge-api --no-pager
 sudo journalctl -u charge-api -n 100 --no-pager
 ```
 
-启用 WxPusher 后，再由普通用户在通知中心完成“获取二维码 → 微信扫码 → 发送测试消息”。“WxPusher 已处理”表示供应商完成处理，不等同于某台微信客户端已经展示或已读。
+启用 WxPusher 后，再由普通用户在「账号 → 通知与提醒」完成“获取二维码 → 微信扫码 → 发送测试消息”。“WxPusher 已处理”表示供应商完成处理，不等同于某台微信客户端已经展示或已读。
 
 ## 环境变量
 
@@ -255,8 +209,6 @@ sudo journalctl -u charge-api -n 100 --no-pager
 | `CHARGE_ADMIN_PASSWORD` | 自动生成 | 首次初始化管理员密码。                    |
 | `CHARGE_COOKIE_KEY`     | 无       | 32 字节 Base64 加密密钥；生产必需。       |
 | `CORS_ALLOWED_ORIGINS`  | 同源     | 逗号分隔的允许 Origin。                   |
-| `YYB_BASE_URL`          | 关闭     | `yyb_go` 地址。                           |
-| `YYB_API_SECRET`        | 无       | 启用 `YYB_BASE_URL` 时必需。              |
 | `MOCELE_BASE_URL`       | 内置默认 | 可选自动登录服务覆盖地址。                |
 | `MOCELE_ORG`            | 内置默认 | 可选组织参数。                            |
 | `MOCELE_OPENINDEX`      | 内置默认 | 可选入口参数。                            |
@@ -264,16 +216,19 @@ sudo journalctl -u charge-api -n 100 --no-pager
 | `PUBLIC_BASE_URL`       | 无       | 启用 WxPusher 时必需的公网 HTTPS Origin。 |
 | `WXPUSHER_BASE_URL`     | 官方 API | 仅用于本地 mock 或受控私有代理。          |
 
-### yyb_go
-
-| 变量             | 说明                              |
-| ---------------- | --------------------------------- |
-| `YYB_SECRET_KEY` | sidecar 敏感状态的 AES-GCM 密钥。 |
-| `YYB_API_SECRET` | 与 Charge 相同的 HMAC 共享密钥。  |
-
 ### 备份服务
 
 `charge-backup.service` 可从 `/etc/charge-backup.env` 读取覆盖项。常见变量包括备份目录、数据库路径和保留天数；可直接查看 [`scripts/backup_db.sh`](../scripts/backup_db.sh) 中的默认值。
+
+### 已退役组件：下线旧版 `yyb_go` sidecar
+
+如果服务器早年部署过 `/opt/yyb_go/yyb-go`（监听 `127.0.0.1:8000`），升级到 1.5.5 后可安全下线：
+
+```bash
+sudo systemctl disable --now yyb-go || true
+```
+
+同时可从 `/etc/charge-api.env` 中移除旧的 `YYB_BASE_URL` 与 `YYB_API_SECRET`（未移除时新版 `charge-server` 也会在启动日志中忽略）。
 
 ## 更新部署
 
@@ -282,24 +237,24 @@ sudo journalctl -u charge-api -n 100 --no-pager
 在开发机仓库运行：
 
 ```bash
-make deploy-git DEPLOY_HOST=root@<服务器IP>
+make deploy-git DEPLOY_HOST=root@your-server
 ```
 
 脚本会：
 
-1. 确认本地工作区没有未提交修改。
-2. 运行 `make check`。
+1. 校验 `DEPLOY_HOST`、`SERVICE_NAME`、`HEALTH_URL` 和 `DEPLOY_PATH`（前置校验，避免误操作）。
+2. 确认本地工作区没有未提交修改，并运行 `make check`。
 3. 将当前分支推送到 GitHub。
-4. 通过 SSH 在服务器执行 `git pull --ff-only`。
-5. 安装前端依赖并构建静态页面。
-6. 构建新的 Go 二进制并原子替换。
-7. 重启 systemd 服务并轮询 `/healthz`。
+4. 通过 SSH 在服务器执行 `git pull --ff-only` 与前端源码检查。
+5. 安装前端依赖、构建静态页面并编译新的 Go 二进制。
+6. 原子切换 `frontend/dist` 与 `charge-server`（保留 `.prev` 备份）。
+7. 重启 systemd 服务并轮询 `/healthz`；若重启或健康检查失败，自动输出 `systemctl status` 与 `journalctl` 诊断日志并回滚 `frontend/dist` 与 `charge-server`。
 
 自定义服务器路径、分支和服务名：
 
 ```bash
 make deploy-git \
-  DEPLOY_HOST=root@<服务器IP> \
+  DEPLOY_HOST=root@your-server \
   DEPLOY_PATH=/opt/charge-api \
   DEPLOY_BRANCH=main \
   SERVICE_NAME=charge-api
@@ -311,14 +266,14 @@ make deploy-git \
 NPM_REGISTRY=https://registry.npmmirror.com \
 PNPM_FETCH_TIMEOUT=180000 \
 PNPM_FETCH_RETRIES=8 \
-make deploy-git DEPLOY_HOST=root@<服务器IP>
+make deploy-git DEPLOY_HOST=root@your-server
 ```
 
 预演命令，不推送也不连接服务器：
 
 ```bash
 SKIP_CHECK=1 make deploy-git \
-  DEPLOY_HOST=root@<服务器IP> \
+  DEPLOY_HOST=root@your-server \
   DEPLOY_ARGS=--dry-run
 ```
 
@@ -327,18 +282,17 @@ SKIP_CHECK=1 make deploy-git \
 GitHub 临时不可用时：
 
 ```bash
-make deploy DEPLOY_HOST=root@<服务器IP>
+make deploy DEPLOY_HOST=root@your-server
 ```
 
-该脚本会排除 `.local/`、`.env`、SQLite、Cookie 密钥、`node_modules/` 和本地构建目录等运行数据。
+该脚本会排除 `.local/`、`.env`、SQLite、Cookie 密钥、`node_modules/` 和本地构建目录等运行数据，同样具备原子切换与失败自动回滚能力。
 
 ## 备份与恢复
 
-Charge 和可选 sidecar 的数据库分别为：
+Charge 数据库路径为：
 
 ```text
 /var/lib/charge-api/charge_state.db
-/opt/yyb_go/resource/db/yyb.db
 ```
 
 不要在服务运行时只复制主 `.db` 文件；启用 WAL 后可能得到不完整备份。仓库提供的脚本使用 SQLite 在线备份 API。
@@ -369,7 +323,7 @@ gunzip -k /var/lib/charge-api/backups/charge_state-<时间戳>.db.gz
 sqlite3 /var/lib/charge-api/backups/charge_state-<时间戳>.db "PRAGMA integrity_check;"
 ```
 
-备份也包含敏感状态，应加密异地保存并限制权限。恢复清单必须同时包含原始的 `CHARGE_COOKIE_KEY`、`YYB_SECRET_KEY` 和 `YYB_API_SECRET`。
+备份包含加密后的用户与公共池凭据，应加密异地保存并限制权限。恢复清单必须同时包含原始的 `CHARGE_COOKIE_KEY`。
 
 ## 安全加固
 
@@ -379,7 +333,7 @@ sqlite3 /var/lib/charge-api/backups/charge_state-<时间戳>.db "PRAGMA integrit
 ss -lntp | grep -E ':8080|:8000'
 ```
 
-预期只看到 `127.0.0.1:8080` 和可选的 `127.0.0.1:8000`。不应出现 `0.0.0.0:8000`。防火墙也应阻止 sidecar 端口：
+预期只看到 `127.0.0.1:8080`，且不应有 `0.0.0.0:8080` 或已退役的 `8000/tcp` 对外暴露；如需收紧防火墙：
 
 ```bash
 sudo ufw deny 8000/tcp
@@ -391,36 +345,19 @@ sudo ufw status
 ```bash
 stat -c '%a %n' \
   /etc/charge-api.env \
-  /etc/yyb-go.env \
-  /var/lib/charge-api/charge_state.db \
-  /opt/yyb_go/resource/db/yyb.db
+  /var/lib/charge-api/charge_state.db
 ```
 
-环境文件和数据库推荐为 `0600`。如果某个可选文件不存在，可以从命令中移除。
+环境文件和数据库推荐为 `0600`。
 
-### 运行端到端安全检查
+### 运行安全检查
 
 ```bash
 cd /opt/charge-api
-./scripts/security_check.sh
-```
-
-首次可先预演：
-
-```bash
 ./scripts/security_check.sh --dry-run
 ```
 
-服务器路径不同时可以覆盖：
-
-```bash
-CHARGE_DB_FILE=/path/to/charge_state.db \
-YYB_DB_FILE=/path/to/yyb.db \
-LOG_UNITS="charge-api yyb-go" \
-./scripts/security_check.sh
-```
-
-该检查用于确认 sidecar 未暴露、未签名请求被拒绝，以及数据库和日志没有出现已知明文敏感值。
+如服务器未运行旧版 `yyb-go`，可按需指定 `LOG_UNITS="charge-api"` 检查数据库与日志中是否出现敏感明文。
 
 ## 升级与回滚
 
@@ -428,17 +365,17 @@ LOG_UNITS="charge-api yyb-go" \
 
 1. 创建在线备份并执行 `PRAGMA integrity_check;`。
 2. 保存当前二进制、Git 提交号和数据库 Schema 对应的发布说明。
-3. 确认所有加密密钥已有离线副本。
+3. 确认 `CHARGE_COOKIE_KEY` 已有离线安全副本。
 4. 阅读目标版本的 [`RELEASE_NOTES.md`](../RELEASE_NOTES.md) 和 [`CHANGELOG.md`](../CHANGELOG.md)。
 
 部署后：
 
 1. `/healthz` 返回预期版本。
-2. 普通用户可以登录、加载看板并主动刷新。
-3. 管理员运维页没有新的连续异常。
-4. 已启用的扫码登录、临时提醒和 WxPusher 分别完成一次真实验证。
+2. 普通用户可以登录、加载看板、从公共桩库添加设备并主动刷新。
+3. 管理员运维页、公共 Cookie 池及运营趋势无异常报错。
+4. 临时空闲提醒与已启用的 WxPusher 分别完成一次真实验证。
 
-回滚时先停止 `charge-api`，恢复与旧版本兼容的数据库备份，再部署旧二进制。仅移除 `WXPUSHER_APP_TOKEN` 可以关闭微信能力，不需要回滚整个应用。
+若需人工回滚，先停止 `charge-api`，恢复与旧版本兼容的数据库备份，再部署旧二进制与前端静态文件。仅移除 `WXPUSHER_APP_TOKEN` 可以关闭微信能力，不需要回滚整个应用。
 
 ## 排障
 
@@ -449,15 +386,15 @@ sudo systemctl --no-pager --full status charge-api
 sudo journalctl -u charge-api -n 100 --no-pager
 ```
 
-常见启动错误：
+常见启动与运行错误：
 
 | 错误                                                 | 处理                                                                                          |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `CHARGE_COOKIE_KEY` 无效                             | 使用 `openssl rand -base64 32` 生成，并确保没有复制换行或空格。已有数据库必须继续使用原密钥。 |
-| 设置了 `YYB_BASE_URL` 但缺少 `YYB_API_SECRET`        | 在 Charge 和 sidecar 环境文件中填入相同共享密钥。                                             |
 | 设置了 `WXPUSHER_APP_TOKEN` 但缺少 `PUBLIC_BASE_URL` | 配置只含协议与域名的公网 HTTPS Origin。                                                       |
+| 提示公共查询通道暂无可用 Cookie                      | 前往管理端「公共池」补充可用凭据，或由用户在「平台连接」上传个人 Cookie 并加入互助公共池。     |
 | 页面可打开但 SSE 不更新                              | 检查反向代理是否对 `/api/stream` 关闭缓冲并延长读取超时。                                     |
 | 部署脚本提示工作区不干净                             | 提交或暂存本地改动后再部署，避免把未审阅文件带到服务器。                                      |
-| 健康检查失败                                         | 查看 systemd 状态和日志，确认前端已构建、数据库目录可写、端口未被占用。                       |
+| 健康检查失败                                         | 查看自动输出的 systemd 状态和日志，确认前端已构建、数据库目录可写、端口未被占用。             |
 
 返回项目概览：[README](../README.md)
