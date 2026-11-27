@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/ninuan/charge-api/actions/workflows/ci.yml"><img src="https://github.com/ninuan/charge-api/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/ninuan/charge-api/releases"><img src="https://img.shields.io/github/v/release/ninuan/charge-api" alt="Release"></a>
-  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25">
+  <img src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white" alt="Go 1.26">
   <img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
   <img src="https://img.shields.io/badge/SQLite-Embedded-003B57?logo=sqlite&logoColor=white" alt="SQLite">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
@@ -59,7 +59,7 @@
 
 ### 环境要求
 
-`Go 1.25+` · `Node.js 22+` · `pnpm 11+` · `Git` · `Make`
+`Go 1.26+` · `Node.js 22+` · `pnpm 11+` · `Git` · `Make`
 
 ### 三步启动本地开发环境
 

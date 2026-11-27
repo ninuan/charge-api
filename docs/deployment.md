@@ -38,7 +38,7 @@ charge-server
 
 - Git、Make、rsync、curl
 - Node.js 22 与 pnpm 11
-- Go 1.25，或支持按 `go.mod` 自动下载 toolchain 的 Go 版本
+- Go 1.26，或支持按 `go.mod` 自动下载 toolchain 的 Go 版本
 - sqlite3
 - Nginx 或 Caddy
 - systemd
