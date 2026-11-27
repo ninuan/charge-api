@@ -1,161 +1,12 @@
 package runtime
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"charge-dashboard/internal/model"
-	"charge-dashboard/internal/yyb"
 )
-
-func (m *Manager) SaveYYBBinding(userID string, account yyb.YYBAccount) (*model.YYBBinding, error) {
-	now := time.Now().UTC()
-	binding := &model.YYBBinding{
-		OpenID:        strings.TrimSpace(account.OpenID),
-		Ref:           strings.TrimSpace(account.Ref),
-		Nickname:      strings.TrimSpace(account.Nickname),
-		Avatar:        strings.TrimSpace(account.Avatar),
-		Status:        "alive",
-		BoundAt:       now,
-		LastCheckedAt: nil,
-		LastError:     "",
-	}
-	if binding.Ref == "" {
-		return nil, fmt.Errorf("yyb account ref is required")
-	}
-	if binding.OpenID == "" {
-		return nil, fmt.Errorf("yyb account openid is required")
-	}
-	if err := m.SetYYBBinding(userID, binding); err != nil {
-		return nil, err
-	}
-	return cloneYYBBinding(binding), nil
-}
-
-func (m *Manager) ClearYYBBinding(userID string) error {
-	return m.SetYYBBinding(userID, nil)
-}
-
-func (m *Manager) SyncCookieFromYYB(userID string, deviceID string, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
-		return model.DashboardSnapshot{}, err
-	}
-	runtime.credentialMu.Lock()
-	defer runtime.credentialMu.Unlock()
-
-	binding, err := m.YYBBinding(userID)
-	if err != nil {
-		return model.DashboardSnapshot{}, err
-	}
-	if binding == nil || binding.Ref == "" {
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("binding_missing", deviceID, 0))
-		return model.DashboardSnapshot{}, fmt.Errorf("yyb binding is required")
-	}
-	ctx := context.Background()
-	code, err := yybClient.GetCode(ctx, binding.Ref, moceleAppID)
-	if err != nil {
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_get_code_failed", deviceID, err))
-		if refreshErr := yybClient.RefreshAccount(ctx, binding.Ref); refreshErr != nil {
-			code := "yyb_account_refresh_failed"
-			if errors.Is(refreshErr, yyb.ErrAccountExpired) {
-				code = "yyb_account_refresh_expired"
-			}
-			if errors.Is(refreshErr, yyb.ErrAccountUnknown) {
-				code = "yyb_account_refresh_unknown"
-			}
-			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError(code, deviceID, refreshErr))
-			err = fmt.Errorf("get code failed: %v; refresh failed: %w", err, refreshErr)
-			if errors.Is(refreshErr, yyb.ErrAccountExpired) {
-				m.markYYBBindingExpired(userID, binding, err)
-			} else {
-				if errors.Is(refreshErr, yyb.ErrAccountRecoveryFailed) {
-					binding.Status = "recovery_failed"
-				}
-				m.markYYBBindingError(userID, binding, err)
-			}
-			return model.DashboardSnapshot{}, err
-		}
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("yyb_account_refresh_succeeded", deviceID, 0))
-		code, err = yybClient.GetCode(ctx, binding.Ref, moceleAppID)
-		if err != nil {
-			m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("yyb_get_code_retry_failed", deviceID, err))
-			m.markYYBBindingError(userID, binding, err)
-			return model.DashboardSnapshot{}, err
-		}
-	}
-	m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("yyb_get_code_succeeded", deviceID, 0))
-	cookieResult, err := moceleClient.ExchangeCode(ctx, deviceID, code)
-	if err != nil {
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError(moceleDiagnosticCode(err), deviceID, err))
-		m.markYYBBindingError(userID, binding, err)
-		return model.DashboardSnapshot{}, err
-	}
-	m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("mocele_autologin_succeeded", deviceID, 0))
-	now := time.Now().UTC()
-	binding.Status = "alive"
-	binding.LastError = ""
-	binding.LastCheckedAt = &now
-	if err := m.setYYBBinding(userID, binding); err != nil {
-		return model.DashboardSnapshot{}, err
-	}
-	snapshot, err := m.UpdateCookie(userID, cookieResult.Cookie)
-	if err != nil {
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("new_cookie_validation_failed", deviceID, err))
-		m.markYYBBindingError(userID, binding, err)
-		return model.DashboardSnapshot{}, err
-	}
-	return snapshot, nil
-}
-
-func (m *Manager) markYYBBindingExpired(userID string, binding *model.YYBBinding, cause error) {
-	binding.Status = "expired"
-	m.markYYBBindingError(userID, binding, cause)
-}
-
-func (m *Manager) markYYBBindingError(userID string, binding *model.YYBBinding, cause error) {
-	now := time.Now().UTC()
-	binding.LastCheckedAt = &now
-	if cause != nil {
-		binding.LastError = cause.Error()
-	}
-	_ = m.setYYBBinding(userID, binding)
-}
-
-func (m *Manager) YYBBinding(userID string) (*model.YYBBinding, error) {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
-		return nil, err
-	}
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-	return cloneYYBBinding(runtime.yybBinding), nil
-}
-
-func (m *Manager) SetYYBBinding(userID string, binding *model.YYBBinding) error {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
-		return err
-	}
-	runtime.credentialMu.Lock()
-	defer runtime.credentialMu.Unlock()
-	return m.setYYBBinding(userID, binding)
-}
-
-// Caller holds credentialMu, including when persisting recovery diagnostics.
-func (m *Manager) setYYBBinding(userID string, binding *model.YYBBinding) error {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
-		return err
-	}
-	runtime.mu.Lock()
-	runtime.yybBinding = cloneYYBBinding(binding)
-	runtime.mu.Unlock()
-	return m.saveUserState(userID)
-}
 
 func cloneYYBBinding(binding *model.YYBBinding) *model.YYBBinding {
 	if binding == nil {
@@ -167,18 +18,6 @@ func cloneYYBBinding(binding *model.YYBBinding) *model.YYBBinding {
 		clone.LastCheckedAt = &value
 	}
 	return &clone
-}
-
-func (m *Manager) FirstDeviceID(userID string) (string, bool, error) {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
-		return "", false, err
-	}
-	ids := runtime.client.DeviceIDs()
-	if len(ids) == 0 {
-		return "", false, nil
-	}
-	return ids[0], true, nil
 }
 
 func (m *Manager) RecoveryDiagnostics(userID string) ([]model.RecoveryDiagnostic, error) {
@@ -195,11 +34,6 @@ func (m *Manager) RecordOperationDiagnostic(userID, operation, code, deviceID st
 	m.recordDiagnostic(userID, model.RecoveryDiagnostic{
 		Operation: operation, Code: code, DeviceSuffix: deviceID, StatusCode: statusCode,
 	})
-}
-
-func (m *Manager) recordRecoveryDiagnostic(userID string, diagnostic model.RecoveryDiagnostic) {
-	diagnostic.Operation = diagnosticOperationRecovery
-	m.recordDiagnostic(userID, diagnostic)
 }
 
 func (m *Manager) recordDiagnostic(userID string, diagnostic model.RecoveryDiagnostic) {
@@ -226,16 +60,6 @@ func (m *Manager) recordDiagnostic(userID string, diagnostic model.RecoveryDiagn
 	}
 	runtime.mu.Unlock()
 	_ = m.saveUserState(userID)
-}
-
-func recoveryDiagnostic(code string, deviceID string, statusCode int) model.RecoveryDiagnostic {
-	return model.RecoveryDiagnostic{
-		Operation: diagnosticOperationRecovery, Code: code, Message: recoveryDiagnosticMessage(code), DeviceSuffix: deviceSuffix(deviceID), StatusCode: statusCode,
-	}
-}
-
-func recoveryDiagnosticWithError(code string, deviceID string, err error) model.RecoveryDiagnostic {
-	return recoveryDiagnostic(code, deviceID, DiagnosticStatusCode(err))
 }
 
 func recoveryDiagnosticMessage(code string) string {
@@ -291,18 +115,6 @@ func normalizeDiagnosticOperation(operation string) string {
 		return operation
 	default:
 		return diagnosticOperationRecovery
-	}
-}
-
-func moceleDiagnosticCode(err error) string {
-	message := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(message, "missing info cookie"):
-		return "mocele_autologin_missing_info"
-	case strings.Contains(message, "missing wxopenid cookie"):
-		return "mocele_autologin_missing_wxopenid"
-	default:
-		return "mocele_autologin_failed"
 	}
 }
 

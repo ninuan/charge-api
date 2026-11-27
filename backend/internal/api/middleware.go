@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Static HTML adds hashes for its exact inline scripts in StaticHandler.
@@ -56,10 +57,23 @@ func WithCacheHeaders(next http.Handler) http.Handler {
 	})
 }
 
+func WithWriteDeadline(next http.Handler, timeout time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if timeout > 0 && r.URL.Path != streamPath {
+			controller := http.NewResponseController(w)
+			_ = controller.SetWriteDeadline(time.Now().Add(timeout))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func WithCompression(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// SSE 需要逐事件立即送达，gzip 的缓冲会让推送滞留在管道里。
-		if r.URL.Path == streamPath || !acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		// SSE 需要逐事件立即送达；HEAD/OPTIONS 无响应体，不可写出 gzip 流头尾。
+		if r.URL.Path == streamPath ||
+			r.Method == http.MethodHead ||
+			r.Method == http.MethodOptions ||
+			!acceptsGzip(r.Header.Get("Accept-Encoding")) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -122,6 +136,10 @@ func (w *gzipResponseWriter) Write(data []byte) (int, error) {
 		return w.writer.Write(data)
 	}
 	return w.ResponseWriter.Write(data)
+}
+
+func (w *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func (w *gzipResponseWriter) Flush() {
@@ -190,6 +208,11 @@ func WithRequestBodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength > MaxRequestBodyBytes {
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+			return
+		}
+		bodylessMethod := r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions
+		if bodylessMethod && r.ContentLength <= 0 && len(r.TransferEncoding) == 0 {
+			next.ServeHTTP(w, r)
 			return
 		}
 		if r.Body != nil && r.Body != http.NoBody {

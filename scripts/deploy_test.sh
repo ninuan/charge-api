@@ -32,6 +32,13 @@ if [[ "$dry_run_output" != *"rsync"* ]] || [[ "$dry_run_output" != *"root@exampl
   exit 1
 fi
 
+for excluded in "frontend/.next/" "frontend/out/" "frontend/.env\\*.local"; do
+  if [[ "$dry_run_output" != *"$excluded"* ]]; then
+    echo "dry-run rsync should exclude $excluded"
+    exit 1
+  fi
+done
+
 if [[ "$dry_run_output" != *"bash scripts/check_frontend_sources.sh"* ]]; then
   echo "dry-run should print the remote frontend source check"
   exit 1

@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -48,33 +49,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [loading, setLoading] = useState(false)
   const [ready, setReady] = useState(false)
+  const authEpochRef = useRef(0)
+  const currentUserRef = useRef<CurrentUser | null>(null)
+  const inFlightFetchMeRef = useRef<{
+    epoch: number
+    promise: Promise<CurrentUser | null>
+  } | null>(null)
 
-  const clearSession = useCallback(() => {
-    setCurrentUser(null)
+  const commitUser = useCallback((user: CurrentUser | null) => {
+    currentUserRef.current = user
+    setCurrentUser(user)
+    setLoading(false)
     setReady(true)
   }, [])
 
+  const clearSession = useCallback(() => {
+    authEpochRef.current += 1
+    inFlightFetchMeRef.current = null
+    commitUser(null)
+  }, [commitUser])
+
   const fetchMe = useCallback(async () => {
-    setLoading(true)
-    try {
-      const user = await requestJSON<CurrentUser>(
-        "/api/auth/me",
-        {},
-        "读取账户信息失败，请稍后重试。"
-      )
-      setCurrentUser(user)
-      return user
-    } catch (reason) {
-      if (reason instanceof RequestError && reason.status === 401) {
-        clearSession()
-        return null
-      }
-      throw reason
-    } finally {
-      setLoading(false)
-      setReady(true)
+    const existing = inFlightFetchMeRef.current
+    if (existing && existing.epoch === authEpochRef.current) {
+      return existing.promise
     }
-  }, [clearSession])
+    const epoch = ++authEpochRef.current
+    setLoading(true)
+    const promise = (async () => {
+      try {
+        const user = await requestJSON<CurrentUser>(
+          "/api/auth/me",
+          { suppressSessionExpired: true },
+          "读取账户信息失败，请稍后重试。"
+        )
+        if (epoch !== authEpochRef.current) return currentUserRef.current
+        commitUser(user)
+        return user
+      } catch (reason) {
+        if (epoch !== authEpochRef.current) return currentUserRef.current
+        if (reason instanceof RequestError && reason.status === 401) {
+          clearSession()
+          return null
+        }
+        setLoading(false)
+        setReady(true)
+        throw reason
+      } finally {
+        if (inFlightFetchMeRef.current?.epoch === epoch) {
+          inFlightFetchMeRef.current = null
+        }
+      }
+    })()
+    inFlightFetchMeRef.current = { epoch, promise }
+    return promise
+  }, [clearSession, commitUser])
 
   const login = useCallback(
     async (
@@ -97,11 +126,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
         "登录失败，请检查用户名、密码和验证后重试。"
       )
-      setCurrentUser(user)
-      setReady(true)
+      authEpochRef.current += 1
+      inFlightFetchMeRef.current = null
+      commitUser(user)
       return user
     },
-    []
+    [commitUser]
   )
 
   const register = useCallback(
@@ -127,11 +157,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
         "注册失败，请检查填写信息和验证后重试。"
       )
-      setCurrentUser(user)
-      setReady(true)
+      authEpochRef.current += 1
+      inFlightFetchMeRef.current = null
+      commitUser(user)
       return user
     },
-    []
+    [commitUser]
   )
 
   const logout = useCallback(async () => {
@@ -150,10 +181,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
         "修改密码失败"
       )
-      setCurrentUser(user)
+      authEpochRef.current += 1
+      inFlightFetchMeRef.current = null
+      commitUser(user)
       return user
     },
-    []
+    [commitUser]
   )
 
   const acknowledgeUsageGuide = useCallback(async () => {
@@ -162,10 +195,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       { method: "POST" },
       "确认使用说明失败"
     )
-    setCurrentUser(user)
-    setReady(true)
+    authEpochRef.current += 1
+    inFlightFetchMeRef.current = null
+    commitUser(user)
     return user
-  }, [])
+  }, [commitUser])
 
   const fetchSessions = useCallback(
     () => requestJSON<SessionView[]>("/api/auth/sessions", {}, "读取会话失败"),

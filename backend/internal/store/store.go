@@ -132,6 +132,22 @@ func (s *DashboardStore) MergeCapturePiles(captured []model.Pile) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.mergeCapturePilesLocked(captured)
+	s.publishLocked()
+}
+
+// MergeCapturePilesAndRefreshInfo updates both captured piles and refresh metadata
+// atomically under one lock and broadcasts a single SSE snapshot.
+func (s *DashboardStore) MergeCapturePilesAndRefreshInfo(captured []model.Pile, info model.RefreshInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.mergeCapturePilesLocked(captured)
+	s.refresh = info
+	s.publishLocked()
+}
+
+func (s *DashboardStore) mergeCapturePilesLocked(captured []model.Pile) {
 	for _, pile := range captured {
 		if existing, ok := s.piles[pile.ID]; ok {
 			pile.CreatedAt = existing.CreatedAt
@@ -148,7 +164,6 @@ func (s *DashboardStore) MergeCapturePiles(captured []model.Pile) {
 		}
 		s.piles[pile.ID] = pile
 	}
-	s.publishLocked()
 }
 
 func (s *DashboardStore) Subscribe() chan model.DashboardSnapshot {
@@ -171,11 +186,22 @@ func (s *DashboardStore) Unsubscribe(ch chan model.DashboardSnapshot) {
 }
 
 func (s *DashboardStore) publishLocked() {
+	if len(s.subscribers) == 0 {
+		return
+	}
 	snapshot := s.snapshotLocked()
 	for ch := range s.subscribers {
 		select {
 		case ch <- snapshot:
 		default:
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- snapshot:
+			default:
+			}
 		}
 	}
 }

@@ -2,6 +2,8 @@
 Description=Charge Console
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -14,12 +16,19 @@ ExecStart=/opt/charge-api/backend/charge-server -listen 127.0.0.1:8080 -database
 
 Restart=always
 RestartSec=3
+TimeoutStopSec=35
 UMask=0077
 
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
 ReadWritePaths=/var/lib/charge-api
 
 [Install]

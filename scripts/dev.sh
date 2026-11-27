@@ -4,7 +4,9 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEV_ENV_FILE="${LOCAL_DEV_ENV_FILE:-$ROOT_DIR/.local/dev.env}"
+# shellcheck source=scripts/lib/dev_env.sh
 source "$ROOT_DIR/scripts/lib/dev_env.sh"
+# shellcheck source=scripts/lib/dev_process.sh
 source "$ROOT_DIR/scripts/lib/dev_process.sh"
 load_dev_env_file "$DEV_ENV_FILE"
 
@@ -99,9 +101,6 @@ if [[ -f "$DEV_ENV_FILE" ]]; then
 else
   echo "本地配置: ${DEV_ENV_FILE}（未创建，可复制 examples/dev.env.example）"
 fi
-if [[ -n "${YYB_BASE_URL:-}" ]]; then
-  echo "YYB sidecar: ${YYB_BASE_URL}"
-fi
 echo "按 Ctrl+C 同时停止前后端。"
 echo
 
@@ -110,16 +109,10 @@ echo
   CORS_ALLOWED_ORIGINS="http://127.0.0.1:$FRONTEND_PORT" \
   CHARGE_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   CHARGE_COOKIE_KEY="$COOKIE_KEY" \
-  YYB_BASE_URL="${YYB_BASE_URL:-}" \
-  YYB_API_SECRET="${YYB_API_SECRET:-}" \
   WXPUSHER_APP_TOKEN="${WXPUSHER_APP_TOKEN:-}" \
   WXPUSHER_BASE_URL="${WXPUSHER_BASE_URL:-}" \
   PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://127.0.0.1:$FRONTEND_PORT}" \
-  MOCELE_BASE_URL="${MOCELE_BASE_URL:-}" \
-  MOCELE_ORG="${MOCELE_ORG:-}" \
-  MOCELE_OPENINDEX="${MOCELE_OPENINDEX:-}" \
   CHARGE_LOCAL_DEV=1 \
-  CHARGE_DEV_FORCE_AUTH_EXPIRED="${CHARGE_DEV_FORCE_AUTH_EXPIRED:-}" \
   go run ./cmd/server \
     -listen "127.0.0.1:$BACKEND_PORT" \
     -database "$DATABASE_FILE" \

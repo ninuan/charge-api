@@ -255,10 +255,9 @@ func (m *SessionManager) Delete(token string) {
 }
 
 func (m *SessionManager) DeleteUser(userID string) error {
+	var storeErr error
 	if m.store != nil {
-		if err := m.store.DeleteUserSessions(userID); err != nil {
-			return err
-		}
+		storeErr = m.store.DeleteUserSessions(userID)
 	}
 	m.mu.Lock()
 	for token, session := range m.sessions {
@@ -268,7 +267,7 @@ func (m *SessionManager) DeleteUser(userID string) error {
 	}
 	m.revocationGen++
 	m.mu.Unlock()
-	return nil
+	return storeErr
 }
 
 func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView, error) {
@@ -313,10 +312,9 @@ func (m *SessionManager) List(userID, currentToken string) ([]model.SessionView,
 }
 
 func (m *SessionManager) DeleteOthers(userID, currentToken string) error {
+	var storeErr error
 	if m.store != nil {
-		if err := m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken)); err != nil {
-			return err
-		}
+		storeErr = m.store.DeleteOtherSessions(userID, hashSessionToken(currentToken))
 	}
 	m.mu.Lock()
 	for token, session := range m.sessions {
@@ -326,7 +324,7 @@ func (m *SessionManager) DeleteOthers(userID, currentToken string) error {
 	}
 	m.revocationGen++
 	m.mu.Unlock()
-	return nil
+	return storeErr
 }
 
 func (m *SessionManager) cleanupLoop() {

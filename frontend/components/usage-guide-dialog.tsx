@@ -172,9 +172,17 @@ export function UsageGuideDialog({
     }
   }
   function handleOpen(next: boolean) {
-    if (!next && required && !reachedEnd) return
-    setOpen(next)
-    if (!next) closeAppShellMenu()
+    if (next) {
+      setOpen(true)
+      return
+    }
+    if (required) {
+      if (!reachedEnd || saving) return
+      void close()
+      return
+    }
+    setOpen(false)
+    closeAppShellMenu()
   }
   // 读到过底部就保持已读：往回翻不该撤销"已看完"。
   function checkEnd(target: HTMLElement) {

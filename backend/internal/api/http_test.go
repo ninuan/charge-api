@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,12 +12,10 @@ import (
 	"time"
 
 	"charge-dashboard/internal/auth"
-	"charge-dashboard/internal/mocele"
 	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/persistence"
 	appruntime "charge-dashboard/internal/runtime"
-	"charge-dashboard/internal/yyb"
 )
 
 func TestAdminCannotUseDashboardAPI(t *testing.T) {
@@ -76,20 +73,6 @@ func TestUserCanSubmitPileOrder(t *testing.T) {
 	}
 }
 
-func TestDevForceAuthExpiredIsConsumedOnce(t *testing.T) {
-	server, _, _ := newTestServer(t)
-	if server.consumeDevForceAuthExpired() {
-		t.Fatal("test switch should be disabled by default")
-	}
-	server.EnableDevForceAuthExpired()
-	if !server.consumeDevForceAuthExpired() {
-		t.Fatal("test switch was not consumed")
-	}
-	if server.consumeDevForceAuthExpired() {
-		t.Fatal("test switch must only affect one refresh")
-	}
-}
-
 func TestHealthExposesReleaseVersion(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	recorder := httptest.NewRecorder()
@@ -124,7 +107,6 @@ func TestAdminHealthRequiresAdminAndReturnsRedactedServiceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create user session: %v", err)
 	}
-	server.SetYYBIntegration(&fakeAPIYYBClient{}, &fakeAPIMoceleClient{})
 	mux := http.NewServeMux()
 	server.Register(mux)
 
@@ -186,18 +168,13 @@ func TestAdminResponsesDoNotLeakIntegrationSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	now := time.Now().UTC()
-	if err := manager.SetYYBBinding(user.ID, &model.YYBBinding{
-		OpenID: "private-open-id", Ref: "private-ref", Nickname: "Privacy User",
-		Status: "alive", BoundAt: now, LastCheckedAt: &now,
-	}); err != nil {
-		t.Fatalf("SetYYBBinding: %v", err)
+	if _, err := manager.UpdateCookieWithPoolOption(user.ID, "wxopenid=private-open-id; info=private-ref", true); err != nil {
+		t.Fatalf("UpdateCookieWithPoolOption: %v", err)
 	}
 	session, err := sessions.Create(admin.ID)
 	if err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	server.SetYYBIntegration(&fakeAPIYYBClient{}, &fakeAPIMoceleClient{})
 
 	var response bytes.Buffer
 	for _, path := range []string{"/api/admin/stats", "/api/admin/health"} {
@@ -380,29 +357,6 @@ func TestAdminIncidentCanBeAcknowledgedWithNote(t *testing.T) {
 	if issue.Status != "acknowledged" || issue.Note != "已安排重新备份" ||
 		issue.HandledBy != "admin" || issue.HandledAt == nil {
 		t.Fatalf("unexpected incident: %+v", issue)
-	}
-}
-
-func TestWriteAddPileErrorReturnsFriendlyMessageWhenYYBBindingIsMissing(t *testing.T) {
-	recorder := httptest.NewRecorder()
-
-	writeAddPileError(recorder, appruntime.ErrYYBBindingRequired)
-
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
-	}
-	var payload struct {
-		Code  string `json:"code"`
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload.Code != "YYB_BINDING_REQUIRED" {
-		t.Fatalf("code = %q, want YYB_BINDING_REQUIRED", payload.Code)
-	}
-	if payload.Error != "请先完成扫码登录绑定，再添加充电桩" {
-		t.Fatalf("error = %q", payload.Error)
 	}
 }
 
@@ -1089,61 +1043,40 @@ func (c *fixedCaptcha) Verify(id string, answer string) error {
 	return nil
 }
 
-func TestYYBBindingStatusResponseIsRedacted(t *testing.T) {
+func TestRetiredYYBEndpointsReturnNotFound(t *testing.T) {
 	server, manager, sessions := newTestServer(t)
 	user, err := manager.CreateUser(model.UserCreateRequest{
-		Username: "yybuser",
+		Username: "retired-yyb-user",
 		Password: "password123",
 		Role:     model.RoleUser,
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	now := time.Now().UTC().Truncate(time.Second)
-	if err := manager.SetYYBBinding(user.ID, &model.YYBBinding{
-		OpenID:        "yyb-openid-secret-1234",
-		Ref:           "secret-ref",
-		Nickname:      "display name",
-		Avatar:        "https://avatar.example/secret-avatar.png",
-		Status:        "alive",
-		BoundAt:       now,
-		LastCheckedAt: &now,
-	}); err != nil {
-		t.Fatalf("SetYYBBinding: %v", err)
-	}
 	session, err := sessions.Create(user.ID)
 	if err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-
 	mux := http.NewServeMux()
 	server.Register(mux)
-	request := httptest.NewRequest(http.MethodGet, "/api/session/yyb-binding", nil)
-	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	recorder := httptest.NewRecorder()
-	mux.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("binding status returned %d: %s", recorder.Code, recorder.Body.String())
-	}
-	body := recorder.Body.String()
-	for _, secret := range []string{"yyb-openid-secret", "secret-ref", "secret-avatar"} {
-		if strings.Contains(body, secret) {
-			t.Fatalf("binding response leaked %q: %s", secret, body)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/session/yyb-binding"},
+		{http.MethodDelete, "/api/session/yyb-binding"},
+		{http.MethodPost, "/api/session/yyb-qr"},
+		{http.MethodGet, "/api/session/yyb-qr/sid-1/poll"},
+		{http.MethodPost, "/api/session/mocele-cookie"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s returned %d, want 404: %s", tc.method, tc.path, rec.Code, rec.Body.String())
 		}
-	}
-	var payload struct {
-		Bound         bool   `json:"bound"`
-		OpenIDSuffix  string `json:"openidSuffix"`
-		Nickname      string `json:"nickname"`
-		Status        string `json:"status"`
-		BoundAt       string `json:"boundAt"`
-		LastCheckedAt string `json:"lastCheckedAt"`
-	}
-	if err := json.NewDecoder(strings.NewReader(body)).Decode(&payload); err != nil {
-		t.Fatalf("decode binding response: %v", err)
-	}
-	if !payload.Bound || payload.OpenIDSuffix != "1234" || payload.Nickname != "display name" || payload.Status != "alive" || payload.BoundAt == "" || payload.LastCheckedAt == "" {
-		t.Fatalf("unexpected binding payload: %#v", payload)
 	}
 }
 
@@ -1182,109 +1115,6 @@ func TestCookieUpdateResponseDoesNotEchoCookie(t *testing.T) {
 	}
 }
 
-func TestYYBBindingOwnershipUsesCurrentSessionUser(t *testing.T) {
-	server, manager, sessions := newTestServer(t)
-	userA, err := manager.CreateUser(model.UserCreateRequest{Username: "owner-a", Password: "password123", Role: model.RoleUser})
-	if err != nil {
-		t.Fatalf("CreateUser A: %v", err)
-	}
-	userB, err := manager.CreateUser(model.UserCreateRequest{Username: "owner-b", Password: "password123", Role: model.RoleUser})
-	if err != nil {
-		t.Fatalf("CreateUser B: %v", err)
-	}
-	sessionA, err := sessions.Create(userA.ID)
-	if err != nil {
-		t.Fatalf("Create session A: %v", err)
-	}
-	sessionB, err := sessions.Create(userB.ID)
-	if err != nil {
-		t.Fatalf("Create session B: %v", err)
-	}
-	mux := http.NewServeMux()
-	server.Register(mux)
-
-	setBinding(t, manager, userA.ID, "yyb-openid-a-1234", "ref-a", "owner A")
-
-	bodyA := getBindingBody(t, mux, sessionA.Token)
-	if !strings.Contains(bodyA, `"bound":true`) || !strings.Contains(bodyA, `"openidSuffix":"1234"`) || !strings.Contains(bodyA, `"nickname":"owner A"`) {
-		t.Fatalf("user A binding response = %s", bodyA)
-	}
-	bodyB := getBindingBody(t, mux, sessionB.Token)
-	if !strings.Contains(bodyB, `"bound":false`) {
-		t.Fatalf("user B should not see user A binding: %s", bodyB)
-	}
-
-	setBinding(t, manager, userB.ID, "yyb-openid-b-5678", "ref-b", "owner B")
-	bodyB = getBindingBody(t, mux, sessionB.Token)
-	if !strings.Contains(bodyB, `"openidSuffix":"5678"`) || !strings.Contains(bodyB, `"nickname":"owner B"`) {
-		t.Fatalf("user B self binding response = %s", bodyB)
-	}
-
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/session/yyb-binding", nil)
-	deleteReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionB.Token})
-	deleteRec := httptest.NewRecorder()
-	mux.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusNoContent {
-		t.Fatalf("delete binding returned %d: %s", deleteRec.Code, deleteRec.Body.String())
-	}
-	bodyB = getBindingBody(t, mux, sessionB.Token)
-	if !strings.Contains(bodyB, `"bound":false`) {
-		t.Fatalf("user B binding not deleted: %s", bodyB)
-	}
-	bodyA = getBindingBody(t, mux, sessionA.Token)
-	if !strings.Contains(bodyA, `"nickname":"owner A"`) {
-		t.Fatalf("deleting user B binding affected user A: %s", bodyA)
-	}
-}
-
-func TestYYBBindingRejectsAnonymousRequests(t *testing.T) {
-	server, _, _ := newTestServer(t)
-	mux := http.NewServeMux()
-	server.Register(mux)
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		body := strings.NewReader(`{"openid":"secret"}`)
-		request := httptest.NewRequest(method, "/api/session/yyb-binding", body)
-		request.Header.Set("Content-Type", "application/json")
-		recorder := httptest.NewRecorder()
-		mux.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusUnauthorized {
-			t.Fatalf("%s anonymous returned %d, want 401: %s", method, recorder.Code, recorder.Body.String())
-		}
-	}
-}
-
-func TestYYBBindingRejectsClientSuppliedRef(t *testing.T) {
-	server, manager, sessions := newTestServer(t)
-	user, err := manager.CreateUser(model.UserCreateRequest{Username: "ref-injection", Password: "password123", Role: model.RoleUser})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	session, err := sessions.Create(user.ID)
-	if err != nil {
-		t.Fatalf("Create session: %v", err)
-	}
-	mux := http.NewServeMux()
-	server.Register(mux)
-
-	body := bytes.NewReader([]byte(`{"openid":"attacker","ref":"1","status":"alive"}`))
-	request := httptest.NewRequest(http.MethodPost, "/api/session/yyb-binding", body)
-	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	recorder := httptest.NewRecorder()
-	mux.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("post binding returned %d, want 405: %s", recorder.Code, recorder.Body.String())
-	}
-
-	binding, err := manager.YYBBinding(user.ID)
-	if err != nil {
-		t.Fatalf("YYBBinding: %v", err)
-	}
-	if binding != nil {
-		t.Fatalf("client supplied ref was persisted: %+v", binding)
-	}
-}
-
 func TestClientIPIgnoresForgedForwardedForPrefix(t *testing.T) {
 	proxied := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
 	proxied.RemoteAddr = "127.0.0.1:54321"
@@ -1306,206 +1136,4 @@ func TestClientIPIgnoresForgedForwardedForPrefix(t *testing.T) {
 	if got := clientIP(direct); got != "198.51.100.7" {
 		t.Fatalf("clientIP for a direct connection = %q, want the socket peer", got)
 	}
-}
-
-func setBinding(t *testing.T, manager *appruntime.Manager, userID, openID, ref, nickname string) {
-	t.Helper()
-	if err := manager.SetYYBBinding(userID, &model.YYBBinding{
-		OpenID:   openID,
-		Ref:      ref,
-		Nickname: nickname,
-		Status:   "alive",
-		BoundAt:  time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("SetYYBBinding: %v", err)
-	}
-}
-
-func getBindingBody(t *testing.T, handler http.Handler, token string) string {
-	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/api/session/yyb-binding", nil)
-	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("get binding returned %d: %s", recorder.Code, recorder.Body.String())
-	}
-	return recorder.Body.String()
-}
-
-func TestYYBProxyEndpointsRequireLoginAndConfiguration(t *testing.T) {
-	server, manager, sessions := newTestServer(t)
-	user, err := manager.CreateUser(model.UserCreateRequest{Username: "yyb-proxy", Password: "password123", Role: model.RoleUser})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	session, err := sessions.Create(user.ID)
-	if err != nil {
-		t.Fatalf("Create session: %v", err)
-	}
-	mux := http.NewServeMux()
-	server.Register(mux)
-
-	anonymous := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr", nil)
-	anonymousRecorder := httptest.NewRecorder()
-	mux.ServeHTTP(anonymousRecorder, anonymous)
-	if anonymousRecorder.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous yyb-qr returned %d, want 401", anonymousRecorder.Code)
-	}
-
-	configuredRequest := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr", nil)
-	configuredRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	configuredRecorder := httptest.NewRecorder()
-	mux.ServeHTTP(configuredRecorder, configuredRequest)
-	if configuredRecorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("unconfigured yyb-qr returned %d, want 503: %s", configuredRecorder.Code, configuredRecorder.Body.String())
-	}
-}
-
-func TestYYBProxyFlowBindsCurrentUserAndSyncsCookie(t *testing.T) {
-	server, manager, sessions := newTestServer(t)
-	user, err := manager.CreateUser(model.UserCreateRequest{Username: "yyb-flow", Password: "password123", Role: model.RoleUser})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	session, err := sessions.Create(user.ID)
-	if err != nil {
-		t.Fatalf("Create session: %v", err)
-	}
-	yybClient := &fakeAPIYYBClient{code: "wx-code-from-yyb"}
-	moceleClient := &fakeAPIMoceleClient{cookie: "deviceid=2601201412385560001; org=1; openindex=7; wxopenid=open; info=info"}
-	server.SetYYBIntegration(yybClient, moceleClient)
-	mux := http.NewServeMux()
-	server.Register(mux)
-
-	createReq := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr", nil)
-	createReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	createRec := httptest.NewRecorder()
-	mux.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create qr returned %d: %s", createRec.Code, createRec.Body.String())
-	}
-	if !strings.Contains(createRec.Body.String(), `"sessionId":"sid-1"`) || !strings.Contains(createRec.Body.String(), `"imageUrl":"/qr/sid-1/image"`) {
-		t.Fatalf("create qr body = %s", createRec.Body.String())
-	}
-
-	pollReq := httptest.NewRequest(http.MethodGet, "/api/session/yyb-qr/sid-1/poll", nil)
-	pollReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	pollRec := httptest.NewRecorder()
-	mux.ServeHTTP(pollRec, pollReq)
-	if pollRec.Code != http.StatusOK || !strings.Contains(pollRec.Body.String(), `"status":"confirmed"`) {
-		t.Fatalf("poll returned %d: %s", pollRec.Code, pollRec.Body.String())
-	}
-
-	server.rememberQR("sid-1", user.ID)
-	confirmReq := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr/sid-1/confirm", nil)
-	confirmReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	confirmRec := httptest.NewRecorder()
-	mux.ServeHTTP(confirmRec, confirmReq)
-	if confirmRec.Code != http.StatusOK {
-		t.Fatalf("confirm returned %d: %s", confirmRec.Code, confirmRec.Body.String())
-	}
-	if !strings.Contains(confirmRec.Body.String(), `"cookieSynced":false`) {
-		t.Fatalf("confirm without devices should report cookieSynced=false: %s", confirmRec.Body.String())
-	}
-	binding, err := manager.YYBBinding(user.ID)
-	if err != nil {
-		t.Fatalf("YYBBinding: %v", err)
-	}
-	if binding == nil || binding.Ref != "ref-1" || binding.OpenID != "openid-1" || binding.Status != "alive" {
-		t.Fatalf("binding = %#v", binding)
-	}
-
-	body := strings.NewReader(`{"deviceId":"2601201412385560001"}`)
-	syncReq := httptest.NewRequest(http.MethodPost, "/api/session/mocele-cookie", body)
-	syncReq.Header.Set("Content-Type", "application/json")
-	syncReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	syncRec := httptest.NewRecorder()
-	mux.ServeHTTP(syncRec, syncReq)
-	if syncRec.Code != http.StatusOK {
-		t.Fatalf("sync returned %d: %s", syncRec.Code, syncRec.Body.String())
-	}
-	if yybClient.getCodeRef != "ref-1" || yybClient.getCodeAppID != "wx9cbffc15d3cb7739" {
-		t.Fatalf("getCode ref/appid = %q/%q", yybClient.getCodeRef, yybClient.getCodeAppID)
-	}
-	if moceleClient.deviceID != "2601201412385560001" || moceleClient.code != "wx-code-from-yyb" {
-		t.Fatalf("mocele call = device %q code %q", moceleClient.deviceID, moceleClient.code)
-	}
-}
-
-func TestYYBConfirmSyncsCookieWhenUserAlreadyHasDevice(t *testing.T) {
-	server, _, sessions, user := newTestServerWithDevice(t, "2601201412385560001")
-	session, err := sessions.Create(user.ID)
-	if err != nil {
-		t.Fatalf("Create session: %v", err)
-	}
-	yybClient := &fakeAPIYYBClient{code: "wx-code-existing"}
-	moceleClient := &fakeAPIMoceleClient{cookie: "deviceid=2601201412385560001; org=1; openindex=7; wxopenid=open; info=info"}
-	server.SetYYBIntegration(yybClient, moceleClient)
-	mux := http.NewServeMux()
-	server.Register(mux)
-
-	server.rememberQR("sid-1", user.ID)
-	confirmReq := httptest.NewRequest(http.MethodPost, "/api/session/yyb-qr/sid-1/confirm", nil)
-	confirmReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
-	confirmRec := httptest.NewRecorder()
-	mux.ServeHTTP(confirmRec, confirmReq)
-	if confirmRec.Code != http.StatusOK {
-		t.Fatalf("confirm returned %d: %s", confirmRec.Code, confirmRec.Body.String())
-	}
-	if !strings.Contains(confirmRec.Body.String(), `"cookieSynced":true`) {
-		t.Fatalf("confirm with device should report cookieSynced=true: %s", confirmRec.Body.String())
-	}
-	if moceleClient.deviceID != "2601201412385560001" || moceleClient.code != "wx-code-existing" {
-		t.Fatalf("mocele call = device %q code %q", moceleClient.deviceID, moceleClient.code)
-	}
-}
-
-type fakeAPIYYBClient struct {
-	pollStatus   string
-	confirmCalls int
-	code         string
-	getCodeRef   string
-	getCodeAppID string
-	healthErr    error
-}
-
-func (f *fakeAPIYYBClient) CreateQR(ctx context.Context) (yyb.QRSession, error) {
-	return yyb.QRSession{SessionID: "sid-1", ImageURL: "/qr/sid-1/image", ImageBase64: "data:image/jpeg;base64,abc", Status: "waiting"}, nil
-}
-
-func (f *fakeAPIYYBClient) PollQR(ctx context.Context, sessionID string) (yyb.QRPollResult, error) {
-	status := f.pollStatus
-	if status == "" {
-		status = "confirmed"
-	}
-	return yyb.QRPollResult{SessionID: sessionID, Status: status, Message: "ready"}, nil
-}
-
-func (f *fakeAPIYYBClient) ConfirmQR(ctx context.Context, sessionID string) (yyb.YYBAccount, error) {
-	f.confirmCalls++
-	return yyb.YYBAccount{Ref: "ref-1", OpenID: "openid-1", Nickname: "Alice", Avatar: "https://avatar.example/a.png", Status: "alive"}, nil
-}
-
-func (f *fakeAPIYYBClient) GetCode(ctx context.Context, ref string, appID string) (string, error) {
-	f.getCodeRef = ref
-	f.getCodeAppID = appID
-	return f.code, nil
-}
-
-func (f *fakeAPIYYBClient) RefreshAccount(ctx context.Context, ref string) error { return nil }
-
-func (f *fakeAPIYYBClient) Health(context.Context) error { return f.healthErr }
-
-type fakeAPIMoceleClient struct {
-	exchangeErr error
-	cookie      string
-	deviceID    string
-	code        string
-}
-
-func (f *fakeAPIMoceleClient) ExchangeCode(ctx context.Context, deviceID string, code string) (mocele.CookieResult, error) {
-	f.deviceID = deviceID
-	f.code = code
-	return mocele.CookieResult{Cookie: f.cookie, WXOpenID: "open", Info: "info"}, f.exchangeErr
 }

@@ -3,6 +3,7 @@ package security
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestRedactValueHidesSensitiveValueAndKeepsLength(t *testing.T) {
@@ -39,5 +40,21 @@ func TestRedactTextRedactsBeforeTruncating(t *testing.T) {
 	got := RedactText(input, cut)
 	if strings.Contains(got, secret[:8]) {
 		t.Fatalf("RedactText leaked a truncated secret fragment: %q", got)
+	}
+}
+
+func TestRedactTextCoversQueryInlineHeadersAppTokenAndUTF8Cut(t *testing.T) {
+	input := `request failed: https://example.com/cb?code=secret-code&appToken=AT_secret123; Authorization: Bearer inline-bearer-tok; charge_session=sess-secret-999`
+	got := RedactText(input, 0)
+	for _, leaked := range []string{"secret-code", "AT_secret123", "inline-bearer-tok", "sess-secret-999"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("RedactText leaked %q in %q", leaked, got)
+		}
+	}
+
+	utf8Input := "中文前缀敏感日志内容"
+	truncated := RedactText(utf8Input, 4)
+	if !utf8.ValidString(truncated) {
+		t.Fatalf("RedactText produced invalid UTF-8: %q", truncated)
 	}
 }

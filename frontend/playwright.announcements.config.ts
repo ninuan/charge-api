@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test"
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "announcements.integration.spec.ts",
+  forbidOnly: Boolean(process.env.CI),
   workers: 1,
   timeout: 60000,
   reporter: "list",
@@ -15,7 +16,9 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "pnpm run build:static && bash ../scripts/announcement-test-server.sh",
+      process.env.SKIP_STATIC_BUILD === "1"
+        ? "bash ../scripts/announcement-test-server.sh"
+        : "pnpm run build:static && bash ../scripts/announcement-test-server.sh",
     url: "http://127.0.0.1:18081/healthz",
     reuseExistingServer: false,
     timeout: 120000,

@@ -228,7 +228,7 @@ launchLoop:
 		go func(item reminderTargetState) {
 			defer wait.Done()
 			defer func() { <-semaphore }()
-			if err := m.executeReminderTarget(item, now); err != nil {
+			if err := m.executeReminderTarget(ctx, item, now); err != nil {
 				errCh <- err
 			}
 		}(item)
@@ -374,21 +374,20 @@ func (m *Manager) prepareReminderTarget(
 		}
 		return state, false, nil
 	}
+	if state.PausedReason == watchPauseCredentialExpired {
+		// CanUseWatchReminders already passed above (e.g., pool cookie re-enabled,
+		// FreeUserWatchAllowed turned on, or personal cookie refreshed); clear
+		// credential-expired pause before evaluating power-off or scheduling.
+		state.PausedReason = ""
+		state.ConsecutiveFailures = 0
+		state.NextAttemptAt = now
+	}
 
 	inPowerOff, restoreAt, err := scheduledPowerOffWindow(now, settings)
 	if err != nil {
 		return model.WatchRefreshState{}, false, err
 	}
 	if inPowerOff {
-		if state.PausedReason == watchPauseCredentialExpired {
-			changed := state.ConsecutiveFailures != 0 || quotaReset
-			state.ConsecutiveFailures = 0
-			if !changed {
-				return state, false, nil
-			}
-			state.UpdatedAt = now
-			return state, false, m.repository.SaveWatchRefreshState(state)
-		}
 		powerChanged := state.PausedReason != watchPausePowerOff || state.NextAttemptAt.Before(restoreAt)
 		if powerChanged {
 			state.NextAttemptAt = restoreAt.Add(m.reminderRestoreJitter(
@@ -409,13 +408,6 @@ func (m *Manager) prepareReminderTarget(
 		state.NextAttemptAt = now
 	}
 	if state.PausedReason == watchPausePowerOff && state.NextAttemptAt.After(now) {
-		if quotaReset {
-			state.UpdatedAt = now
-			return state, false, m.repository.SaveWatchRefreshState(state)
-		}
-		return state, false, nil
-	}
-	if state.PausedReason == watchPauseCredentialExpired {
 		if quotaReset {
 			state.UpdatedAt = now
 			return state, false, m.repository.SaveWatchRefreshState(state)
@@ -496,14 +488,24 @@ func (m *Manager) prepareReminderTarget(
 }
 
 func (m *Manager) executeReminderTarget(
+	ctx context.Context,
 	item reminderTargetState,
 	cycleNow time.Time,
 ) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	state := item.state
 	previousPauseReason := state.PausedReason
 	previousConsecutiveFailures := state.ConsecutiveFailures
 	previousLastSuccessAt := cloneTimePointer(state.LastSuccessAt)
-	result, refreshErr := m.refreshWatchedPile(item.target.userID, item.target.deviceID, func() error {
+	previousQuotaDate := state.QuotaDate
+	previousQuotaUsed := state.QuotaUsed
+	previousLastAttemptAt := cloneTimePointer(state.LastAttemptAt)
+	result, refreshErr := m.refreshWatchedPileContext(ctx, item.target.userID, item.target.deviceID, func() error {
 		now := m.reminderSchedulerNow().UTC()
 		latestSettings := normalizeRegistrationSettings(m.Settings())
 		inPowerOff, _, err := scheduledPowerOffWindow(now, latestSettings)
@@ -560,6 +562,27 @@ func (m *Manager) executeReminderTarget(
 	now := m.reminderSchedulerNow().UTC()
 
 	switch {
+	case refreshErr != nil && (ctx.Err() != nil || errors.Is(refreshErr, context.Canceled)):
+		// Graceful shutdown canceled the in-flight probe; roll back the
+		// pre-reserved quota and restore prior state without entering backoff
+		// or leaving a sticky in_flight pause reason.
+		if previousPauseReason == watchPauseInFlight {
+			state.PausedReason = ""
+		} else {
+			state.PausedReason = previousPauseReason
+		}
+		state.ConsecutiveFailures = previousConsecutiveFailures
+		state.LastSuccessAt = previousLastSuccessAt
+		state.QuotaDate = previousQuotaDate
+		state.QuotaUsed = previousQuotaUsed
+		state.LastAttemptAt = previousLastAttemptAt
+		state.NextAttemptAt = now
+		state.UpdatedAt = now
+		_ = m.repository.SaveWatchRefreshState(state)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return refreshErr
 	case errors.Is(refreshErr, ErrWatchQuotaExceeded):
 		latestSettings := normalizeRegistrationSettings(m.Settings())
 		next, err := nextReminderQuotaDay(now, latestSettings.ScheduledPowerOffTimezone)
@@ -596,14 +619,14 @@ func (m *Manager) executeReminderTarget(
 			return err
 		}
 		if len(latestRules) == 0 {
-			return m.repository.DeleteWatchRefreshState(item.target.userID, item.target.deviceID)
+			return m.clearWatchRefreshStatePreservingTodayQuota(item.target.userID, item.target.deviceID, now)
 		}
 		active, next, err := reminderRulesActiveAt(latestRules, now)
 		if err != nil {
 			return err
 		}
 		if active {
-			return m.repository.DeleteWatchRefreshState(item.target.userID, item.target.deviceID)
+			return m.clearWatchRefreshStatePreservingTodayQuota(item.target.userID, item.target.deviceID, now)
 		}
 		return m.pauseReminderState(&state, watchPauseInactiveRule, next, now)
 	case charger.IsAuthExpired(refreshErr):

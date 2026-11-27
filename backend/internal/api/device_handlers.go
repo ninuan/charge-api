@@ -7,7 +7,6 @@ import (
 
 	"charge-dashboard/internal/model"
 	appruntime "charge-dashboard/internal/runtime"
-	"charge-dashboard/internal/yyb"
 )
 
 func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
@@ -56,15 +55,7 @@ func (s *Server) handlePiles(w http.ResponseWriter, r *http.Request) {
 			writeCodedError(w, http.StatusBadRequest, "PILE_PORT_COUNT_INVALID", "充电口数量必须在 1-64 之间")
 			return
 		}
-		var resp model.PileCreateResponse
-		var err error
-		if s.yybClient != nil && s.moceleClient != nil {
-			pile, yybErr := s.manager.AddPileWithYYB(user.ID, req, s.yybClient, s.moceleClient)
-			resp = model.PileCreateResponse{Pile: pile}
-			err = yybErr
-		} else {
-			resp, err = s.manager.AddPileWithCatalog(user.ID, req)
-		}
+		resp, err := s.manager.AddPileWithCatalog(user.ID, req)
 		if err != nil {
 			s.recordDashboardDiagnostic(user, "add_pile", "add_pile_failed", req.ID, appruntime.DiagnosticStatusCode(err))
 			writeAddPileError(w, err)
@@ -87,21 +78,6 @@ func writeAddPileError(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, appruntime.ErrPublicPoolUnavailable) {
 		writeCodedError(w, http.StatusServiceUnavailable, "PUBLIC_POOL_UNAVAILABLE", "公共查询通道暂时不可用，请上传个人 Cookie 或联系管理员。")
-		return
-	}
-	if errors.Is(err, yyb.ErrAccountRecoveryFailed) {
-		writeCodedError(w, http.StatusBadGateway, "YYB_RECOVERY_FAILED", "已保留平台绑定，登录状态暂时无法恢复，请稍后重试。")
-		return
-	}
-	if errors.Is(err, yyb.ErrAccountExpired) || errors.Is(err, yyb.ErrAccountUnknown) {
-		writeCodedError(w, http.StatusConflict, "YYB_RESCAN_REQUIRED", "平台登录需要重新确认，请重新扫码绑定。")
-		return
-	}
-	if errors.Is(err, appruntime.ErrYYBBindingRequired) {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"code":  "YYB_BINDING_REQUIRED",
-			"error": "请先完成扫码登录绑定，再添加充电桩",
-		})
 		return
 	}
 	writePublicOperationError(w, http.StatusBadRequest, "add pile", "添加充电桩失败，请检查桩号后重试。", err)
@@ -211,17 +187,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var snapshot model.DashboardSnapshot
-	var err error
-	if s.consumeDevForceAuthExpired() {
-		if s.yybClient == nil || s.moceleClient == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本地鉴权失效测试需要先配置 YYB 扫码服务"})
-			return
-		}
-		snapshot, err = s.manager.RecoverRefreshWithYYB(user.ID, s.yybClient, s.moceleClient)
-	} else {
-		snapshot, err = s.manager.Refresh(user.ID, false)
-	}
+	snapshot, err := s.manager.Refresh(user.ID, false)
 	if err != nil {
 		s.recordDashboardDiagnostic(user, "refresh", "refresh_failed", "", appruntime.DiagnosticStatusCode(err))
 		writeRefreshError(w, err)

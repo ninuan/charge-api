@@ -603,6 +603,47 @@ func (m *Manager) CreateUser(req model.UserCreateRequest) (model.CurrentUser, er
 	return publicUser(user), nil
 }
 
+// ValidateRegistrationPreconditions performs a cheap read-only check of
+// registration policy, invite validity, and username uniqueness before callers
+// consume Argon2id concurrency slots.
+func (m *Manager) ValidateRegistrationPreconditions(username string, inviteCode string) error {
+	username = strings.TrimSpace(username)
+	if len(username) < 3 || len(username) > 64 {
+		return fmt.Errorf("%w: 用户名长度需要在 3 到 64 个字符之间", ErrInvalidRegisterInput)
+	}
+	inviteCode = strings.TrimSpace(inviteCode)
+	now := time.Now()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.settings.OpenRegistration && !m.settings.InviteRequired {
+		return ErrRegistrationClosed
+	}
+	if inviteCode != "" {
+		if !m.settings.InviteRequired {
+			return ErrInviteRegistrationClosed
+		}
+		matched := false
+		for _, invite := range m.invites {
+			if invite.Enabled && invite.Code == inviteCode &&
+				(invite.ExpiresAt == nil || invite.ExpiresAt.After(now)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return ErrInviteInvalid
+		}
+	} else if !m.settings.OpenRegistration {
+		return ErrInviteRequired
+	}
+	for _, existing := range m.users {
+		if existing.Username == username {
+			return ErrUsernameExists
+		}
+	}
+	return nil
+}
+
 func (m *Manager) RegisterUser(username string, password string, inviteCode string) (model.CurrentUser, error) {
 	username = strings.TrimSpace(username)
 	if len(username) < 3 || len(username) > 64 {
@@ -610,6 +651,9 @@ func (m *Manager) RegisterUser(username string, password string, inviteCode stri
 	}
 	if len(password) < 8 || len(password) > 128 {
 		return model.CurrentUser{}, fmt.Errorf("%w: 密码长度需要在 8 到 128 个字符之间", ErrInvalidRegisterInput)
+	}
+	if err := m.ValidateRegistrationPreconditions(username, inviteCode); err != nil {
+		return model.CurrentUser{}, err
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {

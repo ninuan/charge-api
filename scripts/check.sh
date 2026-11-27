@@ -4,7 +4,9 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GO_CACHE="${GOCACHE:-${TMPDIR:-/tmp}/charge-go-cache}"
-BUILD_OUTPUT="${TMPDIR:-/tmp}/charge-check-server"
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/charge-check-build.XXXXXX")"
+BUILD_OUTPUT="$BUILD_DIR/charge-server"
+trap 'rm -rf "$BUILD_DIR"' EXIT
 
 if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
   echo "前端依赖尚未安装，请先运行 make setup。"
@@ -38,9 +40,10 @@ echo "4/8 前端 lint"
   pnpm lint
 )
 
-echo "5/8 Go 测试"
+echo "5/8 Go 静态检查与测试"
 (
   cd "$ROOT_DIR/backend"
+  GOCACHE="$GO_CACHE" go vet ./...
   GOCACHE="$GO_CACHE" go test ./...
 )
 

@@ -88,7 +88,7 @@ func (s *Store) LoadWxPusherBinding(userID string) (model.WxPusherBinding, bool,
 	var enabled int
 	var boundAt, updatedAt int64
 	var lastTestAt, lastAcceptedAt, lastProviderSuccessAt, lastErrorAt sql.NullInt64
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT user_id, uid_nonce, uid_ciphertext, enabled, event_types,
 		       bound_at, updated_at, last_test_at, last_accepted_at,
 		       last_provider_success_at, last_error_code, last_error_at
@@ -279,7 +279,7 @@ func (s *Store) LoadWxPusherBindSession(userID, sessionID string) (model.WxPushe
 	var nonce, ciphertext []byte
 	var expiresAt, nextPollAt, createdAt int64
 	var completedAt sql.NullInt64
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT id, user_id, provider_code_nonce, provider_code_ciphertext,
 		       qr_url, expires_at, next_poll_at, created_at, completed_at
 		FROM wxpusher_bind_sessions WHERE user_id = ? AND id = ?
@@ -318,7 +318,7 @@ func (s *Store) LoadActiveWxPusherBindSession(userID string) (model.WxPusherBind
 		return model.WxPusherBindSession{}, false, fmt.Errorf("wxpusher bind session requires a user")
 	}
 	var sessionID string
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT id FROM wxpusher_bind_sessions
 		WHERE user_id = ? AND completed_at IS NULL
 		ORDER BY created_at DESC LIMIT 1
@@ -334,7 +334,7 @@ func (s *Store) LoadActiveWxPusherBindSession(userID string) (model.WxPusherBind
 
 func (s *Store) CountWxPusherBindSessionsSince(userID string, since time.Time) (int, error) {
 	var count int
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT COUNT(*) FROM wxpusher_bind_sessions WHERE user_id = ? AND created_at >= ?
 	`, strings.TrimSpace(userID), since.UTC().Unix()).Scan(&count)
 	if err != nil {
@@ -480,6 +480,63 @@ func (s *Store) DeleteWxPusherChannel(userID string, now time.Time) (bool, error
 	return rows > 0, nil
 }
 
+// SaveNotificationDeliveryIfStatus transitions a delivery row only when its
+// current status matches expectedStatus, preventing background status checks
+// from overwriting terminal states (e.g., provider_succeeded from manual recheck).
+func (s *Store) SaveNotificationDeliveryIfStatus(
+	delivery model.NotificationDelivery,
+	expectedStatus model.NotificationDeliveryStatus,
+) (bool, error) {
+	delivery = normalizeNotificationDelivery(delivery)
+	if err := validateNotificationDelivery(delivery); err != nil {
+		return false, err
+	}
+	result, err := s.db.Exec(`
+		UPDATE notification_deliveries
+		SET notification_id = ?,
+			channel = ?,
+			status = ?,
+			is_test = ?,
+			attempt_count = ?,
+			next_attempt_at = ?,
+			claimed_at = ?,
+			provider_record_id = ?,
+			provider_message_content_id = ?,
+			last_error_code = ?,
+			last_error_message = ?,
+			accepted_at = ?,
+			provider_succeeded_at = ?,
+			updated_at = ?
+		WHERE id = ? AND user_id = ? AND status = ?
+	`,
+		stringPointerOrNil(delivery.NotificationID),
+		delivery.Channel,
+		delivery.Status,
+		delivery.IsTest,
+		delivery.AttemptCount,
+		unixTimeOrNil(delivery.NextAttemptAt),
+		unixTimeOrNil(delivery.ClaimedAt),
+		delivery.ProviderRecordID,
+		delivery.ProviderMessageContentID,
+		delivery.LastErrorCode,
+		delivery.LastErrorMessage,
+		unixTimeOrNil(delivery.AcceptedAt),
+		unixTimeOrNil(delivery.ProviderSucceededAt),
+		delivery.UpdatedAt.UTC().Unix(),
+		delivery.ID,
+		delivery.UserID,
+		expectedStatus,
+	)
+	if err != nil {
+		return false, fmt.Errorf("update notification delivery %s: %w", delivery.ID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("check notification delivery update %s: %w", delivery.ID, err)
+	}
+	return rows > 0, nil
+}
+
 func (s *Store) SaveNotificationDelivery(delivery model.NotificationDelivery) error {
 	delivery = normalizeNotificationDelivery(delivery)
 	if err := validateNotificationDelivery(delivery); err != nil {
@@ -546,7 +603,7 @@ func (s *Store) LoadNotificationDelivery(userID, deliveryID string) (model.Notif
 	if userID == "" || deliveryID == "" {
 		return model.NotificationDelivery{}, false, fmt.Errorf("notification delivery requires user and id")
 	}
-	delivery, err := scanNotificationDelivery(s.db.QueryRow(notificationDeliverySelect+` WHERE user_id = ? AND id = ?`, userID, deliveryID))
+	delivery, err := scanNotificationDelivery(s.reader().QueryRow(notificationDeliverySelect+` WHERE user_id = ? AND id = ?`, userID, deliveryID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.NotificationDelivery{}, false, nil
 	}
@@ -567,7 +624,7 @@ func (s *Store) ListNotificationDeliveries(userID string, limit int) ([]model.No
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.Query(notificationDeliverySelect+`
+	rows, err := s.reader().Query(notificationDeliverySelect+`
 		WHERE user_id = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT ?
@@ -599,7 +656,7 @@ func (s *Store) LoadLatestNotificationDelivery(userID string, isTest bool) (mode
 	if isTest {
 		testValue = 1
 	}
-	delivery, err := scanNotificationDelivery(s.db.QueryRow(notificationDeliverySelect+`
+	delivery, err := scanNotificationDelivery(s.reader().QueryRow(notificationDeliverySelect+`
 		WHERE user_id = ? AND is_test = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
@@ -619,7 +676,7 @@ func (s *Store) CountTestNotificationDeliveriesSince(userID string, since time.T
 		return 0, fmt.Errorf("test notification delivery count requires user and time")
 	}
 	var count int
-	if err := s.db.QueryRow(`
+	if err := s.reader().QueryRow(`
 		SELECT COUNT(*) FROM notification_deliveries
 		WHERE user_id=? AND channel=? AND is_test=1 AND created_at>=?
 	`, userID, wxPusherChannel, since.UTC().Unix()).Scan(&count); err != nil {
@@ -631,7 +688,7 @@ func (s *Store) CountTestNotificationDeliveriesSince(userID string, since time.T
 func (s *Store) WxPusherOperationsStatus(since time.Time) (model.WxPusherOperationsStatus, error) {
 	var result model.WxPusherOperationsStatus
 	var oldestPending, lastAccepted, lastProviderSuccess, lastFailure sql.NullInt64
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT
 			(SELECT COUNT(*) FROM wxpusher_bindings WHERE enabled=1),
 			COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END), 0),
@@ -673,7 +730,7 @@ func (s *Store) WxPusherOperationsStatus(since time.Time) (model.WxPusherOperati
 	result.LastProviderSuccessAt = nullableUnixTime(lastProviderSuccess)
 	result.LastFailureAt = nullableUnixTime(lastFailure)
 
-	errorRows, err := s.db.Query(`
+	errorRows, err := s.reader().Query(`
 		SELECT user_id, last_error_code
 		FROM notification_deliveries
 		WHERE channel=? AND updated_at>=? AND last_error_code<>'' AND status NOT IN ('suppressed','cancelled')
@@ -708,7 +765,7 @@ func (s *Store) WxPusherOperationsStatus(since time.Time) (model.WxPusherOperati
 	}
 	result.AffectedBindingUsers = len(affectedBindings)
 
-	outcomeRows, err := s.db.Query(`
+	outcomeRows, err := s.reader().Query(`
 		SELECT status, last_error_code
 		FROM notification_deliveries
 		WHERE channel=? AND (attempt_count>0 OR accepted_at IS NOT NULL)

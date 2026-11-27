@@ -117,12 +117,18 @@ func ParsePayload(source string, body []byte) (model.Pile, error) {
 
 	usedMap := make(map[int]bool, len(raw.Used))
 	for _, u := range raw.Used {
+		if u < 1 || u > openNum {
+			continue
+		}
 		usedMap[u] = true
 	}
 	usedStatusMap := make(map[int]rawUsedStatus, len(raw.Useds))
 	for _, item := range raw.Useds {
-		if item.Index <= 0 {
+		if item.Index < 1 || item.Index > openNum {
 			continue
+		}
+		if item.UsedSeconds < 0 {
+			item.UsedSeconds = 0
 		}
 		usedMap[item.Index] = true
 		usedStatusMap[item.Index] = item

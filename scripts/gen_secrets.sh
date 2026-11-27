@@ -7,16 +7,10 @@ command -v openssl >/dev/null 2>&1 || {
 }
 
 cat <<'EOF'
-# Charge / yyb_go deployment secrets
-# Store these in service environment files such as /etc/charge-api.env and /etc/yyb-go.env.
+# Charge Console deployment secrets
+# Store these in the service environment file (for example /etc/charge-api.env).
 # Do not commit generated values to Git.
 EOF
 
 printf 'CHARGE_COOKIE_KEY='
 openssl rand -base64 32
-
-printf 'YYB_SECRET_KEY='
-openssl rand -base64 32
-
-printf 'YYB_API_SECRET='
-openssl rand -base64 48

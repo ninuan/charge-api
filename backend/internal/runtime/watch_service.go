@@ -331,6 +331,25 @@ func (m *Manager) createWatchRule(userID string, request model.WatchRuleCreateRe
 	if err := m.repository.SaveWatchRule(rule); err != nil {
 		return model.WatchRule{}, fmt.Errorf("save watch rule: %w", err)
 	}
+	if !wakeScheduler {
+		// Reserve a short initial-check window under watchMu so the periodic 30s
+		// scheduler cannot race between SaveWatchRule and CreateWatchRuleWithInitialCheck.
+		existingState, found, loadErr := m.repository.LoadWatchRefreshState(userID, rule.DeviceID)
+		if loadErr == nil {
+			reservedUntil := now.Add(2 * time.Minute)
+			if !found {
+				existingState = model.WatchRefreshState{
+					UserID:   userID,
+					DeviceID: rule.DeviceID,
+				}
+			}
+			if existingState.NextAttemptAt.Before(reservedUntil) {
+				existingState.NextAttemptAt = reservedUntil
+				existingState.UpdatedAt = now
+				_ = m.repository.SaveWatchRefreshState(existingState)
+			}
+		}
+	}
 	if wakeScheduler {
 		m.wakeReminderScheduler()
 	}

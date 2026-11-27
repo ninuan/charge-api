@@ -84,6 +84,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthFailure(w, ip, "", http.StatusBadRequest, "REGISTER_CAPTCHA_INVALID", "verify register captcha", "图片验证码错误或已过期，请重新获取。", err)
 		return
 	}
+	if err := s.manager.ValidateRegistrationPreconditions(req.Username, req.InviteCode); err != nil {
+		if errors.Is(err, appruntime.ErrInviteInvalid) ||
+			errors.Is(err, appruntime.ErrRegistrationClosed) ||
+			errors.Is(err, appruntime.ErrInviteRegistrationClosed) {
+			s.authGuard.RecordFailure(ip, req.Username)
+		}
+		writeRegisterError(w, err)
+		return
+	}
 
 	releaseAuth, ok := s.acquireAuthSlot(w)
 	if !ok {
@@ -93,6 +102,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.manager.RegisterUser(req.Username, req.Password, req.InviteCode)
 	if err != nil {
+		if errors.Is(err, appruntime.ErrInviteInvalid) ||
+			errors.Is(err, appruntime.ErrRegistrationClosed) ||
+			errors.Is(err, appruntime.ErrInviteRegistrationClosed) {
+			s.authGuard.RecordFailure(ip, req.Username)
+		}
 		writeRegisterError(w, err)
 		return
 	}
@@ -179,15 +193,22 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.authGuard.RecordSuccess(ip, user.Username)
-	cookie, _ := r.Cookie(sessionCookieName)
-	currentToken := ""
-	if cookie != nil {
-		currentToken = cookie.Value
-	}
-	if err := s.sessions.DeleteOthers(user.ID, currentToken); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码已修改，但撤销其他会话失败"})
+	newSession, err := s.sessions.Create(user.ID, sessionClientInfo(r))
+	if err != nil {
+		// Fail safe: revoke existing sessions so a password change never leaves
+		// potentially compromised sessions active if rotation cannot issue a new one.
+		_ = s.sessions.DeleteUser(user.ID)
+		clearSessionCookie(w, r)
+		writePublicOperationError(w, http.StatusInternalServerError, "rotate session after password change", "密码已修改，但刷新当前会话失败，请重新登录", err)
 		return
 	}
+	if err := s.sessions.DeleteOthers(user.ID, newSession.Token); err != nil {
+		_ = s.sessions.DeleteUser(user.ID)
+		clearSessionCookie(w, r)
+		writePublicOperationError(w, http.StatusInternalServerError, "revoke other sessions after password change", "密码已修改，但撤销其他会话失败，请重新登录", err)
+		return
+	}
+	setSessionCookie(w, r, newSession)
 	writeJSON(w, http.StatusOK, changedUser)
 }
 

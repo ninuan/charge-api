@@ -2,6 +2,7 @@ package charger
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -60,12 +61,38 @@ func ExtractCookie(raw string) (string, error) {
 	if extracted == "" || !strings.Contains(extracted, "=") {
 		return "", fmt.Errorf("Cookie 格式无效，需要包含有效的键值对（如 wxopenid=...; info=...）")
 	}
+	seenSensitive := make(map[string]struct{}, 2)
+	for _, part := range strings.Split(extracted, ";") {
+		part = strings.TrimSpace(part)
+		eq := strings.IndexByte(part, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(part[:eq]))
+		if key == "wxopenid" || key == "info" {
+			if _, dup := seenSensitive[key]; dup {
+				return "", fmt.Errorf("Cookie 包含重复的 %s 字段，请仅粘贴单份有效 Cookie", key)
+			}
+			seenSensitive[key] = struct{}{}
+		}
+	}
 	return extracted, nil
 }
 
+func normalizeCookieValue(raw string) string {
+	val := strings.TrimSpace(raw)
+	if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+		val = strings.TrimSpace(val[1 : len(val)-1])
+	}
+	if unescaped, err := url.QueryUnescape(val); err == nil {
+		val = strings.TrimSpace(unescaped)
+	}
+	return val
+}
+
 // CookieIdentity returns a canonical upstream identity string for deduplication.
-// When wxopenid is present it is used directly so reordering fields, adding noise
-// keys, or refreshing info for the same WeChat account still maps to one identity.
+// Uses first-wins semantics (matching RFC 6265 / upstream behavior), strips quotes
+// and URL-encoding differences, and ignores mutable deviceid.
 func CookieIdentity(cookie string) string {
 	trimmed := strings.TrimSpace(cookie)
 	if trimmed == "" {
@@ -82,8 +109,11 @@ func CookieIdentity(cookie string) string {
 			continue
 		}
 		key := strings.ToLower(strings.TrimSpace(part[:eq]))
-		val := strings.TrimSpace(part[eq+1:])
+		val := normalizeCookieValue(part[eq+1:])
 		if key == "" || val == "" {
+			continue
+		}
+		if _, exists := pairs[key]; exists {
 			continue
 		}
 		pairs[key] = val
@@ -91,6 +121,7 @@ func CookieIdentity(cookie string) string {
 	if wxopenid := pairs["wxopenid"]; wxopenid != "" {
 		return "wxopenid:" + wxopenid
 	}
+	delete(pairs, "deviceid")
 	if len(pairs) == 0 {
 		return "raw:" + trimmed
 	}

@@ -18,36 +18,14 @@ import (
 
 	"charge-dashboard/internal/api"
 	"charge-dashboard/internal/auth"
-	"charge-dashboard/internal/mocele"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/persistence"
 	appruntime "charge-dashboard/internal/runtime"
 	"charge-dashboard/internal/version"
 	"charge-dashboard/internal/wxpusher"
-	"charge-dashboard/internal/yyb"
 )
 
 type envLookup func(string) string
-
-func yybClientFromEnv(lookup envLookup) (*yyb.Client, error) {
-	baseURL := strings.TrimSpace(lookup("YYB_BASE_URL"))
-	if baseURL == "" {
-		return nil, nil
-	}
-	secret := strings.TrimSpace(lookup("YYB_API_SECRET"))
-	if secret == "" {
-		return nil, fmt.Errorf("YYB_API_SECRET is required when YYB_BASE_URL is set")
-	}
-	return yyb.NewClient(yyb.Config{BaseURL: baseURL, APISecret: []byte(secret)})
-}
-
-func moceleClientFromEnv(lookup envLookup) *mocele.Client {
-	return mocele.NewClient(mocele.Config{
-		BaseURL:   strings.TrimSpace(lookup("MOCELE_BASE_URL")),
-		Org:       strings.TrimSpace(lookup("MOCELE_ORG")),
-		OpenIndex: strings.TrimSpace(lookup("MOCELE_OPENINDEX")),
-	})
-}
 
 func wxPusherClientFromEnv(lookup envLookup) (*wxpusher.Client, error) {
 	token := strings.TrimSpace(lookup("WXPUSHER_APP_TOKEN"))
@@ -81,10 +59,6 @@ func publicBaseURLFromEnv(lookup envLookup, required bool) (string, error) {
 		}
 	}
 	return raw, nil
-}
-
-func devForceAuthExpiredEnabled(lookup envLookup) bool {
-	return lookup("CHARGE_LOCAL_DEV") == "1" && strings.EqualFold(strings.TrimSpace(lookup("CHARGE_DEV_FORCE_AUTH_EXPIRED")), "true")
 }
 
 func main() {
@@ -177,9 +151,10 @@ func main() {
 		log.Print("legacy JSON state imported")
 	}
 	if initialPassword := manager.InitialAdminPassword(); initialPassword != "" {
-		// 日志会进 journald 并常被采集外送，初始密码只落一次性的 0600 文件。
+		// 日志会进 journald 并常被采集外送，初始密码只以 O_CREATE|O_EXCL 原子落一次性的 0600 文件，
+		// 杜绝跟随预置符号链接或继承宽松权限。
 		passwordPath := filepath.Join(filepath.Dir(absDatabasePath), "initial-admin-password.txt")
-		if err := os.WriteFile(passwordPath, []byte(initialPassword+"\n"), 0o600); err != nil {
+		if err := writeExclusiveSecretFile(passwordPath, []byte(initialPassword+"\n")); err != nil {
 			log.Fatalf("write initial admin password: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		log.Print("generated initial admin password; stored in initial-admin-password.txt in the database directory")
@@ -194,16 +169,12 @@ func main() {
 	if wxPusherClient != nil {
 		server.SetWxPusherIntegration(wxPusherClient)
 	}
-	if devForceAuthExpiredEnabled(os.Getenv) {
-		server.EnableDevForceAuthExpired()
-		log.Printf("local development: next refresh will simulate an expired login credential")
-	}
 	mux := http.NewServeMux()
 	server.Register(mux)
 	mux.Handle("/", server.WithRootRedirect(api.StaticHandler("../frontend/dist")))
 	allowedOrigins := splitCommaSeparated(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	rateLimiter := api.NewIPRateLimiter(300, time.Minute)
-	content := api.WithCacheHeaders(api.WithCompression(mux))
+	content := api.WithWriteDeadline(api.WithCacheHeaders(api.WithCompression(mux)), 30*time.Second)
 	handler := api.WithSecurityHeaders(api.WithCORS(rateLimiter.Middleware(api.WithRequestBodyLimit(content)), allowedOrigins))
 	httpServer := &http.Server{
 		Addr:              *listenAddr,
@@ -245,22 +216,43 @@ func main() {
 		server.ShutdownStreams()
 		stopScheduler()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("graceful shutdown failed: %v", security.SanitizeLogText(err.Error(), 1024))
+			_ = httpServer.Close()
 		}
+		cancel()
 		if err := <-errCh; err != nil && err != http.ErrServerClosed {
 			log.Printf("server stopped: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
-		if err := manager.WaitReminderScheduler(shutdownCtx); err != nil {
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := manager.WaitReminderScheduler(waitCtx); err != nil {
 			log.Printf("reminder scheduler shutdown failed: %v", security.SanitizeLogText(err.Error(), 1024))
 		}
 		if dispatcherStarted {
-			if err := manager.WaitNotificationDispatcher(shutdownCtx); err != nil {
+			if err := manager.WaitNotificationDispatcher(waitCtx); err != nil {
 				log.Printf("notification dispatcher shutdown failed: %v", security.SanitizeLogText(err.Error(), 1024))
 			}
 		}
+		waitCancel()
 	}
+}
+
+func writeExclusiveSecretFile(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	return file.Close()
 }
 
 func splitCommaSeparated(raw string) []string {

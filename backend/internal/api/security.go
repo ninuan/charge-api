@@ -102,11 +102,34 @@ func WithCORS(next http.Handler, allowedOrigins []string) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(allowed) > 0 {
+			w.Header().Add("Vary", "Origin")
+		}
 		rawOrigin := strings.TrimSpace(r.Header.Get("Origin"))
 		origin := normalizeOrigin(rawOrigin)
 		if rawOrigin != "" && origin == "" {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin is not allowed"})
 			return
+		}
+		_, explicitlyAllowed := allowed[origin]
+		if isUnsafeMethod(r.Method) {
+			fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+			if fetchSite != "" && fetchSite != "same-origin" && fetchSite != "none" {
+				if origin == "" || !explicitlyAllowed {
+					writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-site request is not allowed"})
+					return
+				}
+			}
+			if origin == "" {
+				if rawReferer := strings.TrimSpace(r.Header.Get("Referer")); rawReferer != "" {
+					refOrigin := normalizeRefererOrigin(rawReferer)
+					_, refAllowed := allowed[refOrigin]
+					if refOrigin == "" || (!sameOrigin(r, refOrigin) && !refAllowed) {
+						writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin is not allowed"})
+						return
+					}
+				}
+			}
 		}
 		if origin == "" {
 			if r.Method == http.MethodOptions {
@@ -117,7 +140,6 @@ func WithCORS(next http.Handler, allowedOrigins []string) http.Handler {
 			return
 		}
 
-		_, explicitlyAllowed := allowed[origin]
 		if !sameOrigin(r, origin) && !explicitlyAllowed {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin is not allowed"})
 			return
@@ -125,7 +147,6 @@ func WithCORS(next http.Handler, allowedOrigins []string) http.Handler {
 		if explicitlyAllowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Add("Vary", "Origin")
 		}
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -136,6 +157,23 @@ func WithCORS(next http.Handler, allowedOrigins []string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isUnsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRefererOrigin(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
 }
 
 func normalizeOrigin(raw string) string {

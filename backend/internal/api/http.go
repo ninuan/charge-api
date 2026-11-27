@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,7 +21,6 @@ import (
 	"charge-dashboard/internal/security"
 	"charge-dashboard/internal/version"
 	"charge-dashboard/internal/wxpusher"
-	"charge-dashboard/internal/yyb"
 )
 
 const (
@@ -35,27 +34,19 @@ const (
 
 var deviceIDPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
 var pileNumberPattern = regexp.MustCompile(`^[0-9]{6,64}$`)
-var qrSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 type Server struct {
-	manager             *appruntime.Manager
-	sessions            *auth.SessionManager
-	authGuard           *auth.AuthGuard
-	captcha             captchaService
-	yybClient           yybSessionClient
-	moceleClient        appruntime.MoceleCookieClient
-	wxPusherClient      appruntime.WxPusherBindingClient
-	devMu               sync.Mutex
-	devForceAuthExpired bool
-	healthMu            sync.RWMutex
-	healthDegradations  map[string]string
-	streams             streamLimits
-	streamStop          chan struct{}
-	streamStopOnce      sync.Once
-	authSem             chan struct{}
-	qrMu                sync.Mutex
-	bindingBusy         map[string]bool
-	qrSessions          map[string]*ownedQRSession
+	manager            *appruntime.Manager
+	sessions           *auth.SessionManager
+	authGuard          *auth.AuthGuard
+	captcha            captchaService
+	wxPusherClient     appruntime.WxPusherBindingClient
+	healthMu           sync.RWMutex
+	healthDegradations map[string]string
+	streams            streamLimits
+	streamStop         chan struct{}
+	streamStopOnce     sync.Once
+	authSem            chan struct{}
 }
 
 type captchaService interface {
@@ -63,38 +54,8 @@ type captchaService interface {
 	Verify(id string, answer string) error
 }
 
-type yybSessionClient interface {
-	appruntime.YYBCodeClient
-	CreateQR(ctx context.Context) (yyb.QRSession, error)
-	PollQR(ctx context.Context, sessionID string) (yyb.QRPollResult, error)
-	ConfirmQR(ctx context.Context, sessionID string) (yyb.YYBAccount, error)
-	Health(ctx context.Context) error
-}
-
-func (s *Server) SetYYBIntegration(yybClient yybSessionClient, moceleClient appruntime.MoceleCookieClient) {
-	s.yybClient = yybClient
-	s.moceleClient = moceleClient
-}
-
 func (s *Server) SetWxPusherIntegration(client *wxpusher.Client) {
 	s.wxPusherClient = client
-}
-
-// EnableDevForceAuthExpired enables a one-time local development refresh simulation.
-func (s *Server) EnableDevForceAuthExpired() {
-	s.devMu.Lock()
-	s.devForceAuthExpired = true
-	s.devMu.Unlock()
-}
-
-func (s *Server) consumeDevForceAuthExpired() bool {
-	s.devMu.Lock()
-	defer s.devMu.Unlock()
-	if !s.devForceAuthExpired {
-		return false
-	}
-	s.devForceAuthExpired = false
-	return true
 }
 
 func NewServer(
@@ -189,10 +150,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/session/cookie", s.handleCookieUpdate)
 	mux.HandleFunc("/api/session/cookie/test", s.handleCookieTest)
 	mux.HandleFunc("/api/session/cookie/join-pool", s.handleCookieJoinPool)
-	mux.HandleFunc("/api/session/yyb-binding", s.handleYYBBinding)
-	mux.HandleFunc("/api/session/yyb-qr", s.handleYYBQR)
-	mux.HandleFunc("/api/session/yyb-qr/", s.handleYYBQR)
-	mux.HandleFunc("/api/session/mocele-cookie", s.handleMoceleCookie)
 	mux.HandleFunc(streamPath, s.handleStream)
 	mux.HandleFunc("/healthz", s.handleHealth)
 }
@@ -246,7 +203,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	defer s.streams.release(user.ID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "private, no-cache, no-store")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
@@ -507,8 +464,22 @@ func requestIsSecure(r *http.Request) bool {
 		host = r.RemoteAddr
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback() &&
-		strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+	if ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	return strings.EqualFold(rightmostHeaderValue(r.Header.Values("X-Forwarded-Proto")), "https")
+}
+
+func rightmostHeaderValue(headers []string) string {
+	for h := len(headers) - 1; h >= 0; h-- {
+		parts := strings.Split(headers[h], ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			if value := strings.TrimSpace(parts[i]); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func methodNotAllowed(w http.ResponseWriter) {
@@ -579,17 +550,40 @@ func clientIP(r *http.Request) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	parsed := net.ParseIP(host)
+	parsed := net.ParseIP(strings.TrimSpace(host))
 	if parsed != nil && parsed.IsLoopback() {
-		// X-Real-IP 由反向代理用 proxy_set_header 覆写，客户端无法影响；仅采纳合法 IP。
-		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(realIP) != nil {
-			return realIP
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("TRUSTED_PROXY_HEADER"))) {
+		case "none":
+			return parsed.String()
+		case "cf-connecting-ip":
+			if ip := parseCanonicalIP(r.Header.Get("CF-Connecting-IP")); ip != "" {
+				return ip
+			}
+			return parsed.String()
+		case "x-forwarded-for":
+			if forwarded := rightmostForwardedFor(r.Header.Values("X-Forwarded-For")); forwarded != "" {
+				return forwarded
+			}
+			return parsed.String()
+		case "x-real-ip":
+			if realIP := parseCanonicalIP(r.Header.Get("X-Real-IP")); realIP != "" {
+				return realIP
+			}
+			return parsed.String()
+		default:
+			// Default loopback proxy precedence (Nginx proxy_set_header X-Real-IP / X-Forwarded-For).
+			// For Caddy/Cloudflare deployments that do not overwrite X-Real-IP, configure
+			// TRUSTED_PROXY_HEADER=x-forwarded-for or cf-connecting-ip.
+			if realIP := parseCanonicalIP(r.Header.Get("X-Real-IP")); realIP != "" {
+				return realIP
+			}
+			if forwarded := rightmostForwardedFor(r.Header.Values("X-Forwarded-For")); forwarded != "" {
+				return forwarded
+			}
 		}
-		// nginx 的 $proxy_add_x_forwarded_for 把真实对端追加在客户端提交的
-		// X-Forwarded-For 之后，因此只有最右一段可信；需遍历所有同名头避免多行头绕过。
-		if forwarded := rightmostForwardedFor(r.Header.Values("X-Forwarded-For")); forwarded != "" {
-			return forwarded
-		}
+	}
+	if parsed != nil {
+		return parsed.String()
 	}
 	if host == "" {
 		return "unknown"
@@ -597,14 +591,21 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func rightmostForwardedFor(headers []string) string {
-	for h := len(headers) - 1; h >= 0; h-- {
-		parts := strings.Split(headers[h], ",")
-		for i := len(parts) - 1; i >= 0; i-- {
-			if value := strings.TrimSpace(parts[i]); net.ParseIP(value) != nil {
-				return value
-			}
-		}
+func parseCanonicalIP(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return ""
 	}
-	return ""
+	return ip.String()
+}
+
+// rightmostForwardedFor inspects ONLY the rightmost non-empty hop in
+// X-Forwarded-For and fails closed if it is not a valid IP, never walking
+// leftward into attacker-controlled entries.
+func rightmostForwardedFor(headers []string) string {
+	rightmost := rightmostHeaderValue(headers)
+	if rightmost == "" {
+		return ""
+	}
+	return parseCanonicalIP(rightmost)
 }

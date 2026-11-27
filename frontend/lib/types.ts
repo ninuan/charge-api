@@ -1,3 +1,17 @@
+import type {
+  PublicPoolCookie,
+  RegistrationSettings,
+  SharedPile,
+  UserRefreshQuota,
+} from "@/lib/api/generated"
+
+export type {
+  PublicPoolCookie,
+  RegistrationSettings,
+  SharedPile,
+  UserRefreshQuota,
+}
+
 export type PortStatus = "idle" | "in_use" | "offline"
 
 export interface Port {
@@ -53,56 +67,10 @@ export interface RefreshInfo {
   message?: string
 }
 
-export interface UserRefreshQuota {
-  hasPersonalCookie: boolean
-  personalCookieStatus: "none" | "valid" | "expired"
-  joinedPublicPool?: boolean
-  requirePoolShareForUnlimited?: boolean
-  unlimitedActive?: boolean
-  freeDailyLimit: number
-  freeDailyUsed: number
-  freeDailyRemaining: number
-  bonusRemaining: number
-  totalFreeRemaining: number
-  dailyResetAt?: string
-  sharedPileCacheTTLSeconds?: number
-  contributedPileCount: number
-  pileContributionBonusQuota: number
-  freeUserWatchAllowed: boolean
-  cookieGuideUrl?: string
-  publicPoolAvailable: number
-}
-
-export interface SharedPile {
-  deviceId: string
-  number: string
-  name: string
-  address: string
-  openNum: number
-  contributedByUserId?: string
-  lastFetchedAt?: string
-  lastSnapshot?: Pile
-  createdAt: string
-  updatedAt: string
-}
-
 export interface PileCreateResponse extends Pile {
   rewardGranted?: number
   fromSharedCatalog?: boolean
   quota?: UserRefreshQuota
-}
-
-export interface PublicPoolCookie {
-  id: string
-  label: string
-  ownerUserId?: string
-  enabled: boolean
-  status: "healthy" | "expired"
-  consecutiveFailures: number
-  lastUsedAt?: string
-  lastError?: string
-  createdAt: string
-  updatedAt: string
 }
 
 export interface DashboardSnapshot {
@@ -208,32 +176,6 @@ export interface AdminUserPage {
   pageSize: number
   total: number
   totalPages: number
-}
-
-export interface RegistrationSettings {
-  openRegistration: boolean
-  inviteRequired: boolean
-  defaultDeviceLimit: number
-  defaultRefreshEnabled: boolean
-  statsRetentionDays: number
-  portHistoryRetentionDays: number
-  backgroundRemindersEnabled: boolean
-  recurringRemindersEnabled: boolean
-  watchRefreshIntervalMinutes: number
-  watchPileLimitPerUser: number
-  watchDailyRefreshQuota: number
-  notificationRetentionDays: number
-  scheduledPowerOffEnabled: boolean
-  scheduledPowerOffStartMinute: number
-  scheduledPowerOffEndMinute: number
-  scheduledPowerOffTimezone: string
-  powerRestoreJitterMinutes: number
-  freeDailyRefreshQuota?: number
-  pileContributionBonusQuota?: number
-  sharedPileCacheTTLSeconds?: number
-  freeUserWatchAllowed?: boolean
-  requirePoolShareForUnlimited?: boolean
-  cookieGuideUrl?: string
 }
 
 export interface InviteCode {

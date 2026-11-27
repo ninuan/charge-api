@@ -55,6 +55,7 @@ import type {
   WxPusherChannelState,
   WxPusherEventType,
 } from "@/lib/api/generated"
+import { RequestError } from "@/lib/http"
 import {
   createWxPusherBindSession,
   deleteWxPusherChannel,
@@ -176,8 +177,10 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   const [testing, setTesting] = useState(false)
   const [rechecking, setRechecking] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [nextPollAtMs, setNextPollAtMs] = useState<number>(0)
   const abortRef = useRef<AbortController | null>(null)
-  const pollInFlight = useRef(false)
+  const pollTimerRef = useRef<number | null>(null)
+  const sessionRef = useRef<WxPusherBindSession | null>(null)
   const channelLoadInFlight = useRef(false)
   const hasPendingDelivery =
     !loadFailed &&
@@ -247,10 +250,17 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   }, [active, hasPendingDelivery, loadChannel])
 
   const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
     abortRef.current?.abort()
     abortRef.current = null
-    pollInFlight.current = false
   }, [])
+
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
 
   function changeBindOpen(next: boolean) {
     setBindOpen(next)
@@ -262,15 +272,29 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
       session?.status === "waiting_scan" &&
       new Date(session.expiresAt).getTime() > Date.now()
     ) {
-      setNow(Date.now())
+      const currentTime = Date.now()
+      setNow(currentTime)
+      setNextPollAtMs(
+        Math.max(
+          currentTime + 2_000,
+          Date.parse(session.nextPollAt || "") || currentTime + 2_000
+        )
+      )
       setBindOpen(true)
       return
     }
     setBinding(true)
     try {
       const created = await createWxPusherBindSession()
-      setNow(Date.now())
+      const currentTime = Date.now()
+      setNow(currentTime)
       setSession(created)
+      setNextPollAtMs(
+        Math.max(
+          currentTime + 2_000,
+          Date.parse(created.nextPollAt || "") || currentTime + 3_000
+        )
+      )
       setBindOpen(true)
     } catch (reason) {
       notify.error(reason, { title: "获取绑定二维码失败" })
@@ -279,36 +303,111 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
     }
   }
 
-  const poll = useCallback(async () => {
-    if (!session || session.status !== "waiting_scan" || pollInFlight.current)
+  useEffect(() => {
+    if (!bindOpen || !session?.id || session.status !== "waiting_scan") {
+      stopPolling()
       return
-    pollInFlight.current = true
-    const controller = new AbortController()
-    abortRef.current = controller
-    try {
-      const updated = await pollWxPusherBindSession(session.id, {
-        signal: controller.signal,
-      })
-      setSession(updated)
-      setNow(Date.now())
-      if (updated.status === "bound") {
-        stopPolling()
-        await loadChannel()
-        notify.success("微信提醒绑定成功", {
-          id: "wxpusher-binding-poll",
-        })
+    }
+
+    const sessionId = session.id
+    let disposed = false
+    let consecutiveErrors = 0
+
+    const computeDelayMs = (nextPollAt?: string) => {
+      const parsed = nextPollAt ? Date.parse(nextPollAt) : Number.NaN
+      if (Number.isFinite(parsed)) {
+        return Math.min(15_000, Math.max(2_000, parsed - Date.now()))
       }
-    } catch (reason) {
-      if (!controller.signal.aborted)
+      return 3_000
+    }
+
+    const scheduleNext = (delayMs: number) => {
+      if (disposed) return
+      const clampedDelay = Math.max(2_000, delayMs)
+      setNextPollAtMs(Date.now() + clampedDelay)
+      if (pollTimerRef.current !== null) {
+        window.clearTimeout(pollTimerRef.current)
+      }
+      pollTimerRef.current = window.setTimeout(() => {
+        pollTimerRef.current = null
+        void runPoll()
+      }, clampedDelay)
+    }
+
+    const runPoll = async () => {
+      if (disposed) return
+      const current = sessionRef.current
+      if (
+        !current ||
+        current.id !== sessionId ||
+        current.status !== "waiting_scan"
+      ) {
+        return
+      }
+      if (Date.parse(current.expiresAt) <= Date.now()) {
+        return
+      }
+
+      const controller = new AbortController()
+      abortRef.current = controller
+      try {
+        const updated = await pollWxPusherBindSession(sessionId, {
+          signal: controller.signal,
+        })
+        if (disposed || controller.signal.aborted) return
+        consecutiveErrors = 0
+        setSession(updated)
+        setNow(Date.now())
+        if (updated.status === "bound") {
+          stopPolling()
+          await loadChannel()
+          notify.success("微信提醒绑定成功", {
+            id: "wxpusher-binding-poll",
+          })
+          return
+        }
+        if (updated.status === "waiting_scan") {
+          scheduleNext(computeDelayMs(updated.nextPollAt))
+        }
+      } catch (reason) {
+        if (disposed || controller.signal.aborted) return
         notify.error(reason, {
           title: "查询绑定状态失败",
           id: "wxpusher-binding-poll",
         })
-    } finally {
-      if (abortRef.current === controller) abortRef.current = null
-      pollInFlight.current = false
+        if (
+          reason instanceof RequestError &&
+          reason.status >= 400 &&
+          reason.status < 500 &&
+          reason.status !== 429
+        ) {
+          stopPolling()
+          setSession((prev) =>
+            prev && prev.id === sessionId
+              ? {
+                  ...prev,
+                  status: "expired",
+                  message: reason.message || "二维码已失效，请重新获取。",
+                }
+              : prev
+          )
+          return
+        }
+        consecutiveErrors += 1
+        const backoffMs = Math.min(30_000, 3_000 * 2 ** (consecutiveErrors - 1))
+        scheduleNext(backoffMs)
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null
+      }
     }
-  }, [loadChannel, session, stopPolling])
+
+    scheduleNext(computeDelayMs(sessionRef.current?.nextPollAt))
+
+    return () => {
+      disposed = true
+      stopPolling()
+    }
+  }, [bindOpen, loadChannel, session?.id, session?.status, stopPolling])
 
   useEffect(() => {
     if (!bindOpen || session?.status !== "waiting_scan") return
@@ -332,15 +431,9 @@ export function WxPusherChannelCard({ active }: { active: boolean }) {
   }, [bindOpen, session?.expiresAt, session?.status, stopPolling])
 
   const expiresIn = secondsUntil(session?.expiresAt, now)
-  const nextPollIn = secondsUntil(session?.nextPollAt, now)
-
-  useEffect(() => {
-    if (!bindOpen || session?.status !== "waiting_scan") return
-    if (expiresIn > 0 && nextPollIn <= 0) {
-      const task = window.setTimeout(() => void poll(), 0)
-      return () => window.clearTimeout(task)
-    }
-  }, [bindOpen, expiresIn, nextPollIn, poll, session?.status])
+  const nextPollIn = nextPollAtMs
+    ? Math.max(0, Math.ceil((nextPollAtMs - now) / 1000))
+    : secondsUntil(session?.nextPollAt, now)
 
   useEffect(() => stopPolling, [stopPolling])
 

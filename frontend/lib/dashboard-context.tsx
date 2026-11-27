@@ -81,6 +81,29 @@ type DashboardContextValue = {
   subscribeStreamOpen: (listener: () => void) => () => void
 }
 
+function computeStatistics(piles: Pile[]): DashboardSnapshot["statistics"] {
+  let portCount = 0
+  let inUsePortCount = 0
+  let idlePortCount = 0
+  let offlinePorts = 0
+  for (const pile of piles) {
+    const ports = Array.isArray(pile.ports) ? pile.ports : []
+    portCount += ports.length
+    for (const port of ports) {
+      if (port.status === "in_use") inUsePortCount += 1
+      else if (port.status === "offline") offlinePorts += 1
+      else idlePortCount += 1
+    }
+  }
+  return {
+    pileCount: piles.length,
+    portCount,
+    inUsePortCount,
+    idlePortCount,
+    offlinePorts,
+  }
+}
+
 const DashboardContext = createContext<DashboardContextValue | null>(null)
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
@@ -96,6 +119,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const reconnectAttemptRef = useRef(0)
   const openStreamRef = useRef<() => void>(() => undefined)
   const lastServerStampRef = useRef(0)
+  const fetchEpochRef = useRef(0)
+  const inFlightFetchCountRef = useRef(0)
   const notificationListenersRef = useRef(
     new Set<(notification: Notification) => void>()
   )
@@ -129,22 +154,31 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const reset = useCallback(() => {
+    fetchEpochRef.current += 1
     lastServerStampRef.current = 0
     setSnapshot({ ...initialSnapshot, updatedAt: new Date().toISOString() })
   }, [])
 
   const fetchSnapshot = useCallback(async () => {
+    const epoch = ++fetchEpochRef.current
+    inFlightFetchCountRef.current += 1
     setLoading(true)
     try {
-      applySnapshot(
-        await request<DashboardSnapshot>(
-          "/api/piles",
-          {},
-          "暂时无法加载充电桩信息，请稍后重试。"
-        )
+      const next = await request<DashboardSnapshot>(
+        "/api/piles",
+        {},
+        "暂时无法加载充电桩信息，请稍后重试。"
       )
+      if (epoch !== fetchEpochRef.current) return
+      applySnapshot(next)
     } finally {
-      setLoading(false)
+      inFlightFetchCountRef.current = Math.max(
+        0,
+        inFlightFetchCountRef.current - 1
+      )
+      if (inFlightFetchCountRef.current === 0) {
+        setLoading(false)
+      }
     }
   }, [applySnapshot])
 
@@ -152,7 +186,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     // 服务端在每次变更后都会向 SSE 推送新快照，连接在线时不再重复全量拉取。
     if (
       typeof EventSource !== "undefined" &&
-      streamRef.current?.readyState === EventSource.OPEN
+      streamRef.current?.readyState === (EventSource.OPEN ?? 1)
     )
       return
     await fetchSnapshot()
@@ -170,6 +204,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         },
         "添加充电桩失败，请检查桩号后重试。"
       )
+      fetchEpochRef.current += 1
       setSnapshot((current) => {
         const exists = current.piles.some((item) => item.id === pile.id)
         const nextPiles = exists
@@ -178,14 +213,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         return {
           ...current,
           piles: nextPiles,
-          statistics: {
-            ...current.statistics,
-            pileCount: nextPiles.length,
-          },
+          statistics: computeStatistics(nextPiles),
           quota: pile.quota ?? current.quota,
         }
       })
-      await syncAfterMutation()
+      void syncAfterMutation().catch(() => undefined)
       return pile
     },
     [syncAfterMutation]
@@ -198,7 +230,17 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         { method: "DELETE" },
         "删除充电桩失败，请稍后重试。"
       )
-      await syncAfterMutation()
+      fetchEpochRef.current += 1
+      setSnapshot((current) => {
+        const nextPiles = current.piles.filter((item) => item.id !== id)
+        if (nextPiles.length === current.piles.length) return current
+        return {
+          ...current,
+          piles: nextPiles,
+          statistics: computeStatistics(nextPiles),
+        }
+      })
+      void syncAfterMutation().catch(() => undefined)
     },
     [syncAfterMutation]
   )
@@ -208,7 +250,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       id: string,
       payload: { name: string; address: string; sortOrder: number }
     ) => {
-      await request<void>(
+      const updated = await request<Pile | undefined>(
         `/api/piles/${encodeURIComponent(id)}`,
         {
           method: "PATCH",
@@ -217,7 +259,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         },
         "更新充电桩失败，请稍后重试。"
       )
-      await syncAfterMutation()
+      fetchEpochRef.current += 1
+      setSnapshot((current) => {
+        const nextPiles = current.piles.map((item) => {
+          if (item.id !== id) return item
+          if (updated && typeof updated === "object" && updated.id) {
+            return updated
+          }
+          return {
+            ...item,
+            name: payload.name,
+            address: payload.address,
+            sortOrder: payload.sortOrder,
+          }
+        })
+        return {
+          ...current,
+          piles: nextPiles,
+          statistics: computeStatistics(nextPiles),
+        }
+      })
+      void syncAfterMutation().catch(() => undefined)
     },
     [syncAfterMutation]
   )
@@ -424,7 +486,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       if (epoch !== streamEpochRef.current) return
       reconnectAttemptRef.current = 0
       setStreamState("connected")
-      streamOpenListenersRef.current.forEach((listener) => listener())
+      streamOpenListenersRef.current.forEach((listener) => {
+        try {
+          listener()
+        } catch {
+          // 隔离单个订阅者的同步异常，避免影响实时通道状态与其他监听者。
+        }
+      })
     }
     stream.addEventListener("snapshot", (event) => {
       if (epoch !== streamEpochRef.current) return
@@ -440,18 +508,25 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     })
     stream.addEventListener("notification", (event) => {
       if (epoch !== streamEpochRef.current) return
+      let notification: Notification
       try {
-        const notification = JSON.parse(
+        notification = JSON.parse(
           (event as MessageEvent<string>).data
         ) as Notification
-        notificationListenersRef.current.forEach((listener) =>
-          listener(notification)
-        )
-        reconnectAttemptRef.current = 0
-        setStreamState("connected")
       } catch {
         setStreamState("error")
+        return
       }
+      notificationListenersRef.current.forEach((listener) => {
+        try {
+          listener(notification)
+        } catch {
+          // 隔离单个通知订阅者异常（例如移动端浏览器不支持 Notification 构造），
+          // 确保其余订阅者继续收到更新且不会误把 SSE 标为重连中。
+        }
+      })
+      reconnectAttemptRef.current = 0
+      setStreamState("connected")
     })
     stream.onerror = () => {
       if (epoch !== streamEpochRef.current) return
@@ -475,7 +550,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === "undefined") return
     const handleOnline = () => {
-      if (!streamWantedRef.current || streamRef.current) return
+      if (!streamWantedRef.current) return
+      if (
+        typeof EventSource !== "undefined" &&
+        streamRef.current?.readyState === (EventSource.OPEN ?? 1)
+      ) {
+        return
+      }
+      streamRef.current?.close()
+      streamRef.current = null
       reconnectAttemptRef.current = 0
       cancelPendingReconnect()
       openStreamRef.current()

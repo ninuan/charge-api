@@ -28,6 +28,7 @@ import { NotificationProvider } from "@/lib/notification-context"
 import { WatchProvider, useWatch } from "@/lib/watch-context"
 import { useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
+import { safeHref } from "@/lib/safe-href"
 import { formatQuotaResetTime, updatePageQuery } from "@/lib/workbench"
 import { DashboardSession } from "./dashboard-session"
 import { UserWorkbenchShell } from "./user-shell"
@@ -196,7 +197,6 @@ function AccountContent({ admin = false }: { admin?: boolean }) {
               type="button"
               className={`wb-seg-btn ${tab === value ? "wb-seg-active" : ""}`}
               aria-current={tab === value ? "page" : undefined}
-              aria-pressed={tab === value}
               onClick={() => updatePageQuery({ tab: value, connect: null })}
             >
               {label}
@@ -475,23 +475,27 @@ function PlatformConnection() {
           </WorkbenchButton>
         </div>
 
-        {quota?.cookieGuideUrl && (
-          <div className="wb-setting-row">
-            <div>
-              <h3>如何抓取个人 Cookie（视频教程）</h3>
-              <p>只需抓一次包粘贴即可长期使用，完全不走微信协议、零风控。</p>
+        {(() => {
+          const guideHref = safeHref(quota?.cookieGuideUrl)
+          if (!guideHref) return null
+          return (
+            <div className="wb-setting-row">
+              <div>
+                <h3>如何抓取个人 Cookie（视频教程）</h3>
+                <p>只需抓一次包粘贴即可长期使用，完全不走微信协议、零风控。</p>
+              </div>
+              <a
+                href={guideHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="wb-button"
+              >
+                观看教程
+                <ExternalLinkIcon size={14} />
+              </a>
             </div>
-            <a
-              href={quota.cookieGuideUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="wb-button"
-            >
-              观看教程
-              <ExternalLinkIcon size={14} />
-            </a>
-          </div>
-        )}
+          )
+        })()}
 
         {hasPersonal && (
           <div className="wb-setting-row">
@@ -580,18 +584,22 @@ function PlatformConnection() {
                 同意将该 Cookie 加入全站互助公共池（仅用于查询空闲状态，不涉及支付或充电），立即解锁不限次刷新与空位提醒
               </span>
             </label>
-            {quota?.cookieGuideUrl && (
-              <p className="wb-field-hint">
-                不知道怎么获取？
-                <a
-                  href={quota.cookieGuideUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  点此查看抓包视频教程
-                </a>
-              </p>
-            )}
+            {(() => {
+              const guideHref = safeHref(quota?.cookieGuideUrl)
+              if (!guideHref) return null
+              return (
+                <p className="wb-field-hint">
+                  不知道怎么获取？
+                  <a
+                    href={guideHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    点此查看抓包视频教程
+                  </a>
+                </p>
+              )
+            })()}
             {formError && (
               <p role="alert" className="wb-form-error">
                 {formError}

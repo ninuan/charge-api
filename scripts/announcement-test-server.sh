@@ -13,7 +13,7 @@ trap 'exit 143' TERM
 cd "$ROOT_DIR/backend"
 go build -o "$TEST_DIR/server" ./cmd/server
 # Only isolated local fixtures; never use the developer's database or integrations.
-env -u YYB_BASE_URL -u YYB_API_SECRET -u MOCELE_BASE_URL -u WXPUSHER_APP_TOKEN \
+env -u WXPUSHER_APP_TOKEN -u WXPUSHER_BASE_URL \
  CORS_ALLOWED_ORIGINS=http://127.0.0.1:18081 PUBLIC_BASE_URL=http://127.0.0.1:18081 CHARGE_LOCAL_DEV=0 \
  CHARGE_ADMIN_PASSWORD=local-announcement-test-password \
  CHARGE_COOKIE_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \

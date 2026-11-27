@@ -177,6 +177,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const markAllRead = useCallback(async () => {
     const result = await watchApi.markAllNotificationsRead()
+    requestVersionRef.current += 1
+    setLoading(false)
+    setLoadingMore(false)
     const readAt = new Date().toISOString()
     setItems((current) =>
       statusRef.current === "unread"
@@ -185,6 +188,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             notification.readAt ? notification : { ...notification, readAt }
           )
     )
+    if (statusRef.current === "unread") {
+      setNextCursor(undefined)
+    }
     setUnreadCount(0)
     for (const id of notificationUnreadStateRef.current.keys())
       notificationUnreadStateRef.current.set(id, false)
@@ -275,14 +281,22 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return
 
       const presentation = notificationPresentation(notification)
-      const browserNotification = new window.Notification(presentation.title, {
-        body: presentation.message,
-        tag: notification.id,
-      })
-      browserNotification.onclick = () => {
-        window.focus()
-        navigateToNotification(notification)
-        browserNotification.close()
+      try {
+        const browserNotification = new window.Notification(
+          presentation.title,
+          {
+            body: presentation.message,
+            tag: notification.id,
+          }
+        )
+        browserNotification.onclick = () => {
+          window.focus()
+          navigateToNotification(notification)
+          browserNotification.close()
+        }
+      } catch {
+        // Android Chrome / 部分移动 WebView 不支持直接 new Notification()，
+        // 吞掉构造异常以保证 SSE 通知中心与提醒状态更新继续工作。
       }
     })
     const unsubscribeOpen = subscribeStreamOpen(() => {

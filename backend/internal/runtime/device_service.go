@@ -88,53 +88,6 @@ func (m *Manager) AddPile(userID string, req model.PileUpsertRequest) (model.Pil
 	return model.Pile{}, fmt.Errorf("device %s was not returned by remote API", req.ID)
 }
 
-func (m *Manager) AddPileWithYYB(userID string, req model.PileUpsertRequest, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.Pile, error) {
-	runtime, err := m.runtimeFor(userID)
-	if err != nil {
-		return model.Pile{}, err
-	}
-	req.ID = strings.TrimSpace(req.ID)
-	req.Number = strings.TrimSpace(req.Number)
-	if req.ID == "" && req.Number != "" {
-		user, _ := m.User(userID)
-		if !user.RefreshEnabled {
-			return model.Pile{}, fmt.Errorf("管理员已暂停此账户的远端刷新，暂时无法验证新设备")
-		}
-		if user.DeviceLimit > 0 && len(runtime.client.DeviceIDs()) >= user.DeviceLimit {
-			return model.Pile{}, fmt.Errorf("当前账户最多添加 %d 台充电桩", user.DeviceLimit)
-		}
-		runtime.refreshMu.Lock()
-		resolvedID, resolveErr := runtime.client.ResolveDeviceIDByNumber(req.Number)
-		runtime.refreshMu.Unlock()
-		if resolveErr != nil {
-			return model.Pile{}, resolveErr
-		}
-		req.ID = resolvedID
-	}
-
-	pile, err := m.AddPile(userID, req)
-	if err == nil {
-		return pile, nil
-	}
-	if !charger.IsAuthExpired(err) {
-		return model.Pile{}, err
-	}
-	if req.ID == "" {
-		return model.Pile{}, err
-	}
-	binding, bindingErr := m.YYBBinding(userID)
-	if bindingErr != nil {
-		return model.Pile{}, bindingErr
-	}
-	if binding == nil || binding.Ref == "" {
-		return model.Pile{}, ErrYYBBindingRequired
-	}
-	if _, syncErr := m.SyncCookieFromYYB(userID, req.ID, yybClient, moceleClient); syncErr != nil {
-		return model.Pile{}, fmt.Errorf("自动更新登录凭据失败: %w", syncErr)
-	}
-	return m.AddPile(userID, req)
-}
-
 func (m *Manager) DeletePile(userID string, id string) error {
 	m.watchMu.Lock()
 	defer m.watchMu.Unlock()
@@ -152,6 +105,7 @@ func (m *Manager) DeletePile(userID string, id string) error {
 		return fmt.Errorf("pile not found")
 	}
 	runtime.client.RemoveDevice(id)
+	runtime.clearDeviceFetch(id)
 	m.invalidateBackgroundPileValidation(userID, id)
 	if err := m.saveUserState(userID); err != nil {
 		return err
@@ -243,37 +197,6 @@ func (m *Manager) Refresh(userID string, force bool) (model.DashboardSnapshot, e
 		return model.DashboardSnapshot{}, err
 	}
 	return m.attachQuota(userID, snapshot), nil
-}
-
-func (m *Manager) RefreshWithYYB(userID string, force bool, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
-	snapshot, err := m.Refresh(userID, force)
-	if err == nil || !charger.IsAuthExpired(err) {
-		return snapshot, err
-	}
-	m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("remote_auth_rejected", "", err))
-	if yybClient == nil || moceleClient == nil {
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("recovery_unavailable", "", 0))
-		return model.DashboardSnapshot{}, err
-	}
-	return m.RecoverRefreshWithYYB(userID, yybClient, moceleClient)
-}
-
-func (m *Manager) RecoverRefreshWithYYB(userID string, yybClient YYBCodeClient, moceleClient MoceleCookieClient) (model.DashboardSnapshot, error) {
-	deviceID, ok, deviceErr := m.FirstDeviceID(userID)
-	if deviceErr != nil || !ok {
-		if deviceErr != nil {
-			return model.DashboardSnapshot{}, deviceErr
-		}
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("recovery_unavailable", "", 0))
-		return model.DashboardSnapshot{}, fmt.Errorf("no device is available for automatic credential recovery")
-	}
-	snapshot, syncErr := m.SyncCookieFromYYB(userID, deviceID, yybClient, moceleClient)
-	if syncErr != nil {
-		m.recordRecoveryDiagnostic(userID, recoveryDiagnosticWithError("recovery_failed", deviceID, syncErr))
-		return model.DashboardSnapshot{}, fmt.Errorf("自动更新登录凭据失败: %w", syncErr)
-	}
-	m.recordRecoveryDiagnostic(userID, recoveryDiagnostic("recovery_succeeded", deviceID, 0))
-	return snapshot, nil
 }
 
 func (m *Manager) UpdateCookie(userID string, rawCookie string) (model.DashboardSnapshot, error) {

@@ -42,7 +42,7 @@ func (s *Store) ListAudit(page, pageSize int) (model.AuditPage, error) {
 		pageSize = 100
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM admin_audit_logs`).Scan(&total); err != nil {
+	if err := s.reader().QueryRow(`SELECT COUNT(*) FROM admin_audit_logs`).Scan(&total); err != nil {
 		return model.AuditPage{}, fmt.Errorf("count admin audit: %w", err)
 	}
 	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
@@ -52,7 +52,7 @@ func (s *Store) ListAudit(page, pageSize int) (model.AuditPage, error) {
 	if page > totalPages {
 		page = totalPages
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, actor_id, actor, action, target_type, target_id,
 		       target_label, result, message, created_at
 		FROM admin_audit_logs
@@ -232,7 +232,7 @@ func (s *Store) RecordHealthCheck(service string, health model.ServiceHealth, at
 }
 
 func (s *Store) HealthSummary(service string, current model.ServiceHealth, now time.Time) (model.ServiceHealth, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT state, checked_at
 		FROM service_health_checks
 		WHERE service=? AND checked_at>=?
@@ -290,17 +290,20 @@ func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays i
 		return result, fmt.Errorf("stat database: %w", err)
 	}
 	result.DatabaseSizeBytes = info.Size()
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM metrics`).Scan(&result.MetricRows); err != nil {
+	if walInfo, walErr := os.Stat(s.path + "-wal"); walErr == nil {
+		result.DatabaseSizeBytes += walInfo.Size()
+	}
+	if err := s.reader().QueryRow(`SELECT COUNT(*) FROM metrics`).Scan(&result.MetricRows); err != nil {
 		return result, fmt.Errorf("count metrics: %w", err)
 	}
-	if err := s.db.QueryRow(`
+	if err := s.reader().QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN resolved_at IS NOT NULL THEN 1 ELSE 0 END), 0)
 		FROM notifications
 	`).Scan(&result.NotificationRows, &result.ResolvedNotificationRows); err != nil {
 		return result, fmt.Errorf("summarize notifications: %w", err)
 	}
 	var oldestHistory, newestHistory sql.NullInt64
-	if err := s.db.QueryRow(`
+	if err := s.reader().QueryRow(`
 		SELECT COUNT(*), MIN(changed_at), MAX(changed_at)
 		FROM port_status_events
 	`).Scan(&result.PortHistoryRows, &oldestHistory, &newestHistory); err != nil {
@@ -349,7 +352,7 @@ func (s *Store) OperationsStatus(metricRetentionDays, portHistoryRetentionDays i
 // RefreshIntegrityCheck executes PRAGMA quick_check and updates the cached result.
 func (s *Store) RefreshIntegrityCheck() (string, error) {
 	var integrity string
-	if err := s.db.QueryRow(`PRAGMA quick_check`).Scan(&integrity); err != nil {
+	if err := s.reader().QueryRow(`PRAGMA quick_check`).Scan(&integrity); err != nil {
 		return "", fmt.Errorf("check database integrity: %w", err)
 	}
 	s.integrityMu.Lock()
@@ -357,6 +360,36 @@ func (s *Store) RefreshIntegrityCheck() (string, error) {
 	s.integrityCheckedAt = time.Now()
 	s.integrityMu.Unlock()
 	return integrity, nil
+}
+
+func (s *Store) PruneAdminAuditLogs(before time.Time) (int64, error) {
+	result, err := s.db.Exec(
+		`DELETE FROM admin_audit_logs WHERE created_at < ?`,
+		before.UTC().UnixNano(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("prune admin audit logs: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+func (s *Store) PruneResolvedAdminIncidents(before time.Time) (int64, error) {
+	result, err := s.db.Exec(
+		`DELETE FROM admin_incidents WHERE status = 'resolved' AND last_seen_at < ?`,
+		before.UTC().UnixNano(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("prune resolved admin incidents: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+func (s *Store) CheckpointWAL() error {
+	_, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	if err != nil {
+		return fmt.Errorf("checkpoint sqlite wal: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) cachedIntegrityCheck() (string, error) {
@@ -371,7 +404,7 @@ func (s *Store) cachedIntegrityCheck() (string, error) {
 }
 
 func (s *Store) ReminderMetricCounts(since time.Time) (map[string]int, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT kind, COALESCE(SUM(count), 0)
 		FROM metrics
 		WHERE created_at >= ? AND kind LIKE 'watch_%'
@@ -399,7 +432,7 @@ func (s *Store) ReminderMetricCounts(since time.Time) (map[string]int, error) {
 func (s *Store) ReminderRuleOperationsStats(since, now time.Time) (model.ReminderRuleOperationsStats, error) {
 	var result model.ReminderRuleOperationsStats
 	var averageMinutes sql.NullFloat64
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT
 			COALESCE(SUM(CASE WHEN w.mode='temporary' AND w.enabled=1
 				AND w.completed_at IS NULL AND w.expires_at > ? THEN 1 ELSE 0 END), 0),

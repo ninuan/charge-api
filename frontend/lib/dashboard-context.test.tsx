@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { DashboardProvider, useDashboard } from "@/lib/dashboard-context"
@@ -25,7 +25,10 @@ const snapshot = {
 }
 
 describe("DashboardProvider", () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
 
   it("loads the snapshot with the existing credentialed request", async () => {
     const fetchMock = vi
@@ -146,6 +149,78 @@ describe("DashboardProvider", () => {
     expect(notificationListener).toHaveBeenCalledWith(
       expect.objectContaining({ id: "notice-1", type: "pile_available" })
     )
+  })
+
+  it("isolates throwing notification listeners and resets stuck CONNECTING stream on online", () => {
+    class MockEventSource {
+      static CONNECTING = 0
+      static OPEN = 1
+      static CLOSED = 2
+      static instances: MockEventSource[] = []
+      readyState = MockEventSource.CONNECTING
+      onerror: ((event: Event) => void) | null = null
+      onopen: ((event: Event) => void) | null = null
+      listeners = new Map<string, (event: Event) => void>()
+      constructor() {
+        MockEventSource.instances.push(this)
+      }
+      addEventListener = vi.fn(
+        (name: string, listener: EventListenerOrEventListenerObject) => {
+          this.listeners.set(name, listener as (event: Event) => void)
+        }
+      )
+      close = vi.fn()
+    }
+    vi.stubGlobal("EventSource", MockEventSource)
+    const brokenListener = vi.fn(() => {
+      throw new TypeError("Illegal constructor")
+    })
+    const healthyListener = vi.fn()
+    const { result } = renderHook(() => useDashboard(), {
+      wrapper: DashboardProvider,
+    })
+
+    act(() => {
+      result.current.subscribeNotifications(brokenListener)
+      result.current.subscribeNotifications(healthyListener)
+      result.current.connectStream()
+    })
+    expect(MockEventSource.instances).toHaveLength(1)
+
+    // Stuck in CONNECTING: online event closes and opens a fresh EventSource.
+    act(() => {
+      window.dispatchEvent(new Event("online"))
+    })
+    expect(MockEventSource.instances[0].close).toHaveBeenCalledTimes(1)
+    expect(MockEventSource.instances).toHaveLength(2)
+
+    // Once OPEN, online event leaves the healthy stream untouched.
+    act(() => {
+      MockEventSource.instances[1].readyState = MockEventSource.OPEN
+      MockEventSource.instances[1].onopen?.(new Event("open"))
+      window.dispatchEvent(new Event("online"))
+    })
+    expect(MockEventSource.instances).toHaveLength(2)
+
+    // A throwing subscriber must not break other subscribers or flip streamState to error.
+    act(() => {
+      MockEventSource.instances[1].listeners.get("notification")?.(
+        new MessageEvent("notification", {
+          data: JSON.stringify({
+            id: "notice-2",
+            userId: "user-1",
+            type: "pile_available",
+            severity: "info",
+            title: "有空闲口",
+            message: "北门桩出现空闲口",
+            createdAt: "2026-08-11T09:05:00Z",
+          }),
+        })
+      )
+    })
+    expect(brokenListener).toHaveBeenCalledTimes(1)
+    expect(healthyListener).toHaveBeenCalledTimes(1)
+    expect(result.current.streamState).toBe("connected")
   })
 
   it("reconnects with backoff after EventSource.CLOSED and cancels on disconnect", () => {

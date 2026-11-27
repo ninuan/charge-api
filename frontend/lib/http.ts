@@ -128,6 +128,8 @@ export const sessionExpiredEvent = "charge:session-expired"
 export type RequestOptions = RequestInit & {
   // 需要串联远端设备请求的长操作（刷新、添加桩等）可放宽超时。
   timeoutMs?: number
+  // 静默鉴权探测（如 AuthProvider.fetchMe）收到 401 时不派发全局过期事件。
+  suppressSessionExpired?: boolean
 }
 
 export async function request<T>(
@@ -135,7 +137,11 @@ export async function request<T>(
   init: RequestOptions = {},
   fallback: string
 ): Promise<T> {
-  const { timeoutMs = defaultTimeoutMs, ...rest } = init
+  const {
+    timeoutMs = defaultTimeoutMs,
+    suppressSessionExpired = false,
+    ...rest
+  } = init
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const external = rest.signal
@@ -162,6 +168,7 @@ export async function request<T>(
   if (!response.ok && response.status !== 204) {
     if (
       response.status === 401 &&
+      !suppressSessionExpired &&
       path !== "/api/auth/login" &&
       path !== "/api/auth/register" &&
       typeof window !== "undefined"

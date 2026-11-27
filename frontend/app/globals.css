@@ -259,30 +259,6 @@ body {
   }
 }
 
-@keyframes notification-badge-change {
-  0% {
-    transform: scale(0.82);
-  }
-  65% {
-    transform: scale(1.08);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-@keyframes notification-target-glow {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--success) 38%, transparent);
-  }
-  45% {
-    box-shadow: 0 0 0 8px color-mix(in oklab, var(--success) 15%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 14px transparent;
-  }
-}
-
 .admin-trend-enter {
   animation: admin-trend-enter 220ms ease-out both;
 }
@@ -306,22 +282,12 @@ body {
   animation: feedback-banner-enter 180ms ease-out both;
 }
 
-.notification-badge-change {
-  animation: notification-badge-change 180ms ease-out both;
-}
-
-.notification-target-glow {
-  animation: notification-target-glow 900ms ease-out 2;
-}
-
 @media (prefers-reduced-motion: reduce) {
   [class*="health-recovered"],
   .admin-trend-enter,
   .feedback-status-change,
   .feedback-success-once,
-  .feedback-banner-transition,
-  .notification-badge-change,
-  .notification-target-glow {
+  .feedback-banner-transition {
     animation: none !important;
   }
 

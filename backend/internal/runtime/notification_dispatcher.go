@@ -294,13 +294,17 @@ func (m *Manager) confirmNotificationDelivery(ctx context.Context, delivery mode
 		delivery.NextAttemptAt, delivery.ClaimedAt = nil, nil
 		delivery.LastErrorCode, delivery.LastErrorMessage = "", ""
 		delivery.ProviderSucceededAt, delivery.UpdatedAt = timePointer(now), now
-		if err := m.repository.SaveNotificationDelivery(delivery); err != nil {
+		updated, err := m.repository.SaveNotificationDeliveryIfStatus(delivery, model.NotificationDeliveryAccepted)
+		if err != nil {
 			return err
+		}
+		if !updated {
+			return nil
 		}
 		return m.repository.RecordWxPusherProviderSuccess(delivery.UserID, now)
 	}
 	if status.Failed {
-		return m.finishDelivery(delivery, model.NotificationDeliveryFailed, "provider_delivery_failed", now)
+		return m.finishAcceptedDelivery(delivery, model.NotificationDeliveryFailed, "provider_delivery_failed", now)
 	}
 	delivery.LastErrorCode, delivery.LastErrorMessage = "", ""
 	return m.rescheduleAcceptedDelivery(delivery, now)
@@ -308,7 +312,7 @@ func (m *Manager) confirmNotificationDelivery(ctx context.Context, delivery mode
 
 func (m *Manager) rescheduleAcceptedDelivery(delivery model.NotificationDelivery, now time.Time) error {
 	if delivery.AcceptedAt == nil {
-		return m.finishDelivery(delivery, model.NotificationDeliveryUncertain, "accepted_time_missing", now)
+		return m.finishAcceptedDelivery(delivery, model.NotificationDeliveryUncertain, "accepted_time_missing", now)
 	}
 	elapsed := now.Sub(*delivery.AcceptedAt)
 	var next time.Time
@@ -318,10 +322,18 @@ func (m *Manager) rescheduleAcceptedDelivery(delivery model.NotificationDelivery
 	case elapsed < notificationStatusDelays[2]:
 		next = delivery.AcceptedAt.Add(notificationStatusDelays[2])
 	default:
-		return m.finishDelivery(delivery, model.NotificationDeliveryUncertain, "provider_status_unknown", now)
+		return m.finishAcceptedDelivery(delivery, model.NotificationDeliveryUncertain, "provider_status_unknown", now)
 	}
 	delivery.Status, delivery.NextAttemptAt, delivery.ClaimedAt, delivery.UpdatedAt = model.NotificationDeliveryAccepted, &next, nil, now
-	return m.repository.SaveNotificationDelivery(delivery)
+	_, err := m.repository.SaveNotificationDeliveryIfStatus(delivery, model.NotificationDeliveryAccepted)
+	return err
+}
+
+func (m *Manager) finishAcceptedDelivery(delivery model.NotificationDelivery, status model.NotificationDeliveryStatus, code string, now time.Time) error {
+	delivery.Status, delivery.LastErrorCode, delivery.LastErrorMessage = status, code, ""
+	delivery.NextAttemptAt, delivery.ClaimedAt, delivery.UpdatedAt = nil, nil, now
+	_, err := m.repository.SaveNotificationDeliveryIfStatus(delivery, model.NotificationDeliveryAccepted)
+	return err
 }
 
 func (m *Manager) finishDelivery(delivery model.NotificationDelivery, status model.NotificationDeliveryStatus, code string, now time.Time) error {

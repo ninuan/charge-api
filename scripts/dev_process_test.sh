@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/dev_process.sh
 source "$ROOT_DIR/scripts/lib/dev_process.sh"
 
 # Mock process inspection so foreign/active processes are never signalled by tests.

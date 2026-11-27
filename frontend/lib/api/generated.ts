@@ -607,6 +607,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/public-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 管理员列出公共 Cookie 池全部条目（不含明文凭据） */
+        get: operations["listAdminPublicPool"];
+        put?: never;
+        /** 管理员新增公共 Cookie 池条目 */
+        post: operations["createAdminPublicPoolCookie"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/public-pool/{poolId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                poolId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 管理员删除公共 Cookie 池条目 */
+        delete: operations["deleteAdminPublicPoolCookie"];
+        options?: never;
+        head?: never;
+        /** 管理员更新公共 Cookie 备注、启停状态或管理员自有条目凭据 */
+        patch: operations["updateAdminPublicPoolCookie"];
+        trace?: never;
+    };
+    "/api/admin/public-pool/{poolId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                poolId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 管理员实测指定公共 Cookie 池条目有效性 */
+        post: operations["testAdminPublicPoolCookie"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/settings": {
         parameters: {
             query?: never;
@@ -622,6 +679,64 @@ export interface paths {
          */
         put: operations["updateAdminSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/shared-piles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 管理员查询全站公共桩库 */
+        get: operations["listAdminSharedPiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/shared-piles/{deviceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 管理员从公共桩库删除指定记录 */
+        delete: operations["deleteAdminSharedPile"];
+        options?: never;
+        head?: never;
+        /** 管理员修改并锁定公共桩名称与位置 */
+        patch: operations["updateAdminSharedPile"];
+        trace?: never;
+    };
+    "/api/admin/shared-piles/{deviceId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 管理员通过公共 Cookie 池主动刷新指定公共桩快照 */
+        post: operations["refreshAdminSharedPile"];
         delete?: never;
         options?: never;
         head?: never;
@@ -660,6 +775,25 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{userId}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 管理员调整指定用户的永久奖励刷新次数 */
+        patch: operations["updateAdminUserQuota"];
         trace?: never;
     };
     "/api/announcements": {
@@ -1214,25 +1348,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/session/yyb-binding": {
+    "/api/piles/{deviceId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 按单桩刷新充电桩状态（命中共享缓存免费，未命中按次扣减免费额度或直连个人 Cookie） */
+        post: operations["refreshSinglePile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quota": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 读取当前用户的脱敏绑定与扫码能力，不刷新设备 */
-        get: operations["getYybBinding"];
+        /** 获取当前用户的免费刷新额度、奖励次数与个人 Cookie / 互助池状态 */
+        get: operations["getUserQuota"];
         put?: never;
         post?: never;
-        /** 解除当前用户绑定并使其短期扫码会话失效（同账户连接操作进行中返回 409 YYB_BINDING_BUSY） */
-        delete: operations["deleteYybBinding"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/session/yyb-qr": {
+    "/api/session/cookie": {
         parameters: {
             query?: never;
             header?: never;
@@ -1241,44 +1394,59 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 创建归属当前用户的短期扫码会话 */
-        post: operations["createYybQr"];
-        delete?: never;
+        /** 保存或更新个人 Cookie（可选同步加入互助公共池） */
+        post: operations["updatePersonalCookie"];
+        /** 清除个人 Cookie 并退出互助公共池 */
+        delete: operations["clearPersonalCookie"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/session/yyb-qr/{sessionId}/confirm": {
+    "/api/session/cookie/join-pool": {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                sessionId: string;
-            };
+            path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** 校验归属和授权后保存绑定，同会话完成后重试返回原结果 */
-        post: operations["confirmYybQr"];
+        /** 实测当前个人 Cookie 并加入互助公共池 */
+        post: operations["joinPublicPool"];
+        /** 从互助公共池撤回个人 Cookie（保留本地个人 Cookie） */
+        delete: operations["leavePublicPool"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session/cookie/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 实测当前账户已保存的个人 Cookie 有效性 */
+        post: operations["testPersonalCookie"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/session/yyb-qr/{sessionId}/poll": {
+    "/api/shared-piles": {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                sessionId: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        /** 串行查询扫码状态及本站确认结果 */
-        get: operations["pollYybQr"];
+        /** 搜索全站共享充电桩库 */
+        get: operations["searchSharedPiles"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1393,6 +1561,9 @@ export interface components {
             start: string;
             timezone: string;
         };
+        AdminUserQuotaUpdateRequest: {
+            bonusRemaining: number;
+        };
         Announcement: {
             acknowledged: boolean;
             body?: string;
@@ -1455,8 +1626,32 @@ export interface components {
         };
         CodedErrorResponse: {
             /** @enum {string} */
-            code: "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE" | "WATCH_RULE_INVALID" | "WATCH_TARGET_NOT_FOUND" | "WATCH_RULE_NOT_FOUND" | "WATCH_RULE_CONFLICT" | "WATCH_PILE_LIMIT_REACHED" | "WATCH_UNAVAILABLE" | "NOTIFICATION_PREFERENCE_INVALID" | "NOTIFICATION_QUERY_INVALID" | "NOTIFICATION_NOT_FOUND" | "NOTIFICATION_UNAVAILABLE";
+            code: "ANNOUNCEMENT_CONFLICT" | "ANNOUNCEMENT_NOT_FOUND" | "ANNOUNCEMENT_INVALID" | "ANNOUNCEMENT_UNAVAILABLE" | "AUTH_INPUT_INVALID" | "AUTH_INVALID_CREDENTIALS" | "LOGIN_CAPTCHA_REQUIRED" | "LOGIN_CAPTCHA_INVALID" | "PASSWORD_CHANGE_REQUIRED" | "PASSWORD_CHANGE_FAILED" | "RATE_LIMITED" | "REGISTER_INPUT_INVALID" | "REGISTER_CAPTCHA_INVALID" | "REGISTER_USERNAME_TAKEN" | "REGISTER_CLOSED" | "REGISTER_INVITE_DISABLED" | "REGISTER_INVITE_REQUIRED" | "REGISTER_INVITE_INVALID" | "COOKIE_REQUIRED" | "COOKIE_TOO_LARGE" | "COOKIE_TEST_FAILED" | "PERSONAL_COOKIE_REQUIRED" | "JOIN_POOL_FAILED" | "PILE_IDENTIFIER_REQUIRED" | "PILE_ID_INVALID" | "PILE_NUMBER_INVALID" | "PILE_FIELDS_INVALID" | "PILE_PORT_COUNT_INVALID" | "DAILY_PROBE_LIMIT_REACHED" | "REFRESH_QUOTA_EXHAUSTED" | "PUBLIC_POOL_UNAVAILABLE" | "PUBLIC_POOL_COOKIE_DUPLICATE" | "PUBLIC_POOL_INVALID" | "PUBLIC_POOL_NOT_FOUND" | "PUBLIC_POOL_TEST_FAILED" | "SHARED_PILE_NOT_FOUND" | "SHARED_PILE_INVALID" | "SHARED_PILE_REFRESH_FAILED" | "USER_QUOTA_INVALID" | "DEVICE_ID_INVALID" | "PORT_ID_INVALID" | "HISTORY_REMOVED" | "HISTORY_QUERY_INVALID" | "HISTORY_NOT_FOUND" | "HISTORY_RANGE_TOO_LARGE" | "HISTORY_UNAVAILABLE" | "ADMIN_TREND_QUERY_INVALID" | "ADMIN_TRENDS_UNAVAILABLE" | "WATCH_RULE_INVALID" | "WATCH_TARGET_NOT_FOUND" | "WATCH_RULE_NOT_FOUND" | "WATCH_RULE_CONFLICT" | "WATCH_PILE_LIMIT_REACHED" | "WATCH_POWER_OFF_ACTIVE" | "WATCH_CREDENTIAL_EXPIRED" | "WATCH_RECURRING_DISABLED" | "WATCH_UNAVAILABLE" | "NOTIFICATION_PREFERENCE_INVALID" | "NOTIFICATION_QUERY_INVALID" | "NOTIFICATION_NOT_FOUND" | "NOTIFICATION_UNAVAILABLE" | "WXPUSHER_NOT_CONFIGURED" | "WXPUSHER_ALREADY_BOUND" | "WXPUSHER_BIND_SESSION_ACTIVE" | "WXPUSHER_BIND_SESSION_NOT_FOUND" | "WXPUSHER_UID_CONFLICT" | "WXPUSHER_NOT_BOUND" | "WXPUSHER_CHANNEL_DISABLED" | "WXPUSHER_INVALID" | "WXPUSHER_TEST_NOT_FOUND" | "WXPUSHER_RATE_LIMITED" | "WXPUSHER_UNAVAILABLE";
             error: string;
+        };
+        CookieTestResponse: {
+            error?: string;
+            snapshot: components["schemas"]["DashboardSnapshot"];
+            valid: boolean;
+        };
+        CookieUpdateRequest: {
+            cookie: string;
+            joinPublicPool?: boolean;
+        };
+        DashboardCounters: {
+            idlePortCount: number;
+            inUsePortCount: number;
+            offlinePorts: number;
+            pileCount: number;
+            portCount: number;
+        };
+        DashboardSnapshot: {
+            piles: components["schemas"]["Pile"][];
+            quota?: components["schemas"]["UserRefreshQuota"];
+            refresh: components["schemas"]["RefreshInfo"];
+            statistics: components["schemas"]["DashboardCounters"];
+            /** Format: date-time */
+            updatedAt: string;
         };
         DeletedCount: {
             /** Format: int64 */
@@ -1644,6 +1839,39 @@ export interface components {
             resolvedNotificationRows: number;
             wxPusher: components["schemas"]["WxPusherOperationsStatus"];
         };
+        Pile: {
+            address: string;
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            name: string;
+            number: string;
+            online: boolean;
+            openNum: number;
+            ports: components["schemas"]["Port"][];
+            sortOrder?: number;
+            source: string;
+            status: string;
+            /** Format: date-time */
+            updatedAt: string;
+            usedPortIds: number[];
+        };
+        Port: {
+            /** Format: double */
+            energyKwh: number;
+            id: number;
+            /** Format: double */
+            powerKw: number;
+            remainingText?: string;
+            sessionMin: number;
+            /** Format: date-time */
+            startedAt?: string;
+            status: components["schemas"]["PortStatus"];
+            /** Format: date-time */
+            updatedAt: string;
+            usedSeconds: number;
+            usedText?: string;
+        };
         PortHistoryMetrics: {
             /** Format: int64 */
             averageSessionSeconds: number | null;
@@ -1693,13 +1921,62 @@ export interface components {
         };
         /** @enum {string} */
         PortStatus: "idle" | "in_use" | "offline";
+        PublicPoolCookie: {
+            consecutiveFailures: number;
+            /** Format: date-time */
+            createdAt: string;
+            enabled: boolean;
+            id: string;
+            label: string;
+            lastError?: string;
+            /** Format: date-time */
+            lastUsedAt?: string;
+            ownerUserId?: string;
+            /** @enum {string} */
+            status: "healthy" | "expired";
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        PublicPoolCookieCreateRequest: {
+            cookie: string;
+            enabled?: boolean;
+            label: string;
+        };
+        PublicPoolCookieUpdateRequest: {
+            cookie?: string;
+            enabled?: boolean;
+            label?: string;
+        };
+        RefreshInfo: {
+            attemptedDevices: number;
+            cached: boolean;
+            failedDevices: number;
+            /** Format: date-time */
+            lastRemoteAt?: string;
+            message?: string;
+            minIntervalSeconds: number;
+            /** Format: date-time */
+            nextRemoteAt?: string;
+            /** Format: date-time */
+            nextRetryAt?: string;
+            partial: boolean;
+            personalCookieFallback?: boolean;
+            skippedDevices: number;
+            successfulDevices: number;
+            usedPool?: boolean;
+        };
         RegistrationSettings: {
             backgroundRemindersEnabled: boolean;
+            /** @description 仅允许留空或合法的 https:// 地址。 */
+            cookieGuideUrl?: string;
             defaultDeviceLimit: number;
             defaultRefreshEnabled: boolean;
+            freeDailyRefreshQuota?: number;
+            freeUserWatchAllowed?: boolean;
             inviteRequired: boolean;
             notificationRetentionDays: number;
             openRegistration: boolean;
+            pileContributionBonusQuota?: number;
             portHistoryRetentionDays: number;
             powerRestoreJitterMinutes: number;
             /**
@@ -1707,10 +1984,12 @@ export interface components {
              * @description 旧客户端兼容字段，固定返回 false；固定时段提醒已停止调度，原配置仅保留用于回滚。
              */
             readonly recurringRemindersEnabled: boolean;
+            requirePoolShareForUnlimited?: boolean;
             scheduledPowerOffEnabled: boolean;
             scheduledPowerOffEndMinute: number;
             scheduledPowerOffStartMinute: number;
             scheduledPowerOffTimezone: string;
+            sharedPileCacheTTLSeconds?: number;
             statsRetentionDays: number;
             watchDailyRefreshQuota: number;
             watchPileLimitPerUser: number;
@@ -1747,9 +2026,49 @@ export interface components {
             state: "healthy" | "degraded" | "disabled" | "power_off" | "stopped";
             trackedPiles: number;
         };
+        SharedPile: {
+            address: string;
+            contributedByUserId?: string;
+            /** Format: date-time */
+            createdAt: string;
+            deviceId: string;
+            /** Format: date-time */
+            lastFetchedAt?: string;
+            lastSnapshot?: components["schemas"]["Pile"];
+            name: string;
+            number: string;
+            openNum: number;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SharedPileUpdateRequest: {
+            address?: string;
+            name: string;
+        };
         UpdatedCount: {
             /** Format: int64 */
             updated: number;
+        };
+        UserRefreshQuota: {
+            bonusRemaining: number;
+            contributedPileCount: number;
+            cookieGuideUrl?: string;
+            /** Format: date-time */
+            dailyResetAt?: string;
+            freeDailyLimit: number;
+            freeDailyRemaining: number;
+            freeDailyUsed: number;
+            freeUserWatchAllowed: boolean;
+            hasPersonalCookie: boolean;
+            joinedPublicPool?: boolean;
+            /** @enum {string} */
+            personalCookieStatus: "none" | "valid" | "expired";
+            pileContributionBonusQuota: number;
+            publicPoolAvailable: number;
+            requirePoolShareForUnlimited?: boolean;
+            sharedPileCacheTTLSeconds?: number;
+            totalFreeRemaining: number;
+            unlimitedActive?: boolean;
         };
         /** @enum {string} */
         WatchCompletionReason: "notified" | "expired" | "cancelled";
@@ -1910,40 +2229,6 @@ export interface components {
             state: "healthy" | "degraded" | "disabled" | "stopped";
             systemFailures24Hours: number;
             uncertainDeliveries: number;
-        };
-        YybBinding: {
-            bound: boolean;
-            /** Format: date-time */
-            boundAt?: string;
-            cookieSynced?: boolean;
-            /** Format: date-time */
-            lastCheckedAt?: string;
-            message?: string;
-            nickname?: string;
-            openidSuffix?: string;
-            /** @description YYB 与 Mocele 已配置；旧接口可能缺少此字段 */
-            scanEnabled?: boolean;
-            /** @description 仅确认结果包含，用于证明本次二维码的绑定已保存；不得用旧 bound=true 推断新会话成功 */
-            sessionId?: string;
-            status?: string;
-            /**
-             * @description 无设备无需同步、同步成功、绑定已保存但同步失败
-             * @enum {string}
-             */
-            syncState?: "not_needed" | "synced" | "failed";
-        };
-        YybQr: {
-            imageBase64?: string;
-            imageUrl?: string;
-            sessionId: string;
-            status?: string;
-        };
-        YybQrPoll: {
-            binding?: components["schemas"]["YybBinding"];
-            message?: string;
-            sessionId: string;
-            /** @description pending/scanned/authorized/confirmed/expired/cancelled/unknown 为上游状态；confirming/saved 为本站状态。未知状态不得启用确认。 */
-            status: string;
         };
     };
     responses: {
@@ -2331,6 +2616,7 @@ export type AdminTrendRange = components['schemas']['AdminTrendRange'];
 export type AdminTrendsResponse = components['schemas']['AdminTrendsResponse'];
 export type AdminTrendSummary = components['schemas']['AdminTrendSummary'];
 export type AdminTrendWindow = components['schemas']['AdminTrendWindow'];
+export type AdminUserQuotaUpdateRequest = components['schemas']['AdminUserQuotaUpdateRequest'];
 export type Announcement = components['schemas']['Announcement'];
 export type AnnouncementAcknowledgementInput = components['schemas']['AnnouncementAcknowledgementInput'];
 export type AnnouncementAcknowledgementResult = components['schemas']['AnnouncementAcknowledgementResult'];
@@ -2339,6 +2625,10 @@ export type AnnouncementPage = components['schemas']['AnnouncementPage'];
 export type AnnouncementSummary = components['schemas']['AnnouncementSummary'];
 export type AnnouncementVersionInput = components['schemas']['AnnouncementVersionInput'];
 export type CodedErrorResponse = components['schemas']['CodedErrorResponse'];
+export type CookieTestResponse = components['schemas']['CookieTestResponse'];
+export type CookieUpdateRequest = components['schemas']['CookieUpdateRequest'];
+export type DashboardCounters = components['schemas']['DashboardCounters'];
+export type DashboardSnapshot = components['schemas']['DashboardSnapshot'];
 export type DeletedCount = components['schemas']['DeletedCount'];
 export type DeviceHistoryResponse = components['schemas']['DeviceHistoryResponse'];
 export type ErrorResponse = components['schemas']['ErrorResponse'];
@@ -2360,14 +2650,23 @@ export type NotificationSeverity = components['schemas']['NotificationSeverity']
 export type NotificationStatusFilter = components['schemas']['NotificationStatusFilter'];
 export type NotificationType = components['schemas']['NotificationType'];
 export type OperationsStatus = components['schemas']['OperationsStatus'];
+export type Pile = components['schemas']['Pile'];
+export type Port = components['schemas']['Port'];
 export type PortHistoryMetrics = components['schemas']['PortHistoryMetrics'];
 export type PortHistoryResponse = components['schemas']['PortHistoryResponse'];
 export type PortHistorySummary = components['schemas']['PortHistorySummary'];
 export type PortHistoryTimelineItem = components['schemas']['PortHistoryTimelineItem'];
 export type PortStatus = components['schemas']['PortStatus'];
+export type PublicPoolCookie = components['schemas']['PublicPoolCookie'];
+export type PublicPoolCookieCreateRequest = components['schemas']['PublicPoolCookieCreateRequest'];
+export type PublicPoolCookieUpdateRequest = components['schemas']['PublicPoolCookieUpdateRequest'];
+export type RefreshInfo = components['schemas']['RefreshInfo'];
 export type RegistrationSettings = components['schemas']['RegistrationSettings'];
 export type ReminderOperationsStatus = components['schemas']['ReminderOperationsStatus'];
+export type SharedPile = components['schemas']['SharedPile'];
+export type SharedPileUpdateRequest = components['schemas']['SharedPileUpdateRequest'];
 export type UpdatedCount = components['schemas']['UpdatedCount'];
+export type UserRefreshQuota = components['schemas']['UserRefreshQuota'];
 export type WatchCompletionReason = components['schemas']['WatchCompletionReason'];
 export type WatchOverview = components['schemas']['WatchOverview'];
 export type WatchRule = components['schemas']['WatchRule'];
@@ -2383,9 +2682,6 @@ export type WxPusherChannelUpdateRequest = components['schemas']['WxPusherChanne
 export type WxPusherErrorCode = components['schemas']['WxPusherErrorCode'];
 export type WxPusherEventType = components['schemas']['WxPusherEventType'];
 export type WxPusherOperationsStatus = components['schemas']['WxPusherOperationsStatus'];
-export type YybBinding = components['schemas']['YybBinding'];
-export type YybQr = components['schemas']['YybQr'];
-export type YybQrPoll = components['schemas']['YybQrPoll'];
 export type ResponseAdminRequired = components['responses']['AdminRequired'];
 export type ResponseAdminTrendsUnavailable = components['responses']['AdminTrendsUnavailable'];
 export type ResponseHistoryNotFound = components['responses']['HistoryNotFound'];
@@ -2456,6 +2752,200 @@ export interface operations {
             };
         };
     };
+    listAdminPublicPool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 公共 Cookie 池列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPoolCookie"][];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+        };
+    };
+    createAdminPublicPoolCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicPoolCookieCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 新增成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPoolCookie"];
+                };
+            };
+            /** @description 参数或 Cookie 格式无效（PUBLIC_POOL_INVALID） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 公共池已存在相同凭据（PUBLIC_POOL_COOKIE_DUPLICATE） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteAdminPublicPoolCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                poolId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 未找到对应条目（PUBLIC_POOL_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
+    updateAdminPublicPoolCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                poolId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicPoolCookieUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的公共 Cookie 条目 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPoolCookie"];
+                };
+            };
+            /** @description 参数无效或尝试覆盖用户互助 Cookie 凭据（PUBLIC_POOL_INVALID） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 未找到对应条目（PUBLIC_POOL_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            /** @description 重复凭据冲突（PUBLIC_POOL_COOKIE_DUPLICATE） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
+    testAdminPublicPoolCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                poolId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 实测更新后的条目状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPoolCookie"];
+                };
+            };
+            /** @description 实测失败（PUBLIC_POOL_TEST_FAILED） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 未找到对应条目（PUBLIC_POOL_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
     getAdminSettings: {
         parameters: {
             query?: never;
@@ -2513,6 +3003,153 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["AdminRequired"];
             405: components["responses"]["MethodNotAllowed"];
+        };
+    };
+    listAdminSharedPiles: {
+        parameters: {
+            query?: {
+                limit?: number;
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 公共桩库列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedPile"][];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+        };
+    };
+    deleteAdminSharedPile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 未找到公共桩（SHARED_PILE_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
+    updateAdminSharedPile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedPileUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的公共桩记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedPile"];
+                };
+            };
+            /** @description 名称或地址无效（SHARED_PILE_INVALID） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 未找到公共桩（SHARED_PILE_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
+    refreshAdminSharedPile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 刷新后的公共桩记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedPile"];
+                };
+            };
+            /** @description 刷新失败（SHARED_PILE_REFRESH_FAILED） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
+            /** @description 未找到公共桩（SHARED_PILE_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
         };
     };
     getAdminTrends: {
@@ -2576,6 +3213,43 @@ export interface operations {
             403: components["responses"]["AdminRequired"];
             405: components["responses"]["MethodNotAllowed"];
             503: components["responses"]["AdminTrendsUnavailable"];
+        };
+    };
+    updateAdminUserQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserQuotaUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的用户额度快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRefreshQuota"];
+                };
+            };
+            /** @description 奖励额度数值无效（USER_QUOTA_INVALID） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["AdminRequired"];
         };
     };
     getWxPusherChannel: {
@@ -2997,160 +3671,272 @@ export interface operations {
             };
         };
     };
-    getYybBinding: {
+    refreshSinglePile: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description 当前用户已绑定的 6–64 位数字设备 ID */
+                deviceId: components["parameters"]["DeviceId"];
+            };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description scanEnabled 仅表示 YYB 与 Mocele 均已配置 */
+            /** @description 刷新后的完整工作台快照 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["YybBinding"];
+                    "application/json": components["schemas"]["DashboardSnapshot"];
                 };
             };
-            401: components["responses"]["Unauthenticated"];
-        };
-    };
-    deleteYybBinding: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已解除 */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthenticated"];
-        };
-    };
-    createYybQr: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 后端重启或 30 分钟后需重新生成；不保存绑定 */
-            200: {
+            /** @description 设备 ID 格式无效（PILE_ID_INVALID） */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["YybQr"];
+                    "application/json": components["schemas"]["CodedErrorResponse"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            /** @description 未配置扫码或暂时无法创建会话 */
+            403: components["responses"]["OrdinaryUserRequired"];
+            /** @description 免费刷新额度与奖励次数已耗尽（REFRESH_QUOTA_EXHAUSTED） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            /** @description 公共查询通道暂无可用凭据（PUBLIC_POOL_UNAVAILABLE） */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
             };
         };
     };
-    confirmYybQr: {
+    getUserQuota: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                sessionId: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description 绑定已保存；凭据同步失败也保留 bound=true，用 syncState=failed 表达 */
+            /** @description 当前用户额度快照 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["PrivateNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRefreshQuota"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+        };
+    };
+    updatePersonalCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CookieUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的工作台快照与额度信息 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["YybBinding"];
+                    "application/json": components["schemas"]["DashboardSnapshot"];
                 };
             };
-            401: components["responses"]["Unauthenticated"];
-            /** @description 会话不属于当前用户或已失效，QR_SESSION_INVALID */
-            404: {
+            /** @description Cookie 缺失、过长或格式无效 */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description QR_NOT_AUTHORIZED、QR_CONFIRM_IN_PROGRESS 或 YYB_BINDING_BUSY；进行中的操作应查询同会话状态，不盲目重试 */
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            /** @description 该 Cookie 已存在于互助公共池（PUBLIC_POOL_COOKIE_DUPLICATE） */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
-            };
-            /** @description 绑定未保存成功；可重新检查后重试 */
-            500: {
-                headers: {
-                    [name: string]: unknown;
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
                 };
-                content?: never;
-            };
-            /** @description 暂时无法确认扫码授权 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
-    pollYybQr: {
+    clearPersonalCookie: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                sessionId: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description authorized/confirmed 仍需用户确认；saved 才表示本站已保存，附带同会话 binding */
+            /** @description 清除后的工作台快照与额度信息 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["YybQrPoll"];
+                    "application/json": components["schemas"]["DashboardSnapshot"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
-            /** @description 会话不属于当前用户或已失效，QR_SESSION_INVALID */
-            404: {
+            403: components["responses"]["OrdinaryUserRequired"];
+        };
+    };
+    joinPublicPool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 加入互助池后的工作台快照与额度信息 */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DashboardSnapshot"];
+                };
             };
-            /** @description 暂时无法读取扫码状态，不代表授权失败 */
+            /** @description 个人 Cookie 校验失败（JOIN_POOL_FAILED） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            /** @description 相同凭据已在互助公共池（PUBLIC_POOL_COOKIE_DUPLICATE） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+        };
+    };
+    leavePublicPool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 撤回后的工作台快照与额度信息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardSnapshot"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+        };
+    };
+    testPersonalCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 实测结果（valid=true/false）及最新工作台快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CookieTestResponse"];
+                };
+            };
+            /** @description 当前账户未配置个人 Cookie（PERSONAL_COOKIE_REQUIRED） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
+            /** @description 上游探测失败（COOKIE_TEST_FAILED） */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CodedErrorResponse"];
+                };
             };
+        };
+    };
+    searchSharedPiles: {
+        parameters: {
+            query?: {
+                limit?: number;
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 匹配的共享桩列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedPile"][];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["OrdinaryUserRequired"];
         };
     };
     getWatchOverview: {

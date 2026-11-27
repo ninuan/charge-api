@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -25,13 +25,13 @@ jobs:
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -39,14 +39,21 @@ jobs:
       - name: Install dependencies
         run: make setup
 
+      - name: Lint shell scripts
+        run: shellcheck -S warning -x scripts/*.sh scripts/lib/*.sh
+
       # check.sh 与本地提交门禁完全一致：OpenAPI 类型漂移、部署脚本测试、
-      # 前端 lint/测试、Go 测试/构建、类型检查与生产构建。
+      # 前端 lint/测试、Go 静态检查/测试/构建、类型检查与生产构建。
       - name: Run checks
         run: bash scripts/check.sh
 
+      - name: Run Go race detector
+        working-directory: backend
+        run: go test -race -count=1 ./...
+
       - name: Scan Go dependencies
         working-directory: backend
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
       - name: Scan frontend dependencies
         run: pnpm --dir frontend audit --audit-level high
@@ -56,3 +63,8 @@ jobs:
 
       - name: Run browser tests
         run: pnpm --dir frontend test:e2e
+
+      - name: Run full-stack announcement integration tests
+        env:
+          SKIP_STATIC_BUILD: "1"
+        run: pnpm --dir frontend test:e2e:announcements

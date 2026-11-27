@@ -273,14 +273,18 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 	if operationsErr == nil && operations.Reminders.State == "degraded" {
 		exceptions = append(exceptions, model.SystemException{
 			ID: "operations-reminder", Username: "系统", Type: "reminder",
-			Level: "warning", Message: operations.Reminders.Message, Time: now,
+			Level: "warning", Message: operations.Reminders.Message, Time: now.Truncate(24 * time.Hour),
 		})
 	}
 	if operationsErr == nil && (operations.WxPusher.State == "stopped" ||
 		operations.WxPusher.ConsecutiveSystemFailures >= 3) {
+		at := now.Truncate(24 * time.Hour)
+		if operations.WxPusher.LastFailureAt != nil {
+			at = *operations.WxPusher.LastFailureAt
+		}
 		exceptions = append(exceptions, model.SystemException{
 			ID: "operations-wxpusher-system", Username: "系统", Type: "notification_delivery",
-			Level: "warning", Message: operations.WxPusher.Message, Time: now,
+			Level: "warning", Message: operations.WxPusher.Message, Time: at,
 		})
 	}
 	if operationsErr == nil && operations.WxPusher.OldestPendingAt != nil &&
@@ -316,19 +320,17 @@ func (m *Manager) AdminStatsResult() (model.AdminStats, error) {
 	if err != nil {
 		return model.AdminStats{}, fmt.Errorf("load admin incidents: %w", err)
 	}
-	for _, issue := range persisted {
+	for i, issue := range persisted {
 		if _, active := activeIssueIDs[issue.ID]; active || issue.Status == "resolved" || !isDerivedAdminIncident(issue.ID) {
 			continue
 		}
-		if _, err := m.repository.UpdateIncident(
+		updated, err := m.repository.UpdateIncident(
 			issue.ID, "resolved", "问题已不再出现，系统自动标记为已解决", "系统", now,
-		); err != nil {
+		)
+		if err != nil {
 			return model.AdminStats{}, fmt.Errorf("resolve inactive admin incident: %w", err)
 		}
-	}
-	persisted, err = m.repository.ListIncidents("", "", "")
-	if err != nil {
-		return model.AdminStats{}, fmt.Errorf("reload admin incidents: %w", err)
+		persisted[i] = updated
 	}
 	activeIncidents := make([]model.SystemException, 0, len(persisted))
 	for _, issue := range persisted {

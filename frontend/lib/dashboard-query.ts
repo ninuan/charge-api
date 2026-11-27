@@ -19,19 +19,3 @@ export function parseDashboardQuery(search: string): DashboardQuery {
         : "all",
   }
 }
-
-export function serializeDashboardQuery(
-  query: DashboardQuery,
-  currentSearch = ""
-) {
-  const params = new URLSearchParams(currentSearch)
-  const search = query.search.trim()
-
-  if (search) params.set("q", search)
-  else params.delete("q")
-
-  if (query.filter === "all") params.delete("status")
-  else params.set("status", query.filter)
-
-  return params.toString()
-}

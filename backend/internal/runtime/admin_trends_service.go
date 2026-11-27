@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"charge-dashboard/internal/model"
+	"charge-dashboard/internal/persistence"
 )
 
 var ErrAdminTrendQueryInvalid = errors.New("invalid admin trend query")
@@ -37,13 +38,21 @@ func (m *Manager) adminTrendsAt(rangeName, timezone string, now time.Time) (mode
 	if err != nil {
 		return model.AdminTrends{}, fmt.Errorf("load admin trend offline ports: %w", err)
 	}
+	metricRanges := make([]persistence.MetricRange, len(buckets))
+	for index, bucket := range buckets {
+		metricRanges[index] = persistence.MetricRange{
+			Start: bucket.start,
+			End:   queryEnds[index],
+		}
+	}
+	queryEnd := window.End.Add(time.Second)
+	bucketMetrics, totals, err := m.repository.MetricBuckets(metricRanges, window.Start, queryEnd)
+	if err != nil {
+		return model.AdminTrends{}, fmt.Errorf("load admin trend metrics: %w", err)
+	}
 	points := make([]model.AdminTrendPoint, 0, len(buckets))
 	for index, bucket := range buckets {
-		queryEnd := queryEnds[index]
-		metrics, err := m.repository.MetricAggregate(bucket.start, queryEnd)
-		if err != nil {
-			return model.AdminTrends{}, fmt.Errorf("load admin trend metric bucket: %w", err)
-		}
+		metrics := bucketMetrics[index]
 		points = append(points, model.AdminTrendPoint{
 			Start: bucket.start, End: bucket.end,
 			Requests: metrics.Requests, RemoteAttempts: metrics.Remote,
@@ -51,12 +60,6 @@ func (m *Manager) adminTrendsAt(rangeName, timezone string, now time.Time) (mode
 			RemoteSuccessRate: metricSuccessRate(metrics.RemoteOK, metrics.Remote),
 			ActiveUsers:       metrics.ActiveUsers, OfflinePorts: offlineCounts[index],
 		})
-	}
-
-	queryEnd := window.End.Add(time.Second)
-	totals, err := m.repository.MetricAggregate(window.Start, queryEnd)
-	if err != nil {
-		return model.AdminTrends{}, fmt.Errorf("load admin trend summary: %w", err)
 	}
 	offlinePorts := 0
 	if len(offlineCounts) > 0 {

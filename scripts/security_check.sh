@@ -3,46 +3,34 @@
 set -Eeuo pipefail
 
 CHARGE_BASE_URL="${CHARGE_BASE_URL:-http://127.0.0.1:8080}"
-YYB_BASE_URL="${YYB_BASE_URL:-http://127.0.0.1:8000}"
-YYB_LISTEN_PORT="${YYB_LISTEN_PORT:-8000}"
+CHARGE_LISTEN_PORT="${CHARGE_LISTEN_PORT:-8080}"
 CHARGE_DB_FILE="${CHARGE_DB_FILE:-/var/lib/charge-api/charge_state.db}"
-YYB_DB_FILE="${YYB_DB_FILE:-/opt/yyb_go/resource/db/yyb.db}"
-LOG_UNITS="${LOG_UNITS:-charge-api yyb-go}"
+LOG_UNITS="${LOG_UNITS:-charge-api}"
 LOG_SINCE="${LOG_SINCE:-1 hour ago}"
-CHARGE_SIGNED_FLOW_URL="${CHARGE_SIGNED_FLOW_URL:-}"
-CHARGE_SESSION_COOKIE="${CHARGE_SESSION_COOKIE:-}"
-YYB_SENSITIVE_REGEX="${YYB_SENSITIVE_REGEX:-login_buffer|accesstoken|refreshtoken|IQdV|wxopenid}"
-CHARGE_SENSITIVE_REGEX="${CHARGE_SENSITIVE_REGEX:-wxopenid|info=|deviceid=|yyb-openid}"
-LOG_SENSITIVE_REGEX="${LOG_SENSITIVE_REGEX:-accesstoken|refreshtoken|login_buffer|info=|wxopenid|Cookie:}"
+CHARGE_SENSITIVE_REGEX="${CHARGE_SENSITIVE_REGEX:-wxopenid|info=|deviceid=|AT_[A-Za-z0-9]{16,}}"
+LOG_SENSITIVE_REGEX="${LOG_SENSITIVE_REGEX:-info=|wxopenid|Cookie:|charge_session=|AT_[A-Za-z0-9]{16,}}"
 DRY_RUN=0
 
 usage() {
   cat <<USAGE
 Usage: scripts/security_check.sh [--dry-run]
 
-End-to-end security checks for the Charge + yyb_go loopback deployment.
+End-to-end security checks for the Charge Console loopback deployment.
 
 Environment variables:
   CHARGE_BASE_URL          Charge URL, default: http://127.0.0.1:8080
-  YYB_BASE_URL             yyb_go URL, default: http://127.0.0.1:8000
-  YYB_LISTEN_PORT          yyb_go listen port, default: 8000
+  CHARGE_LISTEN_PORT       Charge listen port, default: 8080
   CHARGE_DB_FILE           Charge SQLite file, default: /var/lib/charge-api/charge_state.db
-  YYB_DB_FILE              yyb_go SQLite file, default: /opt/yyb_go/resource/db/yyb.db
-  LOG_UNITS                systemd units, default: charge-api yyb-go
+  LOG_UNITS                systemd units, default: charge-api
   LOG_SINCE                journalctl time window, default: 1 hour ago
-  CHARGE_SIGNED_FLOW_URL   Optional Charge endpoint that triggers a signed yyb_go call
-  CHARGE_SESSION_COOKIE    Optional Cookie header value for CHARGE_SIGNED_FLOW_URL
-  YYB_SENSITIVE_REGEX      Regex used for yyb_go DB plaintext scan
   CHARGE_SENSITIVE_REGEX   Regex used for Charge DB plaintext scan
   LOG_SENSITIVE_REGEX      Regex used for journal log plaintext scan
 
 Checks:
-  1. Unsigned yyb_go /accounts request returns 401.
-  2. Charge is reachable via /healthz, and optional signed flow URL succeeds.
-  3. yyb_go listens on 127.0.0.1:8000 only, not 0.0.0.0:8000.
-  4. yyb_go SQLite does not contain known plaintext tokens.
-  5. Charge SQLite does not contain known plaintext Cookie or yyb binding values.
-  6. Recent service logs do not contain sensitive values.
+  1. Charge is reachable via /healthz.
+  2. Charge listens on loopback (127.0.0.1 / ::1) only, not 0.0.0.0.
+  3. Charge SQLite DB (+ WAL) does not contain known plaintext Cookie or token values.
+  4. Recent service logs do not contain sensitive values.
 USAGE
 }
 
@@ -66,15 +54,16 @@ validate_http_url() {
   fi
 }
 
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/charge-security-check.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
 scan_file_no_matches() {
   local file="$1" regex="$2" label="$3"
   command -v strings >/dev/null 2>&1 || fail "missing required command: strings"
   [[ -f "$file" ]] || fail "${label} file not found: ${file}"
   [[ -r "$file" ]] || fail "${label} file is not readable: ${file}"
-  local tmp_out
-  tmp_out="$(mktemp)"
+  local tmp_out="$TMP_DIR/scan.out"
   if ! strings "$file" > "$tmp_out"; then
-    rm -f "$tmp_out"
     fail "failed to scan ${label}: ${file}"
   fi
   local grep_status=0
@@ -102,79 +91,42 @@ for arg in "$@"; do
   esac
 done
 
-validate_http_url "YYB_BASE_URL" "$YYB_BASE_URL"
 validate_http_url "CHARGE_BASE_URL" "$CHARGE_BASE_URL"
-if [[ -n "$CHARGE_SIGNED_FLOW_URL" ]]; then
-  validate_http_url "CHARGE_SIGNED_FLOW_URL" "$CHARGE_SIGNED_FLOW_URL"
-fi
-if [[ ! "$YYB_LISTEN_PORT" =~ ^[0-9]+$ ]]; then
-  fail "invalid YYB_LISTEN_PORT: ${YYB_LISTEN_PORT}"
+if [[ ! "$CHARGE_LISTEN_PORT" =~ ^[0-9]+$ ]]; then
+  fail "invalid CHARGE_LISTEN_PORT: ${CHARGE_LISTEN_PORT}"
 fi
 
-log_step "Unsigned yyb_go requests are rejected"
-if [[ "$DRY_RUN" -eq 1 ]]; then
-  print_cmd "curl -i ${YYB_BASE_URL}/accounts"
-else
-  yyb_status="$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "${YYB_BASE_URL}/accounts")"
-  [[ "$yyb_status" == "401" ]] || fail "expected unsigned yyb_go /accounts to return 401, got $yyb_status"
-  echo "OK: unsigned yyb_go /accounts returned 401"
-fi
-
-log_step "Charge API is reachable through Charge only"
+log_step "Charge API is reachable via /healthz"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   print_cmd "curl --silent --fail ${CHARGE_BASE_URL}/healthz >/dev/null"
 else
   curl --silent --fail --max-time 10 "${CHARGE_BASE_URL}/healthz" >/dev/null
-fi
-if [[ -n "$CHARGE_SIGNED_FLOW_URL" ]]; then
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    print_cmd "curl --silent --fail ${CHARGE_SIGNED_FLOW_URL} >/dev/null"
-  elif [[ -n "$CHARGE_SESSION_COOKIE" ]]; then
-    printf 'header = "Cookie: %s"\n' "$CHARGE_SESSION_COOKIE" | \
-      curl --silent --fail --max-time 10 --config - "$CHARGE_SIGNED_FLOW_URL" >/dev/null
-    echo "OK: configured Charge signed-flow endpoint succeeded"
-  else
-    curl --silent --fail --max-time 10 "$CHARGE_SIGNED_FLOW_URL" >/dev/null
-    echo "OK: configured Charge signed-flow endpoint succeeded"
-  fi
-else
-  echo "INFO: CHARGE_SIGNED_FLOW_URL is not set; checked /healthz only."
+  echo "OK: ${CHARGE_BASE_URL}/healthz succeeded"
 fi
 
-log_step "yyb_go is bound to loopback only"
+log_step "Charge API is bound to loopback only"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  print_cmd "ss -lntp | grep ':${YYB_LISTEN_PORT}'"
+  print_cmd "ss -lntp | grep ':${CHARGE_LISTEN_PORT}'"
 else
   command -v ss >/dev/null 2>&1 || fail "missing required command: ss"
-  listen_output="$(ss -H -lntp | grep -E ":${YYB_LISTEN_PORT}([[:space:]]|$)" || true)"
-  [[ -n "$listen_output" ]] || fail "no listener found for port ${YYB_LISTEN_PORT}"
+  listen_output="$(ss -H -lntp | grep -E ":${CHARGE_LISTEN_PORT}([[:space:]]|$)" || true)"
+  [[ -n "$listen_output" ]] || fail "no listener found for port ${CHARGE_LISTEN_PORT}"
   echo "$listen_output"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     local_addr="$(awk '{print $4}' <<< "$line")"
     case "$local_addr" in
-      "127.0.0.1:${YYB_LISTEN_PORT}"|"[::1]:${YYB_LISTEN_PORT}"|"::1:${YYB_LISTEN_PORT}")
+      "127.0.0.1:${CHARGE_LISTEN_PORT}"|"[::1]:${CHARGE_LISTEN_PORT}"|"::1:${CHARGE_LISTEN_PORT}")
         ;;
       *)
-        fail "yyb_go listener is exposed on non-loopback address: ${local_addr}"
+        fail "Charge API listener is exposed on non-loopback address: ${local_addr}"
         ;;
     esac
   done <<< "$listen_output"
-  echo "OK: yyb_go listener is loopback-only"
+  echo "OK: Charge API listener is loopback-only"
 fi
 
-log_step "yyb_go DB contains no known plaintext sensitive values"
-if [[ "$DRY_RUN" -eq 1 ]]; then
-  print_cmd "strings ${YYB_DB_FILE} | grep -qE '${YYB_SENSITIVE_REGEX}'"
-else
-  scan_file_no_matches "$YYB_DB_FILE" "$YYB_SENSITIVE_REGEX" "yyb_go DB"
-  if [[ -f "${YYB_DB_FILE}-wal" ]]; then
-    scan_file_no_matches "${YYB_DB_FILE}-wal" "$YYB_SENSITIVE_REGEX" "yyb_go DB WAL"
-  fi
-  echo "OK: yyb_go DB plaintext scan found no matches"
-fi
-
-log_step "Charge DB contains no known plaintext Cookie or yyb binding values"
+log_step "Charge DB contains no known plaintext Cookie or token values"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   print_cmd "strings ${CHARGE_DB_FILE} | grep -qE '${CHARGE_SENSITIVE_REGEX}'"
 else
@@ -201,9 +153,8 @@ else
   for unit in "${units[@]}"; do
     journal_args+=("-u" "$unit")
   done
-  tmp_logs="$(mktemp)"
+  tmp_logs="$TMP_DIR/journal.out"
   if ! journalctl "${journal_args[@]}" --since "$LOG_SINCE" > "$tmp_logs"; then
-    rm -f "$tmp_logs"
     fail "failed to read service logs via journalctl"
   fi
   grep_status=0

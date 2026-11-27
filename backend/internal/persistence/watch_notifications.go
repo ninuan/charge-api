@@ -316,7 +316,7 @@ func (s *Store) LoadNotificationPreference(userID string) (model.NotificationPre
 	var preference model.NotificationPreference
 	var browserEnabled, quietHoursEnabled int
 	var updatedAt int64
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT user_id, browser_enabled, quiet_hours_enabled,
 		       quiet_start_minute, quiet_end_minute, timezone, updated_at
 		FROM notification_preferences
@@ -605,7 +605,7 @@ func (s *Store) ListNotifications(userID string, limit int) ([]model.Notificatio
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, user_id, type, severity, title, message, device_id, port_id,
 		       source_event_id, dedupe_key, read_at, resolved_at,
 		       occurrence_count, last_occurred_at, created_at
@@ -661,7 +661,7 @@ func (s *Store) ListNotificationsPage(query NotificationPageQuery) (model.Notifi
 	}
 	if query.CursorID != "" {
 		var cursorLastOccurredAt int64
-		err := s.db.QueryRow(`
+		err := s.reader().QueryRow(`
 			SELECT last_occurred_at FROM notifications WHERE user_id = ? AND id = ?
 		`, query.UserID, query.CursorID).Scan(&cursorLastOccurredAt)
 		if err == sql.ErrNoRows {
@@ -674,7 +674,7 @@ func (s *Store) ListNotificationsPage(query NotificationPageQuery) (model.Notifi
 		args = append(args, cursorLastOccurredAt, cursorLastOccurredAt, query.CursorID)
 	}
 	args = append(args, query.Limit+1)
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, user_id, type, severity, title, message, device_id, port_id,
 		       source_event_id, dedupe_key, read_at, resolved_at,
 		       occurrence_count, last_occurred_at, created_at
@@ -705,7 +705,7 @@ func (s *Store) ListNotificationsPage(query NotificationPageQuery) (model.Notifi
 		nextCursor = items[len(items)-1].ID
 	}
 	var unreadCount int
-	if err := s.db.QueryRow(`
+	if err := s.reader().QueryRow(`
 		SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL
 	`, query.UserID).Scan(&unreadCount); err != nil {
 		return model.NotificationPage{}, fmt.Errorf("count unread notifications: %w", err)
@@ -719,7 +719,7 @@ func (s *Store) LoadNotification(userID, notificationID string) (model.Notificat
 	if userID == "" || notificationID == "" {
 		return model.Notification{}, false, fmt.Errorf("notification lookup requires user and notification")
 	}
-	notification, err := scanNotification(s.db.QueryRow(`
+	notification, err := scanNotification(s.reader().QueryRow(`
 		SELECT id, user_id, type, severity, title, message, device_id, port_id,
 		       source_event_id, dedupe_key, read_at, resolved_at,
 		       occurrence_count, last_occurred_at, created_at
@@ -812,13 +812,22 @@ func (s *Store) PruneNotifications(before time.Time) (int64, error) {
 	if err != nil {
 		return resolved, err
 	}
-	informational, err := s.pruneRowsInBatchesWhere(
+	informationalRecent, err := s.pruneRowsInBatchesWhere(
 		"notifications",
-		"COALESCE(NULLIF(last_occurred_at, 0), created_at)",
+		"last_occurred_at",
 		cutoff,
-		"resolved_at IS NULL AND type IN ('port_idle', 'pile_recovered')",
+		"resolved_at IS NULL AND type IN ('port_idle', 'pile_recovered') AND last_occurred_at > 0",
 	)
-	return resolved + informational, err
+	if err != nil {
+		return resolved + informationalRecent, err
+	}
+	informationalLegacy, err := s.pruneRowsInBatchesWhere(
+		"notifications",
+		"created_at",
+		cutoff,
+		"resolved_at IS NULL AND type IN ('port_idle', 'pile_recovered') AND last_occurred_at = 0",
+	)
+	return resolved + informationalRecent + informationalLegacy, err
 }
 
 func (s *Store) SaveWatchRefreshState(state model.WatchRefreshState) error {
@@ -871,7 +880,7 @@ func (s *Store) LoadWatchRefreshState(userID, deviceID string) (model.WatchRefre
 	var nextAttemptAt, updatedAt int64
 	var lastAttemptAt, lastSuccessAt sql.NullInt64
 	var availabilityKnown, hadIdlePort int
-	err := s.db.QueryRow(`
+	err := s.reader().QueryRow(`
 		SELECT user_id, device_id, next_attempt_at, last_attempt_at, last_success_at,
 		       consecutive_failures, paused_reason, quota_date, quota_used,
 		       availability_known, had_idle_port, availability_event_id, updated_at
@@ -920,9 +929,9 @@ func (s *Store) ListWatchRefreshStates(userID string) ([]model.WatchRefreshState
 		err  error
 	)
 	if userID == "" {
-		rows, err = s.db.Query(query + ` ORDER BY user_id, device_id`)
+		rows, err = s.reader().Query(query + ` ORDER BY user_id, device_id`)
 	} else {
-		rows, err = s.db.Query(query+` WHERE user_id = ? ORDER BY device_id`, userID)
+		rows, err = s.reader().Query(query+` WHERE user_id = ? ORDER BY device_id`, userID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list watch refresh states: %w", err)
@@ -984,7 +993,7 @@ func (s *Store) WatchRefreshQuotaUsed(userID, quotaDate string) (int, error) {
 		return 0, fmt.Errorf("watch refresh quota requires user and date")
 	}
 	var used int
-	if err := s.db.QueryRow(`
+	if err := s.reader().QueryRow(`
 		SELECT COALESCE(SUM(quota_used), 0)
 		FROM watch_refresh_states
 		WHERE user_id = ? AND quota_date = ?

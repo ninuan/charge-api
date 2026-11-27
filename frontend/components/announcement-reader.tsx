@@ -15,6 +15,7 @@ import {
   type Announcement,
   type AnnouncementPage,
 } from "@/lib/announcements"
+import { safeHref } from "@/lib/safe-href"
 
 export function AnnouncementReader({
   selection,
@@ -233,18 +234,20 @@ export function AnnouncementReader({
                   <p className="py-4 leading-relaxed break-words whitespace-pre-wrap">
                     {data.body}
                   </p>
-                  {data.linkUrl && (
-                    <a
-                      className="text-primary underline"
-                      href={data.linkUrl}
-                      target={
-                        data.linkUrl.startsWith("https:") ? "_blank" : undefined
-                      }
-                      rel="noopener noreferrer"
-                    >
-                      {data.linkLabel}
-                    </a>
-                  )}
+                  {(() => {
+                    const href = safeHref(data.linkUrl, { allowRelative: true })
+                    if (!href) return null
+                    return (
+                      <a
+                        className="text-primary underline"
+                        href={href}
+                        target={href.startsWith("https:") ? "_blank" : undefined}
+                        rel="noopener noreferrer"
+                      >
+                        {data.linkLabel || href}
+                      </a>
+                    )
+                  })()}
                   <div className="mt-4 flex gap-2">
                     <WorkbenchButton onClick={() => onChange("all")}>
                       返回列表

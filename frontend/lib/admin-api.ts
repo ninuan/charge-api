@@ -9,15 +9,21 @@ import type {
   InviteCode,
   InviteCodePage,
   OperationsStatus,
-  PublicPoolCookie,
-  RegistrationSettings,
-  SharedPile,
   SystemException,
   TemporaryPasswordResponse,
-  UserRefreshQuota,
   UserRole,
 } from "@/lib/types"
-import type { AdminTrendRange, AdminTrendsResponse } from "@/lib/api/generated"
+import type {
+  AdminTrendRange,
+  AdminTrendsResponse,
+  PublicPoolCookie,
+  PublicPoolCookieCreateRequest,
+  PublicPoolCookieUpdateRequest,
+  RegistrationSettings,
+  SharedPile,
+  SharedPileUpdateRequest,
+  UserRefreshQuota,
+} from "@/lib/api/generated"
 import {
   request,
   RequestError,
@@ -172,7 +178,6 @@ export const adminApi = {
       enabled?: boolean
       deviceLimit?: number
       refreshEnabled?: boolean
-      password?: string
       role?: UserRole
     }
   ) =>
@@ -223,11 +228,7 @@ export const adminApi = {
       {},
       "加载公共 Cookie 池失败"
     ),
-  createPublicPoolCookie: (payload: {
-    label: string
-    cookie: string
-    enabled?: boolean
-  }) =>
+  createPublicPoolCookie: (payload: PublicPoolCookieCreateRequest) =>
     request<PublicPoolCookie>(
       "/api/admin/public-pool",
       {
@@ -239,7 +240,7 @@ export const adminApi = {
     ),
   updatePublicPoolCookie: (
     id: string,
-    payload: { label?: string; cookie?: string; enabled?: boolean }
+    payload: PublicPoolCookieUpdateRequest
   ) =>
     request<PublicPoolCookie>(
       `/api/admin/public-pool/${encodeURIComponent(id)}`,
@@ -272,10 +273,7 @@ export const adminApi = {
       "加载公共桩库失败"
     )
   },
-  updateSharedPile: (
-    deviceId: string,
-    payload: { name: string; address: string }
-  ) =>
+  updateSharedPile: (deviceId: string, payload: SharedPileUpdateRequest) =>
     request<SharedPile>(
       `/api/admin/shared-piles/${encodeURIComponent(deviceId)}`,
       {

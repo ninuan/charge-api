@@ -303,13 +303,33 @@ function WorkbenchContent() {
   const viewMode = params.get("view") === "catalog" ? "catalog" : "mine"
   const [catalogItems, setCatalogItems] = useState<SharedPile[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState("")
+  const [catalogRetrySeq, setCatalogRetrySeq] = useState(0)
   const [catalogAddingId, setCatalogAddingId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshingPileId, setRefreshingPileId] = useState<string | null>(null)
   const [ordering, setOrdering] = useState(false)
+  const [prevOrderingInvalid, setPrevOrderingInvalid] = useState(false)
   const [reordering, setReordering] = useState(false)
   const [refreshError, setRefreshError] = useState("")
   const [watchPileId, setWatchPileId] = useState<string | null>(null)
+  const [closingPileId, setClosingPileId] = useState<string | null>(null)
+  if (closingPileId && selectedId !== closingPileId) {
+    setClosingPileId(null)
+  }
+  const inspectorSheetRef = useRef<HTMLDivElement>(null)
+  const inspectorOpenerRef = useRef<HTMLElement | null>(null)
+  const wasInspectorOpenRef = useRef(false)
+  const hasActiveFilter = Boolean(search.trim()) || query.filter !== "all"
+  const orderingInvalid =
+    hasActiveFilter || viewMode !== "mine" || snapshot.piles.length < 2
+  if (orderingInvalid !== prevOrderingInvalid) {
+    setPrevOrderingInvalid(orderingInvalid)
+    if (orderingInvalid) {
+      setOrdering(false)
+    }
+  }
+  const isOrdering = ordering && !orderingInvalid
 
   const ownedPileIds = useMemo(
     () => new Set(snapshot.piles.map((p) => p.id)),
@@ -321,12 +341,23 @@ function WorkbenchContent() {
     let active = true
     const timer = window.setTimeout(() => {
       setCatalogLoading(true)
+      setCatalogError("")
       searchSharedPiles(deferredSearch)
         .then((items) => {
-          if (active) setCatalogItems(items)
+          if (active) {
+            setCatalogItems(items)
+            setCatalogError("")
+          }
         })
-        .catch(() => {
-          if (active) setCatalogItems([])
+        .catch((reason) => {
+          if (active) {
+            setCatalogItems([])
+            setCatalogError(
+              reason instanceof Error
+                ? reason.message
+                : "暂时无法加载公共充电桩库，请稍后重试。"
+            )
+          }
         })
         .finally(() => {
           if (active) setCatalogLoading(false)
@@ -336,7 +367,7 @@ function WorkbenchContent() {
       active = false
       window.clearTimeout(timer)
     }
-  }, [viewMode, deferredSearch, searchSharedPiles])
+  }, [viewMode, deferredSearch, catalogRetrySeq, searchSharedPiles])
 
   async function addFromCatalogView(item: SharedPile) {
     if (catalogAddingId || !online) return
@@ -410,11 +441,65 @@ function WorkbenchContent() {
   }))
 
   useEffect(() => {
+    const isOpen = Boolean(selectedId)
+    if (isOpen && !wasInspectorOpenRef.current) {
+      inspectorOpenerRef.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null
+      const frame = window.requestAnimationFrame(() => {
+        if (!document.querySelector('[role="dialog"]')) {
+          inspectorSheetRef.current?.focus({ preventScroll: true })
+        }
+      })
+      wasInspectorOpenRef.current = true
+      return () => window.cancelAnimationFrame(frame)
+    }
+    if (!isOpen && wasInspectorOpenRef.current) {
+      wasInspectorOpenRef.current = false
+      const opener = inspectorOpenerRef.current
+      inspectorOpenerRef.current = null
+      if (opener && opener.isConnected) {
+        opener.focus({ preventScroll: true })
+      } else {
+        document
+          .querySelector<HTMLElement>('[aria-label="搜索充电桩"], main button')
+          ?.focus({ preventScroll: true })
+      }
+    }
+  }, [selectedId])
+
+  useEffect(() => {
     if (!selectedId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
       if (document.querySelector('[role="dialog"]')) return
-      updatePageQuery({ pile: null, port: null, detail: null })
+      if (event.key === "Escape") {
+        updatePageQuery({ pile: null, port: null, detail: null })
+        return
+      }
+      if (event.key === "Tab" && inspectorSheetRef.current) {
+        const container = inspectorSheetRef.current
+        if (!container.contains(document.activeElement)) return
+        const focusables = Array.from(
+          container.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => el.offsetParent !== null)
+        if (focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (
+          event.shiftKey &&
+          (document.activeElement === first ||
+            document.activeElement === container)
+        ) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -424,6 +509,7 @@ function WorkbenchContent() {
     const focus = (event: KeyboardEvent) => {
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey)
         return
+      if (selectedId || document.querySelector('[role="dialog"]')) return
       if (
         event.target instanceof HTMLElement &&
         (event.target.matches("input,textarea,select") ||
@@ -439,7 +525,7 @@ function WorkbenchContent() {
     }
     window.addEventListener("keydown", focus)
     return () => window.removeEventListener("keydown", focus)
-  }, [])
+  }, [selectedId])
 
   function notifyRefreshResult(
     result: DashboardSnapshot,
@@ -516,6 +602,7 @@ function WorkbenchContent() {
   }
 
   async function move(id: string, direction: number) {
+    if (hasActiveFilter) return
     const ids = snapshot.piles.map((p) => p.id)
     const index = ids.indexOf(id)
     const next = index + direction
@@ -565,6 +652,11 @@ function WorkbenchContent() {
         variant="outline"
         busy={refreshing}
         disabled={!online || !currentUser?.refreshEnabled || initialLoading}
+        title={
+          currentUser && !currentUser.refreshEnabled
+            ? "当前账户已被管理员关闭远端刷新权限"
+            : undefined
+        }
         onClick={() => void refresh()}
       >
         <RefreshCwIcon size={14} />
@@ -792,14 +884,15 @@ function WorkbenchContent() {
                     query.filter === value ? "wb-seg-active" : ""
                   }`}
                   aria-pressed={query.filter === value}
-                  onClick={() =>
+                  onClick={() => {
+                    if (ordering && value !== "all") setOrdering(false)
                     updatePageQuery({
                       status: value === "all" ? null : String(value),
                       pile: null,
                       port: null,
                       detail: null,
                     })
-                  }
+                  }}
                 >
                   <span>{label}</span>
                   {!initialLoading && (
@@ -814,24 +907,44 @@ function WorkbenchContent() {
             <WorkbenchSearch
               value={search}
               shortcut="/"
-              onChange={(value) =>
+              onChange={(value) => {
+                if (ordering && value.trim()) setOrdering(false)
                 updatePageQuery(
                   { q: value, pile: null, port: null, detail: null },
                   true
                 )
-              }
+              }}
             />
             {viewMode === "mine" && (
               <WorkbenchButton
-                variant={ordering ? "secondary" : "ghost"}
+                variant={isOrdering ? "secondary" : "ghost"}
                 className="wb-order-toggle"
-                aria-label={ordering ? "完成排序" : "调整充电桩顺序"}
-                aria-pressed={ordering}
-                disabled={snapshot.piles.length < 2 || !online}
-                onClick={() => setOrdering((v) => !v)}
+                aria-label={isOrdering ? "完成排序" : "调整充电桩顺序"}
+                aria-pressed={isOrdering}
+                disabled={!isOrdering && (snapshot.piles.length < 2 || !online)}
+                title={
+                  !isOrdering && hasActiveFilter
+                    ? "进入排序将自动清除当前搜索与状态筛选"
+                    : undefined
+                }
+                onClick={() => {
+                  if (!isOrdering && hasActiveFilter) {
+                    updatePageQuery({
+                      q: null,
+                      status: null,
+                      pile: null,
+                      port: null,
+                      detail: null,
+                    })
+                    setOrdering(true)
+                    notify.info("已清除筛选，现可调整全部充电桩顺序")
+                    return
+                  }
+                  setOrdering((v) => !v)
+                }}
               >
                 <SlidersHorizontalIcon size={14} />
-                <span>{ordering ? "完成排序" : "排序"}</span>
+                <span>{isOrdering ? "完成排序" : "排序"}</span>
               </WorkbenchButton>
             )}
           </div>
@@ -841,6 +954,11 @@ function WorkbenchContent() {
         {viewMode === "catalog" ? (
           catalogLoading ? (
             <StationSkeletonGrid count={4} label="正在加载公共桩库" />
+          ) : catalogError ? (
+            <WorkbenchError
+              message={catalogError}
+              retry={() => setCatalogRetrySeq((n) => n + 1)}
+            />
           ) : catalogItems.length === 0 ? (
             <WorkbenchEmpty
               title="公共桩库暂无匹配的充电桩"
@@ -865,7 +983,11 @@ function WorkbenchContent() {
               }
             />
           ) : (
-            <div className="wb-station-grid">
+            <div
+            className="wb-station-grid"
+            aria-hidden={Boolean(selectedId) || undefined}
+            inert={Boolean(selectedId) || undefined}
+          >
               {catalogItems.map((item) => {
                 const owned = ownedPileIds.has(item.deviceId)
                 const snap = item.lastSnapshot
@@ -1046,9 +1168,11 @@ function WorkbenchContent() {
                           className="wb-icon-button"
                           aria-label={`刷新 ${pile.name || pile.number}`}
                           title={
-                            quota?.unlimitedActive
-                              ? "刷新此桩（不限次）"
-                              : "刷新此桩（未命中全站缓存消耗 1 次额度）"
+                            currentUser && !currentUser.refreshEnabled
+                              ? "当前账户已被管理员关闭远端刷新权限"
+                              : quota?.unlimitedActive
+                                ? "刷新此桩（不限次）"
+                                : "刷新此桩（未命中全站缓存消耗 1 次额度）"
                           }
                           busy={refreshingPileId === pile.id}
                           disabled={
@@ -1070,7 +1194,7 @@ function WorkbenchContent() {
                     </div>
 
                     <div className="wb-card-readout">
-                      {ordering ? (
+                      {isOrdering ? (
                         <div className="wb-reorder-btns">
                           <WorkbenchButton
                             variant="outline"
@@ -1344,7 +1468,11 @@ function WorkbenchContent() {
               updatePageQuery({ pile: null, port: null, detail: null })
             }
           />
-          <div className="wb-inspector-sheet">
+          <div
+            ref={inspectorSheetRef}
+            tabIndex={-1}
+            className="wb-inspector-sheet focus:outline-none"
+          >
             <article className="wb-inspector-article" aria-label="充电桩详情">
               <div className="wb-inspector-top-back">
                 <button
@@ -1380,6 +1508,15 @@ function WorkbenchContent() {
                   portId={selectedPortId}
                   stale={stale || !selected.online}
                   onRemind={() => remind(selected)}
+                  onDeletingChange={(deleting) =>
+                    setClosingPileId((current) =>
+                      deleting
+                        ? selected.id
+                        : current === selected.id
+                          ? null
+                          : current
+                    )
+                  }
                   onRefresh={() => void refreshSinglePile(selected)}
                   refreshing={refreshingPileId === selected.id}
                   refreshDisabled={
@@ -1393,7 +1530,7 @@ function WorkbenchContent() {
                     (rule) => rule.deviceId === selected.id
                   )}
                 />
-              ) : (
+              ) : selectedId === closingPileId ? null : (
                 <WorkbenchEmpty
                   title="这个充电桩不在常用列表中"
                   description="可能已经被移除，请从列表重新选择或重新加载。"
@@ -1430,6 +1567,7 @@ function PileDetail({
   portId,
   stale,
   onRemind,
+  onDeletingChange,
   onRefresh,
   refreshing = false,
   refreshDisabled = false,
@@ -1439,6 +1577,7 @@ function PileDetail({
   portId?: number
   stale: boolean
   onRemind: () => void
+  onDeletingChange?: (deleting: boolean) => void
   onRefresh?: () => void
   refreshing?: boolean
   refreshDisabled?: boolean
@@ -1485,13 +1624,15 @@ function PileDetail({
   async function remove() {
     setSaving(true)
     setFormError("")
+    onDeletingChange?.(true)
     try {
       await deletePile(pile.id)
-      await Promise.allSettled([loadWatch()])
       setModal(null)
-      updatePageQuery({ pile: null, port: null, detail: null })
+      updatePageQuery({ pile: null, port: null, detail: null }, true)
       notify.success("已移出常用桩，关联提醒已结束")
+      void loadWatch().catch(() => undefined)
     } catch (reason) {
+      onDeletingChange?.(false)
       setFormError(
         reason instanceof Error ? reason.message : "移除失败，请重试。"
       )

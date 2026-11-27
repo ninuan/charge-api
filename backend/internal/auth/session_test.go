@@ -119,3 +119,54 @@ func TestPersistentSessionKeepsNormalizedClientMetadata(t *testing.T) {
 		t.Fatalf("unexpected session view: %+v", views)
 	}
 }
+
+func TestSessionManagerEvictsMemoryCacheOnStoreRevocationError(t *testing.T) {
+	store, err := persistence.OpenSQLite(
+		t.TempDir()+"/state.db",
+		bytes.Repeat([]byte{0x68}, persistence.CookieKeySize),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	manager := NewPersistentSessionManager(time.Hour, store)
+	defer manager.Close()
+
+	current, err := manager.Create("user-1")
+	if err != nil {
+		t.Fatalf("Create current: %v", err)
+	}
+	other, err := manager.Create("user-1")
+	if err != nil {
+		t.Fatalf("Create other: %v", err)
+	}
+
+	// Force store operations to fail so we verify fail-closed memory eviction.
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	genBefore := manager.revocationGen
+	if err := manager.DeleteOthers("user-1", current.Token); err == nil {
+		t.Fatal("expected DeleteOthers to return store error on closed DB")
+	}
+	if manager.revocationGen <= genBefore {
+		t.Fatalf("expected revocationGen to advance on DeleteOthers error")
+	}
+	if _, ok := manager.Get(other.Token); ok {
+		t.Fatal("expected other session to be evicted from memory on store error")
+	}
+	if _, ok := manager.Get(current.Token); !ok {
+		t.Fatal("expected current session to remain cached after DeleteOthers")
+	}
+
+	genBefore = manager.revocationGen
+	if err := manager.DeleteUser("user-1"); err == nil {
+		t.Fatal("expected DeleteUser to return store error on closed DB")
+	}
+	if manager.revocationGen <= genBefore {
+		t.Fatalf("expected revocationGen to advance on DeleteUser error")
+	}
+	if _, ok := manager.Get(current.Token); ok {
+		t.Fatal("expected current session to be evicted from memory on DeleteUser store error")
+	}
+}

@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch"
 import { adminApi } from "@/lib/admin-api"
 import { useMinuteClock, useOnline } from "@/lib/browser-state"
 import { notify } from "@/lib/feedback"
+import { safeHref } from "@/lib/safe-href"
 import { formatSnapshotTime, updatePageQuery } from "@/lib/workbench"
 import { minutesToTime, timeToMinutes } from "@/lib/watch-format"
 import type {
@@ -625,12 +626,28 @@ function PolicyForm({
   ) {
     setDraft((current) => ({ ...current, [key]: value }))
   }
+  function isValidIanaTimezone(value: string) {
+    if (!value || /^[+-]\d/.test(value)) return false
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: value })
+      return true
+    } catch {
+      return false
+    }
+  }
   async function save() {
     setSaving(true)
     setError("")
     try {
+      const trimmedTimezone = (draft.scheduledPowerOffTimezone ?? "").trim()
+      const safeTimezone =
+        draft.scheduledPowerOffEnabled || isValidIanaTimezone(trimmedTimezone)
+          ? trimmedTimezone
+          : (initial.scheduledPowerOffTimezone || "Asia/Shanghai").trim()
       const value = await adminApi.saveSettings({
         ...draft,
+        scheduledPowerOffTimezone: safeTimezone,
+        cookieGuideUrl: (draft.cookieGuideUrl ?? "").trim(),
         recurringRemindersEnabled: false,
       })
       onSaved(value)
@@ -659,6 +676,26 @@ function PolicyForm({
       draft.scheduledPowerOffStartMinute === draft.scheduledPowerOffEndMinute
     ) {
       setError("断电开始和恢复时间不能相同。")
+      setSection("reminders")
+      return
+    }
+    if (draft.scheduledPowerOffEnabled) {
+      const trimmedTimezone = (draft.scheduledPowerOffTimezone ?? "").trim()
+      if (!trimmedTimezone) {
+        setError("请填写计划断电时区（例如 Asia/Shanghai）。")
+        setSection("reminders")
+        return
+      }
+      if (!isValidIanaTimezone(trimmedTimezone)) {
+        setError("计划断电时区无效，请输入标准 IANA 时区名称（例如 Asia/Shanghai）。")
+        setSection("reminders")
+        return
+      }
+    }
+    const trimmedGuideUrl = (draft.cookieGuideUrl ?? "").trim()
+    if (trimmedGuideUrl && !safeHref(trimmedGuideUrl)) {
+      setError("Cookie 教程链接必须是有效的 https:// 地址。")
+      setSection("pool")
       return
     }
     if (
@@ -942,9 +979,9 @@ function PolicyForm({
 }
 
 function PublicCookiePoolManager({ online }: { online: boolean }) {
-  const { data, error, reload } = useRemote<PublicPoolCookie[]>(
-    adminApi.publicPool
-  )
+  const { data, setData, error, loading, reload } = useRemote<
+    PublicPoolCookie[]
+  >(adminApi.publicPool)
   const [addOpen, setAddOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<PublicPoolCookie | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<PublicPoolCookie | null>(
@@ -956,6 +993,7 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
   const [editCookie, setEditCookie] = useState("")
   const [busy, setBusy] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
   const [formError, setFormError] = useState("")
 
   async function testItem(item: PublicPoolCookie) {
@@ -1031,14 +1069,26 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
   }
 
   async function toggleEnabled(item: PublicPoolCookie) {
+    if (togglingId !== null) return
+    setTogglingId(item.id)
     try {
-      await adminApi.updatePublicPoolCookie(item.id, {
+      const updated = await adminApi.updatePublicPoolCookie(item.id, {
         enabled: !item.enabled,
       })
+      setData(
+        (current) =>
+          current?.map((entry) =>
+            entry.id === updated.id ? updated : entry
+          ) ?? null
+      )
       reload()
-      notify.success(item.enabled ? "已停用该公共 Cookie" : "已启用该公共 Cookie")
+      notify.success(
+        updated.enabled ? "已启用该公共 Cookie" : "已停用该公共 Cookie"
+      )
     } catch (reason) {
       notify.error(reason instanceof Error ? reason.message : "更新失败")
+    } finally {
+      setTogglingId(null)
     }
   }
 
@@ -1094,6 +1144,8 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
       </div>
       {error ? (
         <WorkbenchError message={error} retry={() => void reload()} />
+      ) : loading && !data ? (
+        <WorkbenchLoading label="正在读取公共 Cookie 池" />
       ) : items.length === 0 ? (
         <WorkbenchEmpty
           icon={DatabaseIcon}
@@ -1175,7 +1227,7 @@ function PublicCookiePoolManager({ online }: { online: boolean }) {
                       </WorkbenchButton>
                       <Switch
                         checked={item.enabled}
-                        disabled={!online || busy}
+                        disabled={!online || busy || loading || togglingId !== null}
                         onCheckedChange={() => void toggleEnabled(item)}
                         aria-label={`切换 ${item.label}`}
                       />
@@ -1651,13 +1703,15 @@ export function WorkbenchAudit() {
     result = params.get("result") ?? "all"
   const fetcher = useCallback(() => adminApi.audit(page, 20), [page])
   const { data, error, loading, reload } = useRemote<AuditPage>(fetcher)
+  const normalizedQuery = query.trim().toLowerCase()
   const items =
     data?.items.filter(
       (item) =>
         (result === "all" || item.result === result) &&
-        `${item.actor} ${auditLabels[item.action] ?? item.action} ${item.targetLabel} ${item.message ?? ""}`.includes(
-          query.trim()
-        )
+        (!normalizedQuery ||
+          `${item.actor} ${auditLabels[item.action] ?? item.action} ${item.targetLabel} ${item.message ?? ""}`
+            .toLowerCase()
+            .includes(normalizedQuery))
     ) ?? []
   return (
     <section className="wb-audit">

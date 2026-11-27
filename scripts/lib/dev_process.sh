@@ -8,6 +8,7 @@ dev_listener_owned() {
   [[ "${owner//[[:space:]]/}" == "$UID" ]] || return 1
   cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
   command="$(ps -p "$pid" -o comm= 2>/dev/null)" || return 1
+  # shellcheck disable=SC2154
   case "$service" in
     backend) [[ "$cwd" == "$ROOT_DIR/backend" && ( "$command" == */server || "$command" == server ) ]] ;;
     frontend) [[ "$cwd" == "$ROOT_DIR/frontend" && "$command" == *next-server* ]] ;;

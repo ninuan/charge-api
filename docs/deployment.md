@@ -87,6 +87,14 @@ go build -o charge-server ./cmd/server
 
 Go 服务从 `frontend/dist/` 提供静态页面，因此前端构建产物和后端二进制必须来自同一版本。
 
+如需在生产环境启用 Cloudflare Web Analytics，因为静态导出在 **构建期** 内联 `NEXT_PUBLIC_*` 环境变量（运行时 `/etc/charge-api.env` 不会生效），请在服务器仓库的 `frontend/.env.production.local`（已被 `.gitignore` 忽略且不会覆盖远端）写入：
+
+```env
+NEXT_PUBLIC_CF_BEACON_TOKEN=your-cloudflare-analytics-token
+```
+
+未配置时不会加载任何外部统计脚本。
+
 ### 3. 配置环境变量
 
 先生成密钥：
@@ -209,12 +217,11 @@ sudo journalctl -u charge-api -n 100 --no-pager
 | `CHARGE_ADMIN_PASSWORD` | 自动生成 | 首次初始化管理员密码。                    |
 | `CHARGE_COOKIE_KEY`     | 无       | 32 字节 Base64 加密密钥；生产必需。       |
 | `CORS_ALLOWED_ORIGINS`  | 同源     | 逗号分隔的允许 Origin。                   |
-| `MOCELE_BASE_URL`       | 内置默认 | 可选自动登录服务覆盖地址。                |
-| `MOCELE_ORG`            | 内置默认 | 可选组织参数。                            |
-| `MOCELE_OPENINDEX`      | 内置默认 | 可选入口参数。                            |
+| `TRUSTED_PROXY_HEADER`  | 自动回环 | 反向代理传递客户端 IP 的受信任请求头（`none`、`cf-connecting-ip`、`x-forwarded-for`、`x-real-ip`）。 |
 | `WXPUSHER_APP_TOKEN`    | 关闭     | WxPusher 服务端 AppToken。                |
 | `PUBLIC_BASE_URL`       | 无       | 启用 WxPusher 时必需的公网 HTTPS Origin。 |
 | `WXPUSHER_BASE_URL`     | 官方 API | 仅用于本地 mock 或受控私有代理。          |
+| `NEXT_PUBLIC_CF_BEACON_TOKEN` | 关闭 | 前端构建期变量（写入 `frontend/.env.production.local`），仅生产构建非空时启用 Cloudflare Web Analytics。 |
 
 ### 备份服务
 
@@ -307,7 +314,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now charge-backup.timer
 ```
 
-默认每天 03:30 执行，并随机延迟最多 15 分钟；备份写入 `/var/lib/charge-api/backups/`，使用 `0600` 权限并滚动保留 14 天。
+默认每天 03:30 执行，并随机延迟最多 15 分钟；备份任务以 `charge:charge` 身份运行，写入 `/var/lib/charge-api/backups/`，使用 `0600` 权限并滚动保留 14 天。
+
+> [!TIP]
+> 若服务器此前安装过旧版（root 身份运行的）`charge-backup.service`，更新 systemd 单元后请执行一次 `sudo chown -R charge:charge /var/lib/charge-api/backups`，确保备份任务与运维监控页均可正常读写历史备份目录。
 
 手动触发：
 
@@ -357,7 +367,7 @@ cd /opt/charge-api
 ./scripts/security_check.sh --dry-run
 ```
 
-如服务器未运行旧版 `yyb-go`，可按需指定 `LOG_UNITS="charge-api"` 检查数据库与日志中是否出现敏感明文。
+默认检查 `charge-api` 的 `/healthz`、回环端口 `8080`、主库与 WAL 文件及 `journalctl -u charge-api` 最近日志中是否出现敏感明文。
 
 ## 升级与回滚
 

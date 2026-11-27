@@ -3,24 +3,26 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/dev_process.sh
+source "$ROOT_DIR/scripts/lib/dev_process.sh"
+
 RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/charge-e2e.XXXXXX")"
 BACKEND_PID=""
 FRONTEND_PID=""
 
 cleanup() {
   trap - EXIT
-  if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" >/dev/null 2>&1; then
-    kill "$FRONTEND_PID" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
-    kill "$BACKEND_PID" >/dev/null 2>&1 || true
-  fi
+  trap '' INT TERM
+  dev_stop_groups "$FRONTEND_PID" "$BACKEND_PID"
   wait "$FRONTEND_PID" "$BACKEND_PID" 2>/dev/null || true
   rm -rf "$RUNTIME_DIR"
 }
 
 trap cleanup EXIT
 trap 'exit 0' INT TERM
+# Put each background service in its own process group so go run / pnpm
+# child processes (charge-server, next-server) are terminated cleanly on exit.
+set -m
 
 (
   cd "$ROOT_DIR/backend"

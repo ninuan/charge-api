@@ -1,6 +1,7 @@
 package charger
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -219,6 +220,13 @@ func (c *Client) FetchPile(deviceID string, force bool) FetchResult {
 // been checked, immediately before the remote HTTP attempt. It lets a caller
 // persist a quota reservation without charging cache or backoff skips.
 func (c *Client) FetchPileWithPermit(deviceID string, force bool, beforeRequest func() error) FetchResult {
+	return c.FetchPileWithPermitContext(context.Background(), deviceID, force, beforeRequest)
+}
+
+func (c *Client) FetchPileWithPermitContext(ctx context.Context, deviceID string, force bool, beforeRequest func() error) FetchResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	deviceID = strings.TrimSpace(deviceID)
 	result := FetchResult{
 		Piles:    make([]model.Pile, 0, 1),
@@ -245,6 +253,13 @@ func (c *Client) FetchPileWithPermit(deviceID string, force bool, beforeRequest 
 		return result
 	}
 
+	if err := ctx.Err(); err != nil {
+		result.Failures = append(result.Failures, DeviceFailure{
+			DeviceID: deviceID,
+			Err:      err,
+		})
+		return result
+	}
 	if beforeRequest != nil {
 		if err := beforeRequest(); err != nil {
 			result.Failures = append(result.Failures, DeviceFailure{
@@ -255,10 +270,18 @@ func (c *Client) FetchPileWithPermit(deviceID string, force bool, beforeRequest 
 		}
 	}
 	result.Attempted = 1
-	pile, err := c.fetchDevice(request)
+	pile, err := c.fetchDeviceContext(ctx, request)
 	if err == nil {
 		c.clearBackoff(deviceID)
 		result.Piles = append(result.Piles, pile)
+		return result
+	}
+	if ctx.Err() != nil {
+		result.Attempted = 0
+		result.Failures = append(result.Failures, DeviceFailure{
+			DeviceID: deviceID,
+			Err:      ctx.Err(),
+		})
 		return result
 	}
 
@@ -285,6 +308,13 @@ func (c *Client) ResolveDeviceIDByNumber(number string) (string, error) {
 }
 
 func (c *Client) ResolveDeviceIDWithCookie(number string, cookieOverride string) (string, error) {
+	return c.ResolveDeviceIDWithCookieContext(context.Background(), number, cookieOverride)
+}
+
+func (c *Client) ResolveDeviceIDWithCookieContext(ctx context.Context, number string, cookieOverride string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	number = strings.TrimSpace(number)
 	if !numericIDPattern.MatchString(number) {
 		return "", fmt.Errorf("桩号必须是 6-64 位数字")
@@ -303,7 +333,7 @@ func (c *Client) ResolveDeviceIDWithCookie(number string, cookieOverride string)
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest(http.MethodGet, resolveURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -326,16 +356,29 @@ func (c *Client) ResolveDeviceIDWithCookie(number string, cookieOverride string)
 	if err != nil {
 		return "", err
 	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "", fmt.Errorf("%w: 桩号解析接口返回 %s", ErrAuthExpired, resp.Status)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return "", fmt.Errorf("桩号解析接口返回 %s", resp.Status)
 	}
 	if id := extractCnumDeviceID(resp, body); id != "" {
 		return id, nil
 	}
+	if locationLooksLikeAuthExpired(resp.Header.Get("Location")) || looksLikeAuthExpired(body) {
+		return "", fmt.Errorf("%w: 桩号 %s 解析触发远端登录校验", ErrAuthExpired, number)
+	}
 	return "", fmt.Errorf("桩号 %s 没有解析到设备长ID", number)
 }
 
 func (c *Client) FetchPileWithCookie(deviceID string, cookie string) (model.Pile, error) {
+	return c.FetchPileWithCookieContext(context.Background(), deviceID, cookie)
+}
+
+func (c *Client) FetchPileWithCookieContext(ctx context.Context, deviceID string, cookie string) (model.Pile, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	deviceID = strings.TrimSpace(deviceID)
 	if deviceID == "" {
 		return model.Pile{}, fmt.Errorf("device id is required")
@@ -349,7 +392,7 @@ func (c *Client) FetchPileWithCookie(deviceID string, cookie string) (model.Pile
 	request.Headers = cloneHeaders(request.Headers)
 	request.Headers["Referer"] = withURLQueryValue(request.Headers["Referer"], "id", deviceID)
 	request.Headers["Cookie"] = withCookieValue(strings.TrimSpace(cookie), "deviceid", deviceID)
-	pile, err := c.fetchPile(request)
+	pile, err := c.fetchPileContext(ctx, request)
 	if err != nil {
 		return model.Pile{}, err
 	}
@@ -431,7 +474,7 @@ func (c *Client) UpdateCookie(cookie string) error {
 	defer c.mu.Unlock()
 
 	c.template.Headers = cloneHeaders(c.template.Headers)
-	c.template.Headers["Cookie"] = withCookieValue(cookie, "deviceid", requestDeviceID(c.template))
+	c.template.Headers["Cookie"] = cookie
 
 	for id, request := range c.requests {
 		request.Headers = cloneHeaders(request.Headers)
@@ -481,7 +524,15 @@ func (r FetchResult) FirstError() error {
 }
 
 func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, error) {
-	req, err := http.NewRequest(
+	return c.fetchPileContext(context.Background(), captureRequest)
+}
+
+func (c *Client) fetchPileContext(ctx context.Context, captureRequest parser.CaptureRequest) (model.Pile, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
 		captureRequest.Method,
 		captureRequest.URL,
 		strings.NewReader(captureRequest.Body),
@@ -507,6 +558,9 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return model.Pile{}, fmt.Errorf("%w: remote API returned %s", ErrAuthExpired, resp.Status)
 	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 && locationLooksLikeAuthExpired(resp.Header.Get("Location")) {
+		return model.Pile{}, fmt.Errorf("%w: remote API redirected to login (%s)", ErrAuthExpired, resp.Status)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return model.Pile{}, fmt.Errorf("remote API returned %s", resp.Status)
 	}
@@ -519,7 +573,11 @@ func (c *Client) fetchPile(captureRequest parser.CaptureRequest) (model.Pile, er
 }
 
 func (c *Client) fetchDevice(request deviceRequest) (model.Pile, error) {
-	pile, err := c.fetchPile(request.request)
+	return c.fetchDeviceContext(context.Background(), request)
+}
+
+func (c *Client) fetchDeviceContext(ctx context.Context, request deviceRequest) (model.Pile, error) {
+	pile, err := c.fetchPileContext(ctx, request.request)
 	if err != nil {
 		return model.Pile{}, err
 	}
@@ -657,11 +715,15 @@ func extractCnumDeviceID(resp *http.Response, body []byte) string {
 			return cookie.Value
 		}
 	}
-	if id := deviceIDFromURL(resp.Header.Get("Location"), resp.Request.URL); id != "" {
+	var reqURL *url.URL
+	if resp.Request != nil {
+		reqURL = resp.Request.URL
+	}
+	if id := deviceIDFromURL(resp.Header.Get("Location"), reqURL); id != "" {
 		return id
 	}
-	if resp.Request != nil && resp.Request.URL != nil {
-		if id := deviceIDFromURL(resp.Request.URL.String(), nil); id != "" {
+	if reqURL != nil {
+		if id := deviceIDFromURL(reqURL.String(), nil); id != "" {
 			return id
 		}
 	}
@@ -746,19 +808,44 @@ func cloneHeaders(headers map[string]string) map[string]string {
 	return clone
 }
 
+func locationLooksLikeAuthExpired(location string) bool {
+	text := strings.ToLower(strings.TrimSpace(location))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"open.weixin.qq.com/connect/oauth2",
+		"/autologin",
+		"/login",
+		"oauth2/authorize",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func looksLikeAuthExpired(body []byte) bool {
 	text := strings.ToLower(string(body))
 	keywords := []string{
-		"cookie",
-		"sid",
 		"unauthorized",
 		"forbidden",
-		"login",
-		"alert",
-		"登录",
+		"open.weixin.qq.com/connect/oauth2",
+		"wxpay/api/autologin",
+		"please login",
+		"not logged in",
 		"未登录",
-		"授权",
-		"过期",
+		"请登录",
+		"请先登录",
+		"请重新登录",
+		"重新登录",
+		"登录已过期",
+		"登录失效",
+		"登录超时",
+		"授权已过期",
+		"重新授权",
+		"请重新打开页面",
 	}
 	for _, keyword := range keywords {
 		if strings.Contains(text, keyword) {

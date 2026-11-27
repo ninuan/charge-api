@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -174,17 +175,75 @@ func (m *Manager) markPersonalCookieExpired(userID string, runtime *UserRuntime,
 	return m.notifyCredentialExpired(userID, now)
 }
 
-func (m *Manager) handlePoolCookieExpired(rec persistence.PublicPoolCookieRecord, errMsg string, now time.Time) {
-	_ = m.repository.MarkPublicPoolCookieResult(rec.ID, true, errMsg)
-	if rec.OwnerUserID != "" {
-		if ownerRT, rtErr := m.runtimeFor(rec.OwnerUserID); rtErr == nil {
-			ownerRT.setPersonalCookieExpired(true)
-			ownerRT.recordFailure(true)
-			m.recordMetric(rec.OwnerUserID, "cookie_error")
-			_ = m.notifyCredentialExpired(rec.OwnerUserID, now)
-			_ = m.saveUserState(rec.OwnerUserID)
+type poolCookieBackoff struct {
+	failures int
+	retryAt  time.Time
+}
+
+const (
+	poolCookieInitialBackoff    = time.Minute
+	poolCookieMaxBackoff        = 15 * time.Minute
+	maxPoolAuthInvalidationsReq = 2
+	maxPoolNonAuthAttemptsReq   = 2
+)
+
+func (m *Manager) isPoolCookieBackedOff(id string, now time.Time) bool {
+	m.poolMu.Lock()
+	defer m.poolMu.Unlock()
+	if m.poolBackoff == nil {
+		return false
+	}
+	state, ok := m.poolBackoff[id]
+	return ok && now.Before(state.retryAt)
+}
+
+func (m *Manager) recordPoolCookieNonAuthFailure(id string, now time.Time) {
+	m.poolMu.Lock()
+	defer m.poolMu.Unlock()
+	if m.poolBackoff == nil {
+		m.poolBackoff = make(map[string]poolCookieBackoff)
+	}
+	state := m.poolBackoff[id]
+	state.failures++
+	delay := poolCookieInitialBackoff
+	for i := 1; i < state.failures && delay < poolCookieMaxBackoff; i++ {
+		delay *= 3
+		if delay > poolCookieMaxBackoff {
+			delay = poolCookieMaxBackoff
 		}
 	}
+	state.retryAt = now.Add(delay)
+	m.poolBackoff[id] = state
+}
+
+func (m *Manager) clearPoolCookieBackoff(id string) {
+	m.poolMu.Lock()
+	delete(m.poolBackoff, id)
+	m.poolMu.Unlock()
+}
+
+func (m *Manager) handlePoolCookieExpired(rec persistence.PublicPoolCookieRecord, errMsg string, now time.Time) bool {
+	updated, err := m.repository.MarkPublicPoolCookieExpiredIfNonceMatches(rec.ID, rec.CookieNonce, errMsg)
+	if err != nil || !updated {
+		// Stale failure for a cookie that was already replaced or deleted.
+		return false
+	}
+	m.clearPoolCookieBackoff(rec.ID)
+	if rec.OwnerUserID != "" {
+		if ownerRT, rtErr := m.runtimeFor(rec.OwnerUserID); rtErr == nil {
+			// Compare the full credential (including info/session token), not just
+			// CookieIdentity (wxopenid), so an in-flight failure of an old cookie
+			// never expires a freshly rotated personal cookie for the same user.
+			if strings.TrimSpace(ownerRT.client.Cookie()) == strings.TrimSpace(rec.Cookie) {
+				ownerRT.setPersonalCookieExpired(true)
+				ownerRT.recordFailure(true)
+				m.recordMetric(rec.OwnerUserID, "cookie_error")
+				_ = m.notifyCredentialExpired(rec.OwnerUserID, now)
+				_ = m.saveUserState(rec.OwnerUserID)
+			}
+		}
+	}
+	return true
 }
 
 func (m *Manager) TestPublicPoolCookie(id string) (model.PublicPoolCookie, error) {
@@ -199,11 +258,13 @@ func (m *Manager) TestPublicPoolCookie(id string) (model.PublicPoolCookie, error
 	client := m.poolClient()
 	_, fetchErr := client.FetchPileWithCookie(probeDeviceID, rec.Cookie)
 	if fetchErr == nil {
+		m.clearPoolCookieBackoff(rec.ID)
 		_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, "")
 	} else if charger.IsAuthExpired(fetchErr) {
-		m.handlePoolCookieExpired(*rec, "实测返回鉴权失效", time.Now().UTC())
-		if avail := m.PublicPoolAvailableCount(); avail <= 1 {
-			m.notifyAdminsPublicPoolDegraded(avail)
+		if m.handlePoolCookieExpired(*rec, "实测返回鉴权失效", time.Now().UTC()) {
+			if avail := m.PublicPoolAvailableCount(); avail <= 1 {
+				m.notifyAdminsPublicPoolDegraded(avail)
+			}
 		}
 	} else {
 		_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, fetchErr.Error())
@@ -291,11 +352,21 @@ func (m *Manager) nextPoolStart(n int) int {
 }
 
 func (m *Manager) fetchPileViaPublicPool(deviceID string) (model.Pile, error) {
+	return m.fetchPileViaPublicPoolContext(context.Background(), deviceID)
+}
+
+func (m *Manager) fetchPileViaPublicPoolContext(ctx context.Context, deviceID string) (model.Pile, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return model.Pile{}, err
+	}
 	cookies, err := m.repository.ListHealthyPublicPoolCookies()
 	if err != nil {
 		return model.Pile{}, err
 	}
-	pile, _, err := m.fetchPileWithPoolCandidates(deviceID, m.poolClient(), cookies)
+	pile, _, err := m.fetchPileWithPoolCandidatesContext(ctx, deviceID, m.poolClient(), cookies)
 	return pile, err
 }
 
@@ -304,19 +375,54 @@ func (m *Manager) fetchPileWithPoolCandidates(
 	client *charger.Client,
 	cookies []persistence.PublicPoolCookieRecord,
 ) (model.Pile, []persistence.PublicPoolCookieRecord, error) {
+	return m.fetchPileWithPoolCandidatesContext(context.Background(), deviceID, client, cookies)
+}
+
+func (m *Manager) fetchPileWithPoolCandidatesContext(
+	ctx context.Context,
+	deviceID string,
+	client *charger.Client,
+	cookies []persistence.PublicPoolCookieRecord,
+) (model.Pile, []persistence.PublicPoolCookieRecord, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if len(cookies) == 0 {
 		m.notifyAdminsPublicPoolDegraded(0)
 		return model.Pile{}, cookies, ErrPublicPoolUnavailable
 	}
+	now := time.Now().UTC()
 	start := m.nextPoolStart(len(cookies))
+	ordered := make([]persistence.PublicPoolCookieRecord, 0, len(cookies))
+	backedOff := make([]persistence.PublicPoolCookieRecord, 0)
+	for i := 0; i < len(cookies); i++ {
+		rec := cookies[(start+i)%len(cookies)]
+		if m.isPoolCookieBackedOff(rec.ID, now) {
+			backedOff = append(backedOff, rec)
+		} else {
+			ordered = append(ordered, rec)
+		}
+	}
+	ordered = append(ordered, backedOff...)
+
 	remaining := make([]persistence.PublicPoolCookieRecord, 0, len(cookies))
 	expiredIDs := make(map[string]bool)
 	remainingHealthy := len(cookies)
-	var lastErr error
-	for i := 0; i < len(cookies); i++ {
-		rec := cookies[(start+i)%len(cookies)]
-		pile, fetchErr := client.FetchPileWithCookie(deviceID, rec.Cookie)
+	authInvalidations := 0
+	nonAuthAttempts := 0
+	var lastNonAuthErr error
+	for _, rec := range ordered {
+		if err := ctx.Err(); err != nil {
+			for _, c := range cookies {
+				if !expiredIDs[c.ID] {
+					remaining = append(remaining, c)
+				}
+			}
+			return model.Pile{}, remaining, err
+		}
+		pile, fetchErr := client.FetchPileWithCookieContext(ctx, deviceID, rec.Cookie)
 		if fetchErr == nil {
+			m.clearPoolCookieBackoff(rec.ID)
 			_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, "")
 			for _, c := range cookies {
 				if !expiredIDs[c.ID] {
@@ -325,26 +431,54 @@ func (m *Manager) fetchPileWithPoolCandidates(
 			}
 			return pile, remaining, nil
 		}
+		if ctx.Err() != nil {
+			for _, c := range cookies {
+				if !expiredIDs[c.ID] {
+					remaining = append(remaining, c)
+				}
+			}
+			return model.Pile{}, remaining, ctx.Err()
+		}
 		if charger.IsAuthExpired(fetchErr) {
 			expiredIDs[rec.ID] = true
-			m.handlePoolCookieExpired(rec, "远端返回鉴权失效", time.Now().UTC())
-			remainingHealthy--
-			if remainingHealthy <= 1 {
-				m.notifyAdminsPublicPoolDegraded(remainingHealthy)
+			if m.handlePoolCookieExpired(rec, "远端返回鉴权失效", time.Now().UTC()) {
+				remainingHealthy--
+				authInvalidations++
+				if remainingHealthy <= 1 {
+					m.notifyAdminsPublicPoolDegraded(remainingHealthy)
+				}
 			}
-			lastErr = fetchErr
+			// Guard against a single broken device page wiping out the entire pool.
+			if authInvalidations >= maxPoolAuthInvalidationsReq && remainingHealthy > 0 {
+				for _, c := range cookies {
+					if !expiredIDs[c.ID] {
+						remaining = append(remaining, c)
+					}
+				}
+				return model.Pile{}, remaining, fetchErr
+			}
 			continue
 		}
+		m.recordPoolCookieNonAuthFailure(rec.ID, time.Now().UTC())
 		_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, fetchErr.Error())
+		lastNonAuthErr = fetchErr
+		nonAuthAttempts++
+		if nonAuthAttempts >= maxPoolNonAuthAttemptsReq {
+			for _, c := range cookies {
+				if !expiredIDs[c.ID] {
+					remaining = append(remaining, c)
+				}
+			}
+			return model.Pile{}, remaining, lastNonAuthErr
+		}
+	}
+	if lastNonAuthErr != nil {
 		for _, c := range cookies {
 			if !expiredIDs[c.ID] {
 				remaining = append(remaining, c)
 			}
 		}
-		return model.Pile{}, remaining, fetchErr
-	}
-	if lastErr != nil {
-		return model.Pile{}, nil, ErrPublicPoolUnavailable
+		return model.Pile{}, remaining, lastNonAuthErr
 	}
 	return model.Pile{}, nil, ErrPublicPoolUnavailable
 }
@@ -359,29 +493,45 @@ func (m *Manager) resolveDeviceIDViaPublicPool(number string) (string, error) {
 		return "", ErrPublicPoolUnavailable
 	}
 	client := m.poolClient()
+	now := time.Now().UTC()
 	start := m.nextPoolStart(len(cookies))
-	remainingHealthy := len(cookies)
-	var lastErr error
+	ordered := make([]persistence.PublicPoolCookieRecord, 0, len(cookies))
+	backedOff := make([]persistence.PublicPoolCookieRecord, 0)
 	for i := 0; i < len(cookies); i++ {
 		rec := cookies[(start+i)%len(cookies)]
+		if m.isPoolCookieBackedOff(rec.ID, now) {
+			backedOff = append(backedOff, rec)
+		} else {
+			ordered = append(ordered, rec)
+		}
+	}
+	ordered = append(ordered, backedOff...)
+
+	remainingHealthy := len(cookies)
+	authInvalidations := 0
+	for _, rec := range ordered {
 		id, resolveErr := client.ResolveDeviceIDWithCookie(number, rec.Cookie)
 		if resolveErr == nil {
+			m.clearPoolCookieBackoff(rec.ID)
 			_ = m.repository.MarkPublicPoolCookieResult(rec.ID, false, "")
 			return id, nil
 		}
 		if charger.IsAuthExpired(resolveErr) {
-			m.handlePoolCookieExpired(rec, "远端返回鉴权失效", time.Now().UTC())
-			remainingHealthy--
-			if remainingHealthy <= 1 {
-				m.notifyAdminsPublicPoolDegraded(remainingHealthy)
+			if m.handlePoolCookieExpired(rec, "远端返回鉴权失效", time.Now().UTC()) {
+				remainingHealthy--
+				authInvalidations++
+				if remainingHealthy <= 1 {
+					m.notifyAdminsPublicPoolDegraded(remainingHealthy)
+				}
 			}
-			lastErr = resolveErr
+			if authInvalidations >= maxPoolAuthInvalidationsReq && remainingHealthy > 0 {
+				return "", resolveErr
+			}
 			continue
 		}
+		// Non-auth resolve errors (e.g., invalid/nonexistent pile number) should
+		// not burn or back off healthy pool cookies.
 		return "", resolveErr
-	}
-	if lastErr != nil {
-		return "", ErrPublicPoolUnavailable
 	}
 	return "", ErrPublicPoolUnavailable
 }
@@ -643,13 +793,10 @@ func (m *Manager) freshSharedPileSnapshotWithTime(deviceID string, now time.Time
 }
 
 func (m *Manager) recordSharedPiles(userID string, piles []model.Pile) {
-	now := time.Now().UTC()
-	for _, pile := range piles {
-		if strings.TrimSpace(pile.ID) == "" {
-			continue
-		}
-		_, _ = m.repository.UpsertSharedPile(pile, userID, now)
+	if len(piles) == 0 {
+		return
 	}
+	_ = m.repository.UpsertSharedPilesBatch(piles, userID, time.Now().UTC())
 }
 
 // RefreshPile refreshes a single owned pile for the user.
@@ -685,13 +832,34 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 
 	// Path A: Active unlimited personal cookie privilege
 	if m.hasUnlimitedPrivilege(userID, runtime) {
+		if !force && m.minInterval > 0 {
+			lastFetch := runtime.lastDeviceFetchAt(deviceID)
+			if !lastFetch.IsZero() && now.Sub(lastFetch) < m.minInterval {
+				nextAt := lastFetch.Add(m.minInterval)
+				info := runtime.store.Snapshot().Refresh
+				info.Cached = true
+				info.Partial = false
+				info.UsedPool = false
+				info.PersonalCookieFallback = false
+				info.NextRemoteAt = &nextAt
+				info.Message = fmt.Sprintf("距离上次刷新不足 %d 秒，当前展示缓存数据", int(m.minInterval.Seconds()))
+				runtime.store.SetRefreshInfo(info)
+				m.recordMetric(userID, "cache")
+				return m.attachQuota(userID, runtime.store.Snapshot()), nil
+			}
+		}
 		result := runtime.client.FetchPile(deviceID, force)
+		if result.Attempted > 0 {
+			runtime.recordDeviceFetch(deviceID, now)
+		}
 		if len(result.Piles) > 0 {
 			runtime.setPersonalCookieExpired(false)
-			runtime.store.MergeCapturePiles(result.Piles)
+			runtime.recordRemoteOK(now)
 			m.recordSharedPiles(userID, result.Piles)
+			nextAt := now.Add(m.minInterval)
 			info := runtime.store.Snapshot().Refresh
 			info.LastRemoteAt = &now
+			info.NextRemoteAt = &nextAt
 			info.AttemptedDevices = result.Attempted
 			info.SuccessfulDevices = len(result.Piles)
 			info.FailedDevices = len(result.Failures)
@@ -700,11 +868,27 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 			info.UsedPool = false
 			info.PersonalCookieFallback = false
 			info.Message = "已使用个人 Cookie 刷新该充电桩"
-			runtime.store.SetRefreshInfo(info)
+			runtime.store.MergeCapturePilesAndRefreshInfo(result.Piles, info)
 			m.recordRefreshMetrics(userID, info)
 			if err := m.saveAndRecordRemotePiles(userID, result.Piles); err != nil {
 				return model.DashboardSnapshot{}, err
 			}
+			return m.attachQuota(userID, runtime.store.Snapshot()), nil
+		}
+		if result.Skipped > 0 && !result.AuthExpired() {
+			info := runtime.store.Snapshot().Refresh
+			info.Cached = true
+			info.Partial = false
+			info.UsedPool = false
+			info.PersonalCookieFallback = false
+			info.AttemptedDevices = 0
+			info.SuccessfulDevices = 0
+			info.FailedDevices = 0
+			info.SkippedDevices = result.Skipped
+			info.NextRetryAt = result.NextRetryAt
+			info.Message = "该充电桩处于请求退避期，当前展示缓存数据"
+			runtime.store.SetRefreshInfo(info)
+			m.recordMetric(userID, "cache")
 			return m.attachQuota(userID, runtime.store.Snapshot()), nil
 		}
 		if !result.AuthExpired() {
@@ -723,7 +907,6 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 
 	// Path B: Public pool (free user or smooth fallback from expired personal cookie)
 	if cachedPile, ok := m.freshSharedPileSnapshot(deviceID, now); ok {
-		runtime.store.MergeCapturePiles([]model.Pile{*cachedPile})
 		info := runtime.store.Snapshot().Refresh
 		info.Cached = true
 		info.UsedPool = true
@@ -733,7 +916,7 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 		} else {
 			info.Message = "已同步全站最近更新的充电桩状态（未消耗刷新次数）"
 		}
-		runtime.store.SetRefreshInfo(info)
+		runtime.store.MergeCapturePilesAndRefreshInfo([]model.Pile{*cachedPile}, info)
 		m.recordMetric(userID, "cache")
 		_ = m.saveUserState(userID)
 		return m.attachQuota(userID, runtime.store.Snapshot()), nil
@@ -757,7 +940,6 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 		return model.DashboardSnapshot{}, fetchErr
 	}
 
-	runtime.store.MergeCapturePiles([]model.Pile{pile})
 	m.recordSharedPiles(userID, []model.Pile{pile})
 	info := runtime.store.Snapshot().Refresh
 	info.LastRemoteAt = &now
@@ -773,7 +955,7 @@ func (m *Manager) RefreshPile(userID, deviceID string, force bool) (model.Dashbo
 	} else {
 		info.Message = "已通过公共池刷新该充电桩（消耗 1 次额度）"
 	}
-	runtime.store.SetRefreshInfo(info)
+	runtime.store.MergeCapturePilesAndRefreshInfo([]model.Pile{pile}, info)
 	m.recordRefreshMetrics(userID, info)
 	if err := m.saveAndRecordPoolPiles(userID, []model.Pile{pile}); err != nil {
 		return model.DashboardSnapshot{}, err
@@ -807,9 +989,6 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 		}
 	}
 
-	if len(cachedPiles) > 0 {
-		runtime.store.MergeCapturePiles(cachedPiles)
-	}
 	if len(expiredIDs) == 0 {
 		info := runtime.store.Snapshot().Refresh
 		info.Cached = true
@@ -820,10 +999,18 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 		} else {
 			info.Message = "已同步全站最近更新状态（未消耗刷新次数）"
 		}
-		runtime.store.SetRefreshInfo(info)
+		if len(cachedPiles) > 0 {
+			runtime.store.MergeCapturePilesAndRefreshInfo(cachedPiles, info)
+		} else {
+			runtime.store.SetRefreshInfo(info)
+		}
 		m.recordMetric(userID, "cache")
 		_ = m.saveUserState(userID)
 		return m.attachQuota(userID, runtime.store.Snapshot()), nil
+	}
+
+	if len(cachedPiles) > 0 {
+		runtime.store.MergeCapturePiles(cachedPiles)
 	}
 
 	settings := m.Settings()
@@ -854,6 +1041,9 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 	}
 	poolClient := m.poolClient()
 	fetchedPiles := make([]model.Pile, 0, len(toFetch))
+	attemptedCount := 0
+	failedCount := 0
+	poolUnavailable := false
 	var firstErr error
 	for _, id := range toFetch {
 		receipt, ok, consumeErr := m.repository.ConsumeRefreshQuota(userID, today, settings.FreeDailyRefreshQuota, 1)
@@ -874,10 +1064,14 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 				firstErr = fetchErr
 			}
 			if errors.Is(fetchErr, ErrPublicPoolUnavailable) {
+				poolUnavailable = true
 				break
 			}
+			attemptedCount++
+			failedCount++
 			continue
 		}
+		attemptedCount++
 		fetchedPiles = append(fetchedPiles, pile)
 	}
 
@@ -889,20 +1083,25 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 	}
 
 	if len(fetchedPiles) > 0 {
-		runtime.store.MergeCapturePiles(fetchedPiles)
 		m.recordSharedPiles(userID, fetchedPiles)
 	}
 
 	info := runtime.store.Snapshot().Refresh
-	info.LastRemoteAt = &now
-	info.AttemptedDevices = len(toFetch)
+	if len(fetchedPiles) > 0 {
+		info.LastRemoteAt = &now
+	}
+	info.AttemptedDevices = attemptedCount
 	info.SuccessfulDevices = len(fetchedPiles)
-	info.FailedDevices = len(toFetch) - len(fetchedPiles)
-	info.Cached = false
-	info.Partial = partialByQuota || info.FailedDevices > 0
+	info.FailedDevices = failedCount
+	info.Cached = len(fetchedPiles) == 0 && len(cachedPiles) > 0
+	info.Partial = partialByQuota || failedCount > 0 || poolUnavailable
 	info.UsedPool = true
 	info.PersonalCookieFallback = fallbackFromExpiredPersonal
 	switch {
+	case poolUnavailable && len(fetchedPiles) == 0:
+		info.Message = "公共查询通道暂无可用 Cookie，其余已命中全站缓存，请稍后重试或上传个人 Cookie"
+	case len(fetchedPiles) == 0 && failedCount > 0:
+		info.Message = "部分充电桩远端刷新失败，其余已命中全站缓存"
 	case fallbackFromExpiredPersonal && partialByQuota:
 		info.Message = fmt.Sprintf("个人 Cookie 已失效，已自动降级用公共池刷新 %d 个桩（剩余额度不足），请及时更新个人 Cookie", len(fetchedPiles))
 	case fallbackFromExpiredPersonal:
@@ -912,7 +1111,11 @@ func (m *Manager) refreshViaPublicPool(userID string, runtime *UserRuntime, fall
 	default:
 		info.Message = fmt.Sprintf("已通过公共池刷新 %d 个桩（消耗 %d 次额度）", len(fetchedPiles), len(fetchedPiles))
 	}
-	runtime.store.SetRefreshInfo(info)
+	if len(fetchedPiles) > 0 {
+		runtime.store.MergeCapturePilesAndRefreshInfo(fetchedPiles, info)
+	} else {
+		runtime.store.SetRefreshInfo(info)
+	}
 	m.recordRefreshMetrics(userID, info)
 	if err := m.saveAndRecordPoolPiles(userID, fetchedPiles); err != nil {
 		return model.DashboardSnapshot{}, err

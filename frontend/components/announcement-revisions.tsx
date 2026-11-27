@@ -14,7 +14,7 @@ export function AnnouncementRevisions({ id }: { id: string }) {
   useEffect(() => {
     const c = new AbortController()
     void announcementRequest<AnnouncementPage>(
-      `/api/admin/announcements/${id}/revisions?page=${page}`,
+      `/api/admin/announcements/${encodeURIComponent(id)}/revisions?page=${page}`,
       { signal: c.signal }
     )
       .then((next) => {

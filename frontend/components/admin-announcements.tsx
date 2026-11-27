@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -12,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { WorkbenchButton } from "@/components/workbench/surfaces"
 import { useOnline } from "@/lib/browser-state"
+import { safeHref } from "@/lib/safe-href"
 import {
   announcementRequest,
   announcementDate,
@@ -38,6 +40,7 @@ function blank() {
     linkUrl: "",
     startAt: localTime(new Date().toISOString()),
     endAt: localTime(new Date(Date.now() + 7 * 86400000).toISOString()),
+    isPermanent: false,
     version: 0,
   }
 }
@@ -96,6 +99,7 @@ export function AdminAnnouncements() {
             linkUrl: a.linkUrl || "",
             startAt: localTime(a.startAt),
             endAt: a.endAt ? localTime(a.endAt) : "",
+            isPermanent: !a.endAt,
             version: a.version,
           })
         } else if (id === "new") setForm(blank())
@@ -138,7 +142,11 @@ export function AdminAnnouncements() {
           return
         }
         let endISO: string | null = null
-        if (form.endAt) {
+        if (!form.isPermanent) {
+          if (!form.endAt.trim()) {
+            setError("请填写有效的结束时间，或勾选长期有效")
+            return
+          }
           const endDate = new Date(`${form.endAt}:00+08:00`)
           if (Number.isNaN(endDate.getTime())) {
             setError("请填写有效的结束时间")
@@ -146,8 +154,19 @@ export function AdminAnnouncements() {
           }
           endISO = endDate.toISOString()
         }
+        const trimmedLinkUrl = form.linkUrl.trim()
+        if (
+          trimmedLinkUrl &&
+          !safeHref(trimmedLinkUrl, { allowRelative: true })
+        ) {
+          setError("链接地址仅支持站内路径（以 / 开头）或 https:// 链接")
+          return
+        }
+        const { isPermanent: _ignorePermanent, ...restForm } = form
+        void _ignorePermanent
         payload = {
-          ...form,
+          ...restForm,
+          linkUrl: trimmedLinkUrl,
           startAt: startDate.toISOString(),
           endAt: endISO,
           remindAgain: again,
@@ -271,17 +290,20 @@ export function AdminAnnouncements() {
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={!form.endAt}
+                      checked={form.isPermanent}
                       onChange={(e) =>
                         setForm({
                           ...form,
-                          endAt: e.target.checked ? "" : blank().endAt,
+                          isPermanent: e.target.checked,
+                          endAt: e.target.checked
+                            ? ""
+                            : form.endAt || blank().endAt,
                         })
                       }
                     />
                     长期有效
                   </label>
-                  {form.endAt && (
+                  {!form.isPermanent && (
                     <label>
                       结束时间（北京时间）
                       <Input
@@ -336,14 +358,20 @@ export function AdminAnnouncements() {
                       <WorkbenchButton
                         type="button"
                         disabled={busy || !online}
-                        onClick={() => setConfirm("publish")}
+                        onClick={() => {
+                          setError("")
+                          setConfirm("publish")
+                        }}
                       >
                         发布已保存草稿
                       </WorkbenchButton>
                       <WorkbenchButton
                         type="button"
                         disabled={busy || !online}
-                        onClick={() => setConfirm("delete")}
+                        onClick={() => {
+                          setError("")
+                          setConfirm("delete")
+                        }}
                       >
                         删除草稿
                       </WorkbenchButton>
@@ -355,14 +383,20 @@ export function AdminAnnouncements() {
                       <WorkbenchButton
                         type="button"
                         disabled={busy || !online}
-                        onClick={() => setConfirm("remind")}
+                        onClick={() => {
+                          setError("")
+                          setConfirm("remind")
+                        }}
                       >
                         更新并重新提醒
                       </WorkbenchButton>
                       <WorkbenchButton
                         type="button"
                         disabled={busy || !online}
-                        onClick={() => setConfirm("withdraw")}
+                        onClick={() => {
+                          setError("")
+                          setConfirm("withdraw")
+                        }}
                       >
                         撤下
                       </WorkbenchButton>
@@ -380,13 +414,16 @@ export function AdminAnnouncements() {
                         const current = epoch.current
                         try {
                           const times = blank()
+                          const { isPermanent: _ignorePermanent, ...restForm } =
+                            form
+                          void _ignorePermanent
                           const result =
                             await announcementRequest<Announcement>(
                               "/api/admin/announcements",
                               {
                                 method: "POST",
                                 body: JSON.stringify({
-                                  ...form,
+                                  ...restForm,
                                   version: 0,
                                   startAt: new Date(
                                     `${times.startAt}:00+08:00`
@@ -517,7 +554,12 @@ export function AdminAnnouncements() {
           <p className="break-words whitespace-pre-wrap">{form.body}</p>
           <p>
             {form.startAt.replace("T", " ")} —{" "}
-            {form.endAt ? form.endAt.replace("T", " ") : "长期有效"}（北京时间）
+            {form.isPermanent
+              ? "长期有效"
+              : form.endAt
+                ? form.endAt.replace("T", " ")
+                : "未填写"}
+            （北京时间）
           </p>
           {form.linkLabel && (
             <span className="text-primary">{form.linkLabel}</span>
@@ -551,17 +593,32 @@ export function AdminAnnouncements() {
                     : "发布的是最近保存的内容，未保存的编辑不会包含在内。"}
             </DialogDescription>
           </DialogHeader>
-          <WorkbenchButton
-            disabled={busy || !online}
-            onClick={() =>
-              void mutate(
-                confirm === "remind" ? "save" : confirm || "",
-                confirm === "remind"
-              )
-            }
-          >
-            {busy ? "正在处理…" : "确认"}
-          </WorkbenchButton>
+          {error && (
+            <p role="alert" className="wb-form-error">
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <WorkbenchButton
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setConfirm(null)}
+            >
+              取消
+            </WorkbenchButton>
+            <WorkbenchButton
+              disabled={busy || !online}
+              onClick={() =>
+                void mutate(
+                  confirm === "remind" ? "save" : confirm || "",
+                  confirm === "remind"
+                )
+              }
+            >
+              {busy ? "正在处理…" : "确认"}
+            </WorkbenchButton>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>

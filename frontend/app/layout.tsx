@@ -9,6 +9,11 @@ export const metadata: Metadata = {
   description: "充电设施运营中心",
 }
 
+const cfBeaconToken =
+  process.env.NODE_ENV === "production"
+    ? process.env.NEXT_PUBLIC_CF_BEACON_TOKEN?.trim() || ""
+    : ""
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -16,12 +21,14 @@ export default function RootLayout({
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="min-h-dvh bg-background text-foreground antialiased">
         <Providers>{children}</Providers>
-        <Script
-          id="cloudflare-web-analytics"
-          src="https://static.cloudflareinsights.com/beacon.min.js"
-          data-cf-beacon='{"token":"40a997d22bb446098457e51a3e6cdf84"}'
-          strategy="afterInteractive"
-        />
+        {cfBeaconToken ? (
+          <Script
+            id="cloudflare-web-analytics"
+            src="https://static.cloudflareinsights.com/beacon.min.js"
+            data-cf-beacon={JSON.stringify({ token: cfBeaconToken })}
+            strategy="afterInteractive"
+          />
+        ) : null}
       </body>
     </html>
   )

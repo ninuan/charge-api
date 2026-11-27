@@ -138,7 +138,19 @@ func TestPublicPoolQuotaCacheFallbackAndContributionReward(t *testing.T) {
 		t.Fatalf("free user CreateWatchRule err = %v, want ErrPersonalCookieRequired", err)
 	}
 
-	// 5. Expire shared cache by lowering TTL check -> Bob consumes 1 free daily credit, then 2nd refresh exhausts quota!
+	// 5. Expire shared cache -> Bob consumes 1 free daily credit, then 2nd refresh exhausts quota!
+	// First verify out-of-order stale upsert cannot overwrite the newer cached snapshot.
+	stalePile := addB.Pile
+	stalePile.Name = "stale-should-be-ignored"
+	if _, err := repo.UpsertSharedPile(stalePile, userA.ID, time.Now().UTC().Add(-2*time.Minute)); err != nil {
+		t.Fatalf("stale upsert shared pile: %v", err)
+	}
+	if sharedAfterStale, err := repo.GetSharedPile(addB.Pile.ID); err != nil || sharedAfterStale == nil || sharedAfterStale.LastSnapshot == nil || sharedAfterStale.LastSnapshot.Name == "stale-should-be-ignored" {
+		t.Fatalf("stale snapshot overwrote newer cache: %+v, err=%v", sharedAfterStale, err)
+	}
+	if err := repo.DeleteSharedPile(addB.Pile.ID); err != nil {
+		t.Fatalf("delete shared pile to expire cache: %v", err)
+	}
 	if _, err := repo.UpsertSharedPile(addB.Pile, userA.ID, time.Now().UTC().Add(-2*time.Minute)); err != nil {
 		t.Fatalf("age shared pile: %v", err)
 	}
@@ -150,6 +162,9 @@ func TestPublicPoolQuotaCacheFallbackAndContributionReward(t *testing.T) {
 		t.Fatalf("unexpected quota after 1st refresh: %+v", snap1.Quota)
 	}
 
+	if err := repo.DeleteSharedPile(addB.Pile.ID); err != nil {
+		t.Fatalf("delete shared pile to expire cache again: %v", err)
+	}
 	if _, err := repo.UpsertSharedPile(addB.Pile, userA.ID, time.Now().UTC().Add(-2*time.Minute)); err != nil {
 		t.Fatalf("age shared pile again: %v", err)
 	}

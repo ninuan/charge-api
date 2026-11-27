@@ -414,3 +414,28 @@ func TestFetchPileWithCookieRejectsCorruptSnapshot(t *testing.T) {
 		}
 	})
 }
+
+func TestLooksLikeAuthExpiredAvoidsGenericSubstringsAndResolveReturnsAuthExpired(t *testing.T) {
+	if looksLikeAuthExpired([]byte(`<div class="alert">Service inside maintenance window</div>`)) {
+		t.Fatal("generic 'alert'/'inside' HTML must not trigger ErrAuthExpired")
+	}
+	if !looksLikeAuthExpired([]byte(`<html><body>登录已过期，请重新登录</body></html>`)) {
+		t.Fatal("explicit auth-expired message should trigger ErrAuthExpired")
+	}
+
+	template := []parser.CaptureRequest{{
+		Name:   "template",
+		Method: http.MethodPost,
+		URL:    "https://example.invalid/action/i/api/devicewithnumbers",
+		Body:   "id=template",
+	}}
+	client := NewClientTemplateOnly(template)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		resp := testResponse(http.StatusFound, "")
+		resp.Header.Set("Location", "https://open.weixin.qq.com/connect/oauth2/authorize?appid=123")
+		return resp, nil
+	})}
+	if _, err := client.ResolveDeviceIDWithCookie("61034278", "wxopenid=expired"); !IsAuthExpired(err) {
+		t.Fatalf("ResolveDeviceIDWithCookie oauth redirect err = %v, want ErrAuthExpired", err)
+	}
+}

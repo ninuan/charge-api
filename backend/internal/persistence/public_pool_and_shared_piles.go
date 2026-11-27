@@ -16,7 +16,8 @@ var ErrPublicPoolCookieDuplicate = errors.New("public pool cookie already exists
 
 type PublicPoolCookieRecord struct {
 	model.PublicPoolCookie
-	Cookie string
+	Cookie      string
+	CookieNonce []byte
 }
 
 type UserQuotaRecord struct {
@@ -184,7 +185,7 @@ func (s *Store) HasPublicPoolCookieDuplicate(excludeID, cookie string) (bool, er
 		return false, nil
 	}
 	var exists int
-	err := s.db.QueryRow(
+	err := s.reader().QueryRow(
 		`SELECT 1 FROM public_cookie_pool WHERE cookie_fingerprint = ? AND id <> ? LIMIT 1`,
 		fp, strings.TrimSpace(excludeID),
 	).Scan(&exists)
@@ -328,7 +329,7 @@ func (s *Store) CreatePublicPoolCookie(entry PublicPoolCookieRecord) (model.Publ
 }
 
 func (s *Store) ListPublicPoolCookies() ([]model.PublicPoolCookie, error) {
-	rows, err := s.db.Query(
+	rows, err := s.reader().Query(
 		`SELECT id, label, COALESCE(owner_user_id, ''), enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at
 		 FROM public_cookie_pool
 		 ORDER BY created_at ASC, id ASC`,
@@ -364,7 +365,7 @@ func (s *Store) ListPublicPoolCookies() ([]model.PublicPoolCookie, error) {
 
 func (s *Store) CountHealthyPublicPoolCookies() (int, error) {
 	var count int
-	if err := s.db.QueryRow(
+	if err := s.reader().QueryRow(
 		`SELECT COUNT(*) FROM public_cookie_pool WHERE enabled = 1 AND status = 'healthy'`,
 	).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count healthy public pool cookies: %w", err)
@@ -373,7 +374,7 @@ func (s *Store) CountHealthyPublicPoolCookies() (int, error) {
 }
 
 func (s *Store) ListHealthyPublicPoolCookies() ([]PublicPoolCookieRecord, error) {
-	rows, err := s.db.Query(
+	rows, err := s.reader().Query(
 		`SELECT id, label, COALESCE(owner_user_id, ''), cookie_nonce, cookie_ciphertext, enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at
 		 FROM public_cookie_pool
 		 WHERE enabled = 1 AND status = 'healthy'
@@ -402,6 +403,7 @@ func (s *Store) ListHealthyPublicPoolCookies() ([]PublicPoolCookieRecord, error)
 			return nil, fmt.Errorf("decrypt public pool cookie %s: %w", rec.ID, err)
 		}
 		rec.Cookie = string(plaintext)
+		rec.CookieNonce = append([]byte(nil), nonce...)
 		rec.Enabled = enabledInt != 0
 		if lastUsed.Valid {
 			t := time.Unix(lastUsed.Int64, 0).UTC()
@@ -415,11 +417,17 @@ func (s *Store) ListHealthyPublicPoolCookies() ([]PublicPoolCookieRecord, error)
 }
 
 func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string, enabled *bool) (model.PublicPoolCookie, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return model.PublicPoolCookie{}, fmt.Errorf("begin update public pool cookie %s: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var existing model.PublicPoolCookie
 	var existingEnabled int
 	var lastUsed sql.NullInt64
 	var createdAt, updatedAt int64
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		`SELECT id, label, COALESCE(owner_user_id, ''), enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at
 		 FROM public_cookie_pool WHERE id = ?`,
 		id,
@@ -457,10 +465,18 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 	if cookie != nil && strings.TrimSpace(*cookie) != "" {
 		trimmedCookie := strings.TrimSpace(*cookie)
 		fp := s.cookieFingerprint(trimmedCookie)
-		if dup, dupErr := s.HasPublicPoolCookieDuplicate(id, trimmedCookie); dupErr != nil {
-			return model.PublicPoolCookie{}, fmt.Errorf("check duplicate public pool cookie: %w", dupErr)
-		} else if dup {
-			return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+		if fp != "" {
+			var exists int
+			dupErr := tx.QueryRow(
+				`SELECT 1 FROM public_cookie_pool WHERE cookie_fingerprint = ? AND id <> ? LIMIT 1`,
+				fp, strings.TrimSpace(id),
+			).Scan(&exists)
+			if dupErr == nil {
+				return model.PublicPoolCookie{}, ErrPublicPoolCookieDuplicate
+			}
+			if !errors.Is(dupErr, sql.ErrNoRows) {
+				return model.PublicPoolCookie{}, fmt.Errorf("check duplicate public pool cookie: %w", dupErr)
+			}
 		}
 		nonce, ciphertext, encErr := s.cipher.encryptWithAAD(publicPoolAAD(id), []byte(trimmedCookie))
 		if encErr != nil {
@@ -469,7 +485,7 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 		existing.Status = "healthy"
 		existing.ConsecutiveFailures = 0
 		existing.LastError = ""
-		_, err = s.db.Exec(
+		_, err = tx.Exec(
 			`UPDATE public_cookie_pool
 			 SET label = ?, cookie_fingerprint = ?, cookie_nonce = ?, cookie_ciphertext = ?, enabled = ?, status = 'healthy',
 			     consecutive_failures = 0, last_error = '', updated_at = ?
@@ -477,7 +493,7 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 			existing.Label, fp, nonce, ciphertext, enabledInt, now.Unix(), id,
 		)
 	} else {
-		_, err = s.db.Exec(
+		_, err = tx.Exec(
 			`UPDATE public_cookie_pool SET label = ?, enabled = ?, updated_at = ? WHERE id = ?`,
 			existing.Label, enabledInt, now.Unix(), id,
 		)
@@ -488,7 +504,36 @@ func (s *Store) UpdatePublicPoolCookie(id string, label *string, cookie *string,
 		}
 		return model.PublicPoolCookie{}, fmt.Errorf("update public pool cookie %s: %w", id, err)
 	}
+	if err := tx.Commit(); err != nil {
+		return model.PublicPoolCookie{}, fmt.Errorf("commit update public pool cookie %s: %w", id, err)
+	}
 	return existing, nil
+}
+
+// MarkPublicPoolCookieExpiredIfNonceMatches marks a pool cookie expired only if
+// its encrypted nonce still matches expectedNonce, preventing stale in-flight
+// failures from expiring a freshly replaced cookie.
+func (s *Store) MarkPublicPoolCookieExpiredIfNonceMatches(id string, expectedNonce []byte, errMsg string) (bool, error) {
+	now := time.Now().UTC().Unix()
+	if len(expectedNonce) == 0 {
+		err := s.MarkPublicPoolCookieResult(id, true, errMsg)
+		return err == nil, err
+	}
+	res, err := s.db.Exec(
+		`UPDATE public_cookie_pool
+		 SET status = 'expired', consecutive_failures = consecutive_failures + 1,
+		     last_used_at = ?, last_error = ?, updated_at = ?
+		 WHERE id = ? AND cookie_nonce = ?`,
+		now, errMsg, now, id, expectedNonce,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (s *Store) MarkPublicPoolCookieResult(id string, expired bool, errMsg string) error {
@@ -529,7 +574,7 @@ func (s *Store) GetPublicPoolCookie(id string) (*PublicPoolCookieRecord, error) 
 	var enabledInt int
 	var lastUsed sql.NullInt64
 	var createdAt, updatedAt int64
-	err := s.db.QueryRow(
+	err := s.reader().QueryRow(
 		`SELECT id, label, COALESCE(owner_user_id, ''), cookie_nonce, cookie_ciphertext, enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at
 		 FROM public_cookie_pool WHERE id = ?`,
 		id,
@@ -549,6 +594,7 @@ func (s *Store) GetPublicPoolCookie(id string) (*PublicPoolCookieRecord, error) 
 		return nil, fmt.Errorf("decrypt public pool cookie %s: %w", rec.ID, err)
 	}
 	rec.Cookie = string(plaintext)
+	rec.CookieNonce = append([]byte(nil), nonce...)
 	rec.Enabled = enabledInt != 0
 	if lastUsed.Valid {
 		t := time.Unix(lastUsed.Int64, 0).UTC()
@@ -614,7 +660,7 @@ func (s *Store) GetUserPublicPoolCookie(userID string) (*model.PublicPoolCookie,
 	var enabledInt int
 	var lastUsed sql.NullInt64
 	var createdAt, updatedAt int64
-	err := s.db.QueryRow(
+	err := s.reader().QueryRow(
 		`SELECT id, label, COALESCE(owner_user_id, ''), enabled, status, consecutive_failures, last_used_at, last_error, created_at, updated_at
 		 FROM public_cookie_pool WHERE id = ?`,
 		id,
@@ -689,6 +735,56 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 	if fetchedAt.IsZero() {
 		fetchedAt = now
 	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin shared pile upsert: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	inserted, err = upsertSharedPileTx(tx, pile, contributorUserID, fetchedAt, now)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit shared pile upsert: %w", err)
+	}
+	return inserted, nil
+}
+
+// UpsertSharedPilesBatch persists a slice of shared pile snapshots in a single
+// SQLite transaction to avoid per-pile fsync overhead during multi-pile refreshes.
+func (s *Store) UpsertSharedPilesBatch(piles []model.Pile, contributorUserID string, fetchedAt time.Time) error {
+	if len(piles) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	if fetchedAt.IsZero() {
+		fetchedAt = now
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin shared piles batch upsert: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	for _, pile := range piles {
+		if strings.TrimSpace(pile.ID) == "" {
+			continue
+		}
+		if _, err := upsertSharedPileTx(tx, pile, contributorUserID, fetchedAt, now); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit shared piles batch upsert: %w", err)
+	}
+	return nil
+}
+
+func upsertSharedPileTx(tx *sql.Tx, pile model.Pile, contributorUserID string, fetchedAt, now time.Time) (bool, error) {
+	deviceID := strings.TrimSpace(pile.ID)
 	snapshotBytes, err := json.Marshal(pile)
 	if err != nil {
 		return false, fmt.Errorf("marshal shared pile snapshot: %w", err)
@@ -697,13 +793,7 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 	if strings.TrimSpace(contributorUserID) != "" {
 		contributor = strings.TrimSpace(contributorUserID)
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return false, fmt.Errorf("begin shared pile upsert: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	fetchedUnix := fetchedAt.UTC().Unix()
 	res, err := tx.Exec(
 		`INSERT OR IGNORE INTO shared_piles
 		 (device_id, number, name, address, open_num, contributed_by_user_id, last_snapshot_json, last_fetched_at, created_at, updated_at)
@@ -715,7 +805,7 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 		pile.OpenNum,
 		contributor,
 		snapshotBytes,
-		fetchedAt.UTC().Unix(),
+		fetchedUnix,
 		now.Unix(),
 		now.Unix(),
 	)
@@ -724,9 +814,6 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 	}
 	rows, _ := res.RowsAffected()
 	if rows > 0 {
-		if err := tx.Commit(); err != nil {
-			return false, fmt.Errorf("commit shared pile insert: %w", err)
-		}
 		return true, nil
 	}
 	var metaLocked int
@@ -750,21 +837,19 @@ func (s *Store) UpsertSharedPile(pile model.Pile, contributorUserID string, fetc
 		     last_snapshot_json = ?,
 		     last_fetched_at = ?,
 		     updated_at = ?
-		 WHERE device_id = ?`,
+		 WHERE device_id = ? AND (last_fetched_at IS NULL OR ? >= last_fetched_at)`,
 		strings.TrimSpace(pile.Number), strings.TrimSpace(pile.Number),
 		strings.TrimSpace(pile.Name), strings.TrimSpace(pile.Name),
 		strings.TrimSpace(pile.Address), strings.TrimSpace(pile.Address),
 		pile.OpenNum, pile.OpenNum,
 		snapshotBytes,
-		fetchedAt.UTC().Unix(),
+		fetchedUnix,
 		now.Unix(),
 		deviceID,
+		fetchedUnix,
 	)
 	if err != nil {
 		return false, fmt.Errorf("update shared pile: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit shared pile update: %w", err)
 	}
 	return false, nil
 }
@@ -850,7 +935,7 @@ func (s *Store) scanSingleSharedPile(query string, arg any) (*model.SharedPile, 
 	var snapshotRaw []byte
 	var lastFetched sql.NullInt64
 	var createdAt, updatedAt int64
-	err := s.db.QueryRow(query, arg).Scan(
+	err := s.reader().QueryRow(query, arg).Scan(
 		&item.DeviceID, &item.Number, &item.Name, &item.Address, &item.OpenNum,
 		&item.ContributedByUserID, &snapshotRaw, &lastFetched, &createdAt, &updatedAt,
 	)
@@ -883,7 +968,7 @@ func (s *Store) SearchSharedPiles(query string, limit int) ([]model.SharedPile, 
 	var rows *sql.Rows
 	var err error
 	if q == "" {
-		rows, err = s.db.Query(
+		rows, err = s.reader().Query(
 			`SELECT device_id, number, name, address, open_num, COALESCE(contributed_by_user_id, ''), last_snapshot_json, last_fetched_at, created_at, updated_at
 			 FROM shared_piles
 			 ORDER BY updated_at DESC, device_id ASC
@@ -937,7 +1022,7 @@ func (s *Store) SearchSharedPiles(query string, limit int) ([]model.SharedPile, 
 func (s *Store) GetUserQuota(userID string, today string) (UserQuotaRecord, error) {
 	var rec UserQuotaRecord
 	var updatedAt int64
-	err := s.db.QueryRow(
+	err := s.reader().QueryRow(
 		`SELECT user_id, daily_date, daily_used, bonus_remaining, contributed_pile_count, daily_probe_date, daily_probe_count, updated_at
 		 FROM user_refresh_quotas WHERE user_id = ?`,
 		userID,
@@ -1135,33 +1220,67 @@ func (s *Store) SetUserBonusQuota(userID string, today string, bonus int) error 
 
 func (s *Store) UpdateSharedPileMeta(deviceID, name, address string) (*model.SharedPile, error) {
 	deviceID = strings.TrimSpace(deviceID)
-	existing, err := s.GetSharedPile(deviceID)
+	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin update shared pile meta: %w", err)
 	}
-	if existing == nil {
+	defer func() { _ = tx.Rollback() }()
+
+	var existing model.SharedPile
+	var snapshotRaw []byte
+	var lastFetched sql.NullInt64
+	var createdAt, updatedAt int64
+	err = tx.QueryRow(
+		`SELECT device_id, number, name, address, open_num, COALESCE(contributed_by_user_id, ''), last_snapshot_json, last_fetched_at, created_at, updated_at
+		 FROM shared_piles WHERE device_id = ?`,
+		deviceID,
+	).Scan(
+		&existing.DeviceID, &existing.Number, &existing.Name, &existing.Address, &existing.OpenNum,
+		&existing.ContributedByUserID, &snapshotRaw, &lastFetched, &createdAt, &updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, sql.ErrNoRows
 	}
+	if err != nil {
+		return nil, fmt.Errorf("load shared pile meta: %w", err)
+	}
+	if lastFetched.Valid {
+		t := time.Unix(lastFetched.Int64, 0).UTC()
+		existing.LastFetchedAt = &t
+	}
+	if len(snapshotRaw) > 0 {
+		var p model.Pile
+		if json.Unmarshal(snapshotRaw, &p) == nil {
+			existing.LastSnapshot = &p
+		}
+	}
+	existing.CreatedAt = time.Unix(createdAt, 0).UTC()
+
 	now := time.Now().UTC()
 	nextName := strings.TrimSpace(name)
 	if nextName == "" {
 		nextName = existing.Name
 	}
 	nextAddress := strings.TrimSpace(address)
+	existing.Name = nextName
+	existing.Address = nextAddress
+	existing.UpdatedAt = now
+
 	var snapshotBytes []byte
 	if existing.LastSnapshot != nil {
 		snap := *existing.LastSnapshot
 		snap.Name = nextName
 		snap.Address = nextAddress
+		existing.LastSnapshot = &snap
 		snapshotBytes, _ = json.Marshal(snap)
 	}
 	if len(snapshotBytes) > 0 {
-		_, err = s.db.Exec(
+		_, err = tx.Exec(
 			`UPDATE shared_piles SET name = ?, address = ?, meta_locked = 1, last_snapshot_json = ?, updated_at = ? WHERE device_id = ?`,
 			nextName, nextAddress, snapshotBytes, now.Unix(), deviceID,
 		)
 	} else {
-		_, err = s.db.Exec(
+		_, err = tx.Exec(
 			`UPDATE shared_piles SET name = ?, address = ?, meta_locked = 1, updated_at = ? WHERE device_id = ?`,
 			nextName, nextAddress, now.Unix(), deviceID,
 		)
@@ -1169,7 +1288,10 @@ func (s *Store) UpdateSharedPileMeta(deviceID, name, address string) (*model.Sha
 	if err != nil {
 		return nil, fmt.Errorf("update shared pile meta: %w", err)
 	}
-	return s.GetSharedPile(deviceID)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit update shared pile meta: %w", err)
+	}
+	return &existing, nil
 }
 
 func (s *Store) DeleteSharedPile(deviceID string) error {

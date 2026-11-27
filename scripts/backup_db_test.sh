@@ -14,7 +14,7 @@ fi
 # systemd 单元与主服务保持同等加固
 BACKUP_SERVICE="$ROOT_DIR/deploy/systemd/charge-backup.service"
 BACKUP_TIMER="$ROOT_DIR/deploy/systemd/charge-backup.timer"
-for needle in "NoNewPrivileges=true" "PrivateTmp=true" "ProtectSystem=strict" "ProtectHome=true" "UMask=0077" "EnvironmentFile=" "ExecStart=" "ReadWritePaths=/var/lib/charge-api"; do
+for needle in "User=charge" "Group=charge" "NoNewPrivileges=true" "PrivateTmp=true" "ProtectSystem=strict" "ProtectHome=true" "UMask=0077" "EnvironmentFile=" "ExecStart=" "ReadWritePaths=/var/lib/charge-api"; do
   if ! grep -q "$needle" "$BACKUP_SERVICE"; then
     echo "charge-backup.service 缺少 $needle"
     exit 1
@@ -44,7 +44,6 @@ touch "$old_backup"
 touch -t 202001010000 "$old_backup"
 
 CHARGE_DB_FILE="$workdir/charge_state.db" \
-YYB_DB_FILE="$workdir/missing-yyb.db" \
 BACKUP_DIR="$workdir/backups" \
 RETENTION_DAYS=1 \
   "$BACKUP_SCRIPT" >/dev/null

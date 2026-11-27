@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { normalizeLegacyHash, resolveRoute } from "@/lib/routing"
+import { normalizeLegacyHash, resolveHomeRoute } from "@/lib/routing"
 
-describe("resolveRoute", () => {
-  it("sends a user away from an administrator-only page", () => {
-    expect(resolveRoute("user", "admin")).toBe("/dashboard")
-  })
-
-  it("sends an anonymous visitor to the login page", () => {
-    expect(resolveRoute(null, "user")).toBe("/login")
+describe("resolveHomeRoute", () => {
+  it("routes admins, users, and guests to their expected entry points", () => {
+    expect(resolveHomeRoute("admin")).toBe("/admin")
+    expect(resolveHomeRoute("user")).toBe("/dashboard")
+    expect(resolveHomeRoute(null)).toBe("/login")
   })
 })
 

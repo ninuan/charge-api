@@ -233,7 +233,7 @@ func validPortStatus(status model.PortStatus) bool {
 }
 
 func (s *Store) LatestPortStatuses(userID, deviceID string) (map[int]model.PortStatusEvent, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, user_id, device_id, port_id, from_status, to_status,
 		       changed_at, used_seconds, remaining_text, source
 		FROM (
@@ -283,7 +283,7 @@ func (s *Store) PortStatusEvents(query PortStatusEventQuery) ([]model.PortStatus
 	}
 	args = append(args, limit)
 
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT id, user_id, device_id, port_id, from_status, to_status,
 		       changed_at, used_seconds, remaining_text, source
 		FROM port_status_events
@@ -316,7 +316,7 @@ func (s *Store) UnnotifiedIdleTransitions(limit int) ([]model.PortStatusEvent, e
 	if limit > defaultPortStatusEventLimit {
 		limit = defaultPortStatusEventLimit
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT e.id, e.user_id, e.device_id, e.port_id, e.from_status, e.to_status,
 		       e.changed_at, e.used_seconds, e.remaining_text, e.source
 		FROM port_status_events e
@@ -433,7 +433,7 @@ func (s *Store) PortStatusEventsForAnalysis(query PortStatusEventQuery, eventLim
 }
 
 func (s *Store) PortStatusEventStarts(userID, deviceID string) (map[int]time.Time, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT port_id, MIN(changed_at)
 		FROM port_status_events
 		WHERE user_id = ? AND device_id = ?

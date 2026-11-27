@@ -10,22 +10,20 @@ if [[ ! -x "$SCRIPT" ]]; then
   exit 1
 fi
 
-help_output="$($SCRIPT --help)"
-for token in "YYB_BASE_URL" "CHARGE_BASE_URL" "YYB_DB_FILE" "CHARGE_DB_FILE" "LOG_UNITS" "--dry-run"; do
+help_output="$("$SCRIPT" --help)"
+for token in "CHARGE_BASE_URL" "CHARGE_LISTEN_PORT" "CHARGE_DB_FILE" "LOG_UNITS" "--dry-run"; do
   if [[ "$help_output" != *"$token"* ]]; then
     echo "help output should document $token"
     exit 1
   fi
 done
 
-dry_run_output="$(YYB_DB_FILE=/tmp/yyb.db CHARGE_DB_FILE=/tmp/charge.db LOG_UNITS='charge-api yyb-go' "$SCRIPT" --dry-run)"
+dry_run_output="$(CHARGE_DB_FILE=/tmp/charge.db LOG_UNITS='charge-api' "$SCRIPT" --dry-run)"
 for token in \
-  "curl -i http://127.0.0.1:8000/accounts" \
   "curl --silent --fail http://127.0.0.1:8080/healthz" \
-  "ss -lntp" \
-  "strings /tmp/yyb.db" \
+  "ss -lntp | grep ':8080'" \
   "strings /tmp/charge.db" \
-  "journalctl -u charge-api -u yyb-go"; do
+  "journalctl -u charge-api"; do
   if [[ "$dry_run_output" != *"$token"* ]]; then
     echo "dry-run output should include: $token"
     exit 1

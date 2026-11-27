@@ -81,4 +81,23 @@ func TestCookieIdentity(t *testing.T) {
 	if fb1 != "cookie:a=1;b=2" || fb1 != fb2 {
 		t.Fatalf("expected canonical sorted fallback, got fb1=%q fb2=%q", fb1, fb2)
 	}
+
+	// Duplicate wxopenid must use first-wins (matching upstream), strip quotes,
+	// normalize URL encoding, and ignore mutable deviceid in fallback hash.
+	dup := CookieIdentity(`wxopenid="oFIRST"; wxopenid=oSPOOFED; info=tok`)
+	if dup != "wxopenid:oFIRST" {
+		t.Fatalf("duplicate/quoted wxopenid identity = %q, want wxopenid:oFIRST", dup)
+	}
+	encoded := CookieIdentity("wxopenid=o%41BC")
+	if encoded != "wxopenid:oABC" {
+		t.Fatalf("url-encoded wxopenid identity = %q, want wxopenid:oABC", encoded)
+	}
+	noOpenID1 := CookieIdentity("deviceid=111; info=abc")
+	noOpenID2 := CookieIdentity("deviceid=999; info=abc")
+	if noOpenID1 != noOpenID2 || noOpenID1 != "cookie:info=abc" {
+		t.Fatalf("deviceid must be excluded from fallback identity: %q vs %q", noOpenID1, noOpenID2)
+	}
+	if _, err := ExtractCookie("wxopenid=oREAL; wxopenid=oDUMMY; info=tok"); err == nil {
+		t.Fatal("ExtractCookie must reject duplicate wxopenid keys")
+	}
 }

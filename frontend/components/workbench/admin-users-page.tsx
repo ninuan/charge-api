@@ -374,23 +374,32 @@ function WorkbenchAdminUserDetail({
   }
   async function save(event: React.FormEvent) {
     event.preventDefault()
+    const trimmedLimit = limit.trim()
     if (
-      !Number.isInteger(Number(limit)) ||
-      Number(limit) < 1 ||
-      Number(limit) > 100
+      trimmedLimit === "" ||
+      !Number.isInteger(Number(trimmedLimit)) ||
+      Number(trimmedLimit) < 1 ||
+      Number(trimmedLimit) > 100
     ) {
       setError("设备上限需要是 1–100 之间的整数。")
       return
     }
     if (role !== user?.role) {
+      setError("")
       setModal("role")
       return
     }
-    await mutate({ deviceLimit: Number(limit) }, "设备上限已保存")
+    await mutate({ deviceLimit: Number(trimmedLimit) }, "设备上限已保存")
   }
   async function saveBonusQuota() {
-    const parsed = Number(bonusInput)
-    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10000) {
+    const trimmed = bonusInput.trim()
+    const parsed = Number(trimmed)
+    if (
+      trimmed === "" ||
+      !Number.isInteger(parsed) ||
+      parsed < 0 ||
+      parsed > 10000
+    ) {
       setError("永久奖励刷新次数需要是 0–10000 之间的整数。")
       return
     }
@@ -827,6 +836,11 @@ function WorkbenchAdminUserDetail({
                 <CopyIcon size={15} />
               </WorkbenchButton>
             </div>
+          )}
+          {modal === "role" && error && (
+            <p role="alert" className="wb-form-error">
+              {error}
+            </p>
           )}
           <DialogFooter>
             <WorkbenchButton

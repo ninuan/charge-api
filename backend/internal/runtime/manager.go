@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -14,25 +13,11 @@ import (
 
 	"charge-dashboard/internal/auth"
 	"charge-dashboard/internal/charger"
-	"charge-dashboard/internal/mocele"
 	"charge-dashboard/internal/model"
 	"charge-dashboard/internal/parser"
 	"charge-dashboard/internal/persistence"
 	"charge-dashboard/internal/store"
 )
-
-const moceleAppID = "wx9cbffc15d3cb7739"
-
-var ErrYYBBindingRequired = errors.New("yyb binding required")
-
-type YYBCodeClient interface {
-	GetCode(ctx context.Context, ref string, appID string) (string, error)
-	RefreshAccount(ctx context.Context, ref string) error
-}
-
-type MoceleCookieClient interface {
-	ExchangeCode(ctx context.Context, deviceID string, code string) (mocele.CookieResult, error)
-}
 
 const (
 	stateVersion                = 3
@@ -73,6 +58,7 @@ type Manager struct {
 	poolMu                 sync.Mutex
 	poolCursor             uint64
 	poolAlertSentAt        time.Time
+	poolBackoff            map[string]poolCookieBackoff
 	wxPusherAttempts       map[string][]time.Time
 	retentionMu            sync.Mutex
 	lastRetentionRun       time.Time
@@ -101,6 +87,7 @@ type UserRuntime struct {
 	client                *charger.Client
 	stats                 model.TrafficStats
 	lastRemoteFetch       time.Time
+	lastDeviceFetch       map[string]time.Time
 	minInterval           time.Duration
 	yybBinding            *model.YYBBinding
 	recoveryDiagnostics   []model.RecoveryDiagnostic
@@ -432,9 +419,6 @@ func (r *UserRuntime) refresh(force bool) ([]model.Pile, error) {
 		lastFetchCopy := fetchedAt
 		r.stats.LastRemoteFetchAt = &lastFetchCopy
 	}
-	if len(result.Piles) > 0 {
-		r.store.MergeCapturePiles(result.Piles)
-	}
 
 	failed := 0
 	for _, failure := range result.Failures {
@@ -472,19 +456,11 @@ func (r *UserRuntime) refresh(force bool) ([]model.Pile, error) {
 	default:
 		info.Message = "没有需要刷新的充电桩"
 	}
-	r.store.SetRefreshInfo(model.RefreshInfo{
-		LastRemoteAt:       info.LastRemoteAt,
-		NextRemoteAt:       info.NextRemoteAt,
-		NextRetryAt:        info.NextRetryAt,
-		MinIntervalSeconds: info.MinIntervalSeconds,
-		AttemptedDevices:   info.AttemptedDevices,
-		SuccessfulDevices:  info.SuccessfulDevices,
-		FailedDevices:      info.FailedDevices,
-		SkippedDevices:     info.SkippedDevices,
-		Cached:             info.Cached,
-		Partial:            info.Partial,
-		Message:            info.Message,
-	})
+	if len(result.Piles) > 0 {
+		r.store.MergeCapturePilesAndRefreshInfo(result.Piles, info)
+	} else {
+		r.store.SetRefreshInfo(info)
+	}
 	if len(result.Piles) == 0 && failed > 0 {
 		return nil, result.FirstError()
 	}
@@ -515,6 +491,34 @@ func (r *UserRuntime) recordRemoteOK(at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stats.LastRemoteOKAt = &at
+}
+
+func (r *UserRuntime) lastDeviceFetchAt(deviceID string) time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	latest := r.lastRemoteFetch
+	if t, ok := r.lastDeviceFetch[deviceID]; ok && t.After(latest) {
+		latest = t
+	}
+	return latest
+}
+
+func (r *UserRuntime) recordDeviceFetch(deviceID string, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lastDeviceFetch == nil {
+		r.lastDeviceFetch = make(map[string]time.Time)
+	}
+	r.lastDeviceFetch[deviceID] = at
+	r.stats.RemoteFetches++
+	atCopy := at
+	r.stats.LastRemoteFetchAt = &atCopy
+}
+
+func (r *UserRuntime) clearDeviceFetch(deviceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.lastDeviceFetch, deviceID)
 }
 
 func (r *UserRuntime) statsSnapshot() model.TrafficStats {

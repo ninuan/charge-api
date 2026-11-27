@@ -5,6 +5,7 @@ import (
 	"encoding/base32"
 	"fmt"
 	"math"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -80,8 +81,13 @@ func (m *Manager) UpdateSettings(settings model.RegistrationSettings) error {
 	}
 	settings.CookieGuideURL = strings.TrimSpace(settings.CookieGuideURL)
 	if settings.CookieGuideURL != "" {
-		if len(settings.CookieGuideURL) > 512 || (!strings.HasPrefix(settings.CookieGuideURL, "https://") && !strings.HasPrefix(settings.CookieGuideURL, "http://")) {
-			return fmt.Errorf("Cookie 教程链接必须是有效的 http(s) 地址且不超过 512 字符")
+		parsedGuideURL, err := url.Parse(settings.CookieGuideURL)
+		if err != nil ||
+			len(settings.CookieGuideURL) > 512 ||
+			strings.ContainsAny(settings.CookieGuideURL, " \t\r\n") ||
+			parsedGuideURL.Scheme != "https" ||
+			parsedGuideURL.Hostname() == "" {
+			return fmt.Errorf("Cookie 教程链接必须是有效的 https:// 地址且不超过 512 字符")
 		}
 	}
 	if settings.DefaultDeviceLimit < 1 || settings.DefaultDeviceLimit > 100 {
@@ -171,6 +177,21 @@ func (m *Manager) runRetentionMaintenance(now time.Time) (int64, int64, int64, e
 	); err != nil {
 		return metricRows, historyRows, notificationRows, fmt.Errorf("prune completed watch rules: %w", err)
 	}
+	auditRetentionDays := settings.StatsRetentionDays
+	if auditRetentionDays < 180 {
+		auditRetentionDays = 180
+	}
+	if _, err := m.repository.PruneAdminAuditLogs(
+		now.UTC().AddDate(0, 0, -auditRetentionDays),
+	); err != nil {
+		return metricRows, historyRows, notificationRows, fmt.Errorf("prune admin audit logs: %w", err)
+	}
+	if _, err := m.repository.PruneResolvedAdminIncidents(
+		now.UTC().AddDate(0, 0, -settings.StatsRetentionDays),
+	); err != nil {
+		return metricRows, historyRows, notificationRows, fmt.Errorf("prune resolved admin incidents: %w", err)
+	}
+	_ = m.repository.CheckpointWAL()
 	_, _ = m.repository.RefreshIntegrityCheck()
 	m.lastRetentionRun = now.UTC()
 	return metricRows, historyRows, notificationRows, nil

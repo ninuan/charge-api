@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -69,7 +70,11 @@ func (m *Manager) RefreshWatchedPile(userID, deviceID string) (WatchedPileRefres
 }
 
 func (m *Manager) refreshWatchedPile(userID, deviceID string, beforeRemoteRequest func() error) (WatchedPileRefreshResult, error) {
-	return m.refreshWatchedPileWithDelivery(userID, deviceID, beforeRemoteRequest, true)
+	return m.refreshWatchedPileContext(context.Background(), userID, deviceID, beforeRemoteRequest)
+}
+
+func (m *Manager) refreshWatchedPileContext(ctx context.Context, userID, deviceID string, beforeRemoteRequest func() error) (WatchedPileRefreshResult, error) {
+	return m.refreshWatchedPileWithDeliveryContext(ctx, userID, deviceID, beforeRemoteRequest, true)
 }
 
 func (m *Manager) refreshWatchedPileWithDelivery(
@@ -77,6 +82,21 @@ func (m *Manager) refreshWatchedPileWithDelivery(
 	beforeRemoteRequest func() error,
 	deliverNotifications bool,
 ) (WatchedPileRefreshResult, error) {
+	return m.refreshWatchedPileWithDeliveryContext(context.Background(), userID, deviceID, beforeRemoteRequest, deliverNotifications)
+}
+
+func (m *Manager) refreshWatchedPileWithDeliveryContext(
+	ctx context.Context,
+	userID, deviceID string,
+	beforeRemoteRequest func() error,
+	deliverNotifications bool,
+) (WatchedPileRefreshResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return WatchedPileRefreshResult{}, err
+	}
 	deviceID = strings.TrimSpace(deviceID)
 	runtime, err := m.runtimeFor(userID)
 	if err != nil {
@@ -102,7 +122,7 @@ func (m *Manager) refreshWatchedPileWithDelivery(
 	runtime.refreshMu.Lock()
 	defer runtime.refreshMu.Unlock()
 
-	result, err := m.loadWatchedPile(runtime, userID, deviceID, beforeRemoteRequest)
+	result, err := m.loadWatchedPile(ctx, runtime, userID, deviceID, beforeRemoteRequest)
 	m.recordWatchedPileMetrics(userID, result, err)
 	if err != nil || result.Skipped {
 		return result, err
@@ -173,6 +193,7 @@ func runtimeOwnsPile(runtime *UserRuntime, deviceID string) bool {
 }
 
 func (m *Manager) loadWatchedPile(
+	ctx context.Context,
 	runtime *UserRuntime,
 	userID string,
 	deviceID string,
@@ -221,7 +242,7 @@ func (m *Manager) loadWatchedPile(
 		// disabled state, or backoff across a shared flight; fall back to an
 		// isolated fetch using this user's own runtime and preconditions.
 		if !validationDue {
-			result, fetchErr := m.fetchWatchedPile(runtime, deviceID, beforeRemoteRequest, usePublicPool)
+			result, fetchErr := m.fetchWatchedPile(ctx, runtime, deviceID, beforeRemoteRequest, usePublicPool)
 			if fetchErr == nil && !result.Skipped {
 				coordinator.mu.Lock()
 				if result.FetchedAt.IsZero() {
@@ -249,7 +270,7 @@ func (m *Manager) loadWatchedPile(
 	coordinator.flights[flightKey] = flight
 	coordinator.mu.Unlock()
 
-	result, fetchErr := m.fetchWatchedPile(runtime, deviceID, beforeRemoteRequest, usePublicPool)
+	result, fetchErr := m.fetchWatchedPile(ctx, runtime, deviceID, beforeRemoteRequest, usePublicPool)
 	coordinator.mu.Lock()
 	if fetchErr == nil && !result.Skipped {
 		if result.FetchedAt.IsZero() {
@@ -274,11 +295,18 @@ func (m *Manager) loadWatchedPile(
 }
 
 func (m *Manager) fetchWatchedPile(
+	ctx context.Context,
 	runtime *UserRuntime,
 	deviceID string,
 	beforeRemoteRequest func() error,
 	usePublicPool bool,
 ) (WatchedPileRefreshResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return WatchedPileRefreshResult{}, err
+	}
 	if usePublicPool {
 		now := m.reminderSchedulerNow()
 		if cachedPile, cachedAt, ok := m.freshSharedPileSnapshotWithTime(deviceID, now); ok {
@@ -293,10 +321,10 @@ func (m *Manager) fetchWatchedPile(
 				return WatchedPileRefreshResult{}, err
 			}
 		}
-		pile, err := m.fetchPileViaPublicPool(deviceID)
+		pile, err := m.fetchPileViaPublicPoolContext(ctx, deviceID)
 		if err != nil {
 			return WatchedPileRefreshResult{
-				Attempted: !errors.Is(err, ErrPublicPoolUnavailable),
+				Attempted: !errors.Is(err, ErrPublicPoolUnavailable) && ctx.Err() == nil,
 			}, err
 		}
 		m.recordSharedPiles("", []model.Pile{pile})
@@ -306,7 +334,7 @@ func (m *Manager) fetchWatchedPile(
 			Attempted: true,
 		}, nil
 	}
-	fetched := runtime.client.FetchPileWithPermit(deviceID, false, beforeRemoteRequest)
+	fetched := runtime.client.FetchPileWithPermitContext(ctx, deviceID, false, beforeRemoteRequest)
 	result := WatchedPileRefreshResult{
 		Attempted:   fetched.Attempted > 0,
 		Skipped:     fetched.Skipped > 0,

@@ -59,6 +59,8 @@ export function AddPileDialog({
   const [catalogQuery, setCatalogQuery] = useState("")
   const [catalogItems, setCatalogItems] = useState<SharedPile[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState("")
+  const [catalogRetrySeq, setCatalogRetrySeq] = useState(0)
   const [addingSharedId, setAddingSharedId] = useState<string | null>(null)
 
   const [error, setError] = useState("")
@@ -83,12 +85,23 @@ export function AddPileDialog({
     let active = true
     const timer = window.setTimeout(() => {
       setCatalogLoading(true)
+      setCatalogError("")
       searchSharedPiles(catalogQuery)
         .then((items) => {
-          if (active) setCatalogItems(items)
+          if (active) {
+            setCatalogItems(items)
+            setCatalogError("")
+          }
         })
-        .catch(() => {
-          if (active) setCatalogItems([])
+        .catch((reason) => {
+          if (active) {
+            setCatalogItems([])
+            setCatalogError(
+              reason instanceof Error
+                ? reason.message
+                : "暂时无法搜索公共充电桩库，请稍后重试。"
+            )
+          }
         })
         .finally(() => {
           if (active) setCatalogLoading(false)
@@ -98,7 +111,7 @@ export function AddPileDialog({
       active = false
       window.clearTimeout(timer)
     }
-  }, [open, mode, catalogQuery, searchSharedPiles])
+  }, [open, mode, catalogQuery, catalogRetrySeq, searchSharedPiles])
 
   useEffect(() => {
     if (open && mode === "contribute") numberInput.current?.focus()
@@ -109,6 +122,7 @@ export function AddPileDialog({
 
   const handleOpenChange = (next: boolean) => {
     setError("")
+    setCatalogError("")
     if (controlledOpen === undefined) {
       setInternalOpen(next)
     }
@@ -260,6 +274,25 @@ export function AddPileDialog({
               <p className="py-6 text-center text-sm opacity-70">
                 正在搜索公共桩库…
               </p>
+            ) : catalogError ? (
+              <div
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm"
+              >
+                <p className="text-destructive">{catalogError}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3"
+                  disabled={!online}
+                  onClick={() => {
+                    setCatalogError("")
+                    setCatalogRetrySeq((n) => n + 1)
+                  }}
+                >
+                  重新搜索
+                </Button>
+              </div>
             ) : catalogItems.length === 0 ? (
               <div className="rounded-lg border p-4 text-center text-sm">
                 <p className="opacity-75">公共桩库中暂无匹配的充电桩。</p>
@@ -372,6 +405,12 @@ export function AddPileDialog({
             {error && (
               <p role="alert" className="text-destructive text-sm">
                 {error}
+              </p>
+            )}
+
+            {currentUser && !currentUser.refreshEnabled && (
+              <p role="status" className="text-xs text-muted-foreground">
+                当前账户已被管理员关闭远端刷新权限，暂无法校验并收录新桩。
               </p>
             )}
 

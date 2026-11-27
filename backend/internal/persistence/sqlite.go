@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 14
+const schemaVersion = 15
 
 const integrityCheckTTL = 6 * time.Hour
 
@@ -39,7 +39,12 @@ func OpenSQLite(path string, cookieKey []byte) (*Store, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", path)
+	writeDSN := (&url.URL{
+		Scheme:   "file",
+		Path:     filepath.ToSlash(path),
+		RawQuery: "_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)",
+	}).String()
+	db, err := sql.Open("sqlite", writeDSN)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -444,6 +449,9 @@ func (s *Store) initialize() error {
 	if err := s.ensurePublicPoolAndSharedPiles(); err != nil {
 		return err
 	}
+	if err := s.ensureSchemaV15Indexes(); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO metadata(key, value) VALUES('schema_version', ?)
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -587,6 +595,31 @@ func (s *Store) ensureSchemaV10Objects() error {
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {
 			return fmt.Errorf("ensure schema v10 object: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureSchemaV15Indexes() error {
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS metrics_kind_created_at_idx
+			ON metrics(kind, created_at)`,
+		`CREATE INDEX IF NOT EXISTS port_status_events_idle_recovery_idx
+			ON port_status_events(from_status, to_status, changed_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS watch_rules_user_device_enabled_idx
+			ON watch_rules(user_id, device_id, enabled, created_at)`,
+		`CREATE INDEX IF NOT EXISTS notifications_user_device_type_time_idx
+			ON notifications(user_id, device_id, type, created_at)`,
+		`CREATE INDEX IF NOT EXISTS notifications_created_at_idx
+			ON notifications(created_at)`,
+		`CREATE INDEX IF NOT EXISTS notifications_last_occurred_at_idx
+			ON notifications(last_occurred_at)`,
+		`CREATE INDEX IF NOT EXISTS notification_deliveries_user_test_time_idx
+			ON notification_deliveries(user_id, is_test, created_at DESC)`,
+	}
+	for _, statement := range statements {
+		if _, err := s.db.Exec(statement); err != nil {
+			return fmt.Errorf("ensure schema v15 index: %w", err)
 		}
 	}
 	return nil
@@ -1328,7 +1361,7 @@ func (s *Store) RecordMetricCount(userID, kind string, count int, at time.Time) 
 // can be inspected without entering interactive request and active-user totals.
 func (s *Store) MetricKindCount(kind string, since time.Time) (int, error) {
 	var count int
-	if err := s.db.QueryRow(
+	if err := s.reader().QueryRow(
 		`SELECT COALESCE(SUM(count), 0) FROM metrics WHERE kind = ? AND created_at >= ?`,
 		kind,
 		since.Unix(),
@@ -1377,7 +1410,7 @@ func (s *Store) pruneRowsInBatchesWhere(table, timeColumn string, before int64, 
 }
 
 func (s *Store) MetricSeries(since time.Time, bucketSeconds int64) ([]model.MetricPoint, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.reader().Query(`
 		SELECT (created_at / ?) * ?, kind, SUM(count), COUNT(DISTINCT user_id)
 		FROM metrics WHERE created_at >= ?
 		GROUP BY 1, kind ORDER BY 1

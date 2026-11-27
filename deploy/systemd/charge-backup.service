@@ -4,8 +4,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# 需要同时读取 charge 与 yyb 两个用户各自 0600 的数据库，因此以 root 运行；
-# 用 ProtectSystem=strict 把可写面收敛到备份目录所在路径。
+# 与 charge-api 保持同属主 charge:charge，确保备份目录可读且 SQLite -wal/-shm 归属一致。
+User=charge
+Group=charge
 EnvironmentFile=-/etc/charge-backup.env
 ExecStart=/opt/charge-api/scripts/backup_db.sh
 
@@ -13,5 +14,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictNamespaces=true
+LockPersonality=true
 UMask=0077
 ReadWritePaths=/var/lib/charge-api

@@ -129,7 +129,7 @@ func (s *Store) Announcements(ctx context.Context, userID string, admin bool, no
 		args = append(args, now.UnixMilli())
 	}
 	query += ` ORDER BY a.start_at DESC,a.id DESC`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func (s *Store) Announcements(ctx context.Context, userID string, admin bool, no
 }
 func (s *Store) AnnouncementBoundary(ctx context.Context, now time.Time) (*time.Time, error) {
 	var stamp sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT MIN(t) FROM (SELECT start_at t FROM announcements WHERE status='published' UNION ALL SELECT end_at t FROM announcements WHERE status='published') WHERE t>?`, now.UnixMilli()).Scan(&stamp)
+	err := s.reader().QueryRowContext(ctx, `SELECT MIN(t) FROM (SELECT start_at t FROM announcements WHERE status='published' UNION ALL SELECT end_at t FROM announcements WHERE status='published') WHERE t>?`, now.UnixMilli()).Scan(&stamp)
 	if err != nil || !stamp.Valid {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (s *Store) QueryAnnouncementPage(ctx context.Context, user string, admin bo
 	if summary {
 		where += ` AND current_status='active' AND (ack=0 OR json_extract(content,'$.level')='important')`
 	}
-	if err := s.db.QueryRowContext(ctx, base+`SELECT COUNT(*) FROM visible`+where, args...).Scan(&out.Total); err != nil {
+	if err := s.reader().QueryRowContext(ctx, base+`SELECT COUNT(*) FROM visible`+where, args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
 	content := `json_remove(content,'$.body')`
@@ -232,7 +232,7 @@ func (s *Store) QueryAnnouncementPage(ctx context.Context, user string, admin bo
 		order = ` ORDER BY (json_extract(content,'$.level')='important') DESC,start_at DESC,id DESC LIMIT 1 OFFSET ?`
 		offset = 0
 	}
-	rows, err := s.db.QueryContext(ctx, base+`SELECT `+content+`,current_status,ack FROM visible`+where+order, append(args, offset)...)
+	rows, err := s.reader().QueryContext(ctx, base+`SELECT `+content+`,current_status,ack FROM visible`+where+order, append(args, offset)...)
 	if err != nil {
 		return out, err
 	}
@@ -258,16 +258,16 @@ func (s *Store) QueryAnnouncementPage(ctx context.Context, user string, admin bo
 }
 func (s *Store) AnnouncementUnreadCount(ctx context.Context, user string, now time.Time) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM announcements a WHERE status='published' AND start_at<=? AND (end_at IS NULL OR end_at>?) AND NOT EXISTS(SELECT 1 FROM announcement_acknowledgements k WHERE k.user_id=? AND k.announcement_id=a.id AND k.reminder_version=json_extract(a.content,'$.reminderVersion'))`, now.UnixMilli(), now.UnixMilli(), user).Scan(&count)
+	err := s.reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM announcements a WHERE status='published' AND start_at<=? AND (end_at IS NULL OR end_at>?) AND NOT EXISTS(SELECT 1 FROM announcement_acknowledgements k WHERE k.user_id=? AND k.announcement_id=a.id AND k.reminder_version=json_extract(a.content,'$.reminderVersion'))`, now.UnixMilli(), now.UnixMilli(), user).Scan(&count)
 	return count, err
 }
 
 func (s *Store) AnnouncementRevisions(ctx context.Context, id string, page int) (model.AnnouncementPage, error) {
 	out := model.AnnouncementPage{Items: []model.Announcement{}, Page: page}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM announcement_revisions WHERE announcement_id=?`, id).Scan(&out.Total); err != nil {
+	if err := s.reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM announcement_revisions WHERE announcement_id=?`, id).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT content FROM announcement_revisions WHERE announcement_id=? ORDER BY version DESC LIMIT 20 OFFSET ?`, id, (page-1)*20)
+	rows, err := s.reader().QueryContext(ctx, `SELECT content FROM announcement_revisions WHERE announcement_id=? ORDER BY version DESC LIMIT 20 OFFSET ?`, id, (page-1)*20)
 	if err != nil {
 		return out, err
 	}

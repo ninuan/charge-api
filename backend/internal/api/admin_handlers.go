@@ -44,7 +44,8 @@ func (s *Server) handleAdminIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 	filtered := make([]model.SystemException, 0, len(issues))
 	for _, item := range issues {
-		if strings.Contains(strings.ToLower(item.Type), "yyb") || strings.Contains(item.Message, "扫码") {
+		itemType := strings.ToLower(strings.TrimSpace(item.Type))
+		if itemType == "yyb" || strings.HasPrefix(itemType, "yyb_") {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -421,7 +422,8 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if len(stats.Exceptions) > 0 {
 		filtered := make([]model.SystemException, 0, len(stats.Exceptions))
 		for _, item := range stats.Exceptions {
-			if strings.Contains(strings.ToLower(item.Type), "yyb") || strings.Contains(item.Message, "扫码") {
+			itemType := strings.ToLower(strings.TrimSpace(item.Type))
+			if itemType == "yyb" || strings.HasPrefix(itemType, "yyb_") {
 				continue
 			}
 			filtered = append(filtered, item)
